@@ -14,6 +14,7 @@
     "dev:dashboard": "pnpm --filter @ade-control-plane/dashboard dev"
   },
   "devDependencies": {
+    "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
 }
