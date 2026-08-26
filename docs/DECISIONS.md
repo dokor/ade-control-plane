@@ -20,7 +20,7 @@ This file records decisions already accepted for the MVP. Reopening one is allow
 
 **Decision:** Raspberry Pi 5 is the first production target.
 
-**Reason:** user does not want a workstation powered continuously; orchestration is lightweight because model inference is remote.
+**Reason:** the always-on orchestration layer should not depend on a workstation; orchestration is lightweight because model inference is remote.
 
 ## D4 — Option C deployment topology
 
@@ -102,3 +102,9 @@ This file records decisions already accepted for the MVP. Reopening one is allow
 **Decision:** restoring PostgreSQL never immediately resumes scheduling.
 
 **Reason:** runner/ADE/external state can be newer than a restored database snapshot; non-terminal executions must be reconciled first.
+
+## D17 — Local runner transport uses a Unix Domain Socket
+
+**Decision:** the `raspberry-local` MVP transport uses a Unix Domain Socket in a narrowly scoped runtime directory, with application-level HMAC authentication, request expiry and replay protection.
+
+**Reason:** worker and runner are on the same host. UDS avoids exposing a TCP runner listener and allows filesystem permissions to provide an additional trust boundary. Future remote runners can implement the same application contract over authenticated HTTPS/mTLS.
