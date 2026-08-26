@@ -6,11 +6,18 @@ ADE Control Plane supervises multiple ADE-managed projects. It is a control plan
 
 ADE owns the internal delivery state and execution semantics of one project. The control plane owns global scheduling, quota policy, runner selection, user-facing supervision and crash-safe multi-project state.
 
+## Human interfaces
+
+The control plane has exactly two human-facing interfaces:
+
+- **Dashboard** for global supervision and control;
+- **GitHub** for project-level interactions around issues, PRs, validations and targeted decisions.
+
 ## Boundary
 
 ```text
                          Human
-            Dashboard / GitHub / Discord / Slack
+                  Dashboard / GitHub
                            │
                            ▼
                   ADE Control Plane
@@ -19,6 +26,11 @@ ADE owns the internal delivery state and execution semantics of one project. The
  Project Registry      Scheduler        Quota Manager
         │                  │                  │
         └─────────── Runner Manager ──────────┘
+                           │
+                    Runner Contract
+                           │
+                           ▼
+                  raspberry-local
                            │
                      ADE Client API
                            │
@@ -54,8 +66,9 @@ Owned by ADE Control Plane:
 - provider quota snapshots and policy state;
 - registered runners and capabilities;
 - leases/locks for scheduled executions;
-- global audit events and notifications;
-- dashboard preferences and control commands.
+- global audit events;
+- GitHub notification/command deliveries;
+- Dashboard preferences and control commands.
 
 ## Core domains
 
@@ -98,7 +111,7 @@ It considers only global signals:
 
 It must never inspect project source code or reinterpret ADE's graph dependencies.
 
-Every selection produces an explanation suitable for the dashboard and audit log.
+Every selection produces an explanation suitable for the Dashboard and audit log.
 
 ### Quota Manager
 
@@ -131,7 +144,7 @@ Each runner advertises capabilities such as architecture, memory class, Docker a
 
 ### Worker
 
-The worker is a long-running process. Its loop is event/timer driven rather than an unconditional busy loop.
+The worker is a long-running control-plane process. Its loop is event/timer driven rather than an unconditional busy loop.
 
 Conceptually:
 
@@ -141,9 +154,10 @@ wake
 → find runnable projects
 → acquire execution lease
 → select runner
-→ ask ADE to advance
+→ submit typed runner request
+→ runner asks ADE to advance
 → persist result/events
-→ notify if necessary
+→ publish Dashboard/GitHub state when necessary
 → schedule next wake-up
 ```
 
@@ -151,7 +165,7 @@ Terminal waiting reasons include `idle`, `quota`, `human`, `runner` and `paused`
 
 ### Dashboard
 
-The dashboard is a view/control surface over persisted global state plus ADE summaries.
+The Dashboard is the primary global view/control surface over persisted global state plus ADE summaries.
 
 It should show:
 
@@ -166,9 +180,20 @@ It should show:
 
 Control actions include pause, resume, reprioritize, retry and handoff/takeover where supported.
 
-### Notifications
+### GitHub Integration
 
-GitHub, Discord and Slack are adapters over the same event and command model. No orchestration rule belongs in a channel adapter.
+GitHub is the only external project interaction surface.
+
+It handles:
+
+- signed webhooks;
+- project-scoped notifications on issues/PRs;
+- typed control commands such as status, pause, resume, retry, priority and decision;
+- authorization based on actor/repository permissions;
+- idempotency and webhook delivery deduplication;
+- links back to the Dashboard for global state.
+
+No scheduling rule belongs in the GitHub integration.
 
 ## Persistence
 
@@ -184,7 +209,7 @@ Likely entities:
 - `executions`;
 - `control_commands`;
 - `audit_events`;
-- `notification_deliveries`.
+- `github_deliveries`.
 
 ## Failure and restart model
 
@@ -202,15 +227,15 @@ Security is a design constraint, not a later hardening phase.
 
 - least privilege for every GitHub/provider/runner credential;
 - deny-by-default network and command capabilities;
-- explicit trust boundaries between dashboard, worker, database, runner, ADE and providers;
+- explicit trust boundaries between Dashboard, worker, database, runner, ADE, GitHub and providers;
 - secret references rather than secret values in model-visible state;
 - redact logs before persistence/display;
 - no production deployment authority by default;
-- channel commands must authenticate the actor and map to explicit permissions;
+- Dashboard and GitHub commands must authenticate the actor and map to explicit permissions;
 - ADE retains responsibility for project-level workspace/tool permissions;
 - runner APIs must use authenticated, integrity-protected requests and replay protection;
-- no Docker socket mounted into dashboard or control-plane worker;
-- no direct host shell access from the public-facing dashboard;
+- no Docker socket mounted into Dashboard or control-plane worker;
+- no direct host shell access from the public-facing Dashboard;
 - no arbitrary command strings crossing the control-plane/runner boundary: only typed, versioned commands;
 - all privileged actions must be auditable with actor, project, runner, reason and result;
 - credentials must be scoped per integration where possible and independently rotatable.
@@ -225,12 +250,12 @@ The selected MVP architecture is **Option C: containerized control plane + isola
 Raspberry Pi 5
 │
 ├── Docker Compose — control plane trust zone
-│   ├── dashboard / control API
+│   ├── Dashboard / control API
 │   ├── control-plane worker
 │   └── PostgreSQL
 │
 ├── existing reverse proxy
-│       └── exposes dashboard/control API only
+│       └── exposes Dashboard/control API only
 │
 └── host runner trust zone
     └── raspberry-local runner service
@@ -243,7 +268,7 @@ Raspberry Pi 5
 
 ### Why the runner stays outside the control-plane containers
 
-The runner needs materially stronger privileges than the dashboard or scheduler: local repositories, Git credentials, subprocesses, build tools and potentially Docker/browser capabilities. Keeping it outside the control-plane containers prevents those privileges from leaking into the public-facing application or scheduler process.
+The runner needs materially stronger privileges than the Dashboard or scheduler: local repositories, Git credentials, subprocesses, build tools and potentially Docker/browser capabilities. Keeping it outside the control-plane containers prevents those privileges from leaking into the public-facing application or scheduler process.
 
 The control plane must never obtain the runner's generic shell privileges. It can only submit a constrained execution contract to the runner.
 
@@ -285,7 +310,7 @@ The runner validates:
 
 ### Container hardening target
 
-For dashboard and worker containers:
+For Dashboard and worker containers:
 
 - run as non-root;
 - read-only root filesystem where practical;
