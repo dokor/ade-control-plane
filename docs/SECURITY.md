@@ -2,7 +2,7 @@
 
 ## Goal
 
-ADE Control Plane coordinates privileged development automation across multiple repositories. A compromise of the dashboard, worker, runner or an external integration must not automatically imply unrestricted host, repository, secret or production access.
+ADE Control Plane coordinates privileged development automation across multiple repositories. A compromise of the Dashboard, worker, runner or GitHub integration must not automatically imply unrestricted host, repository, secret or production access.
 
 Security is therefore enforced through explicit trust boundaries, least privilege, typed contracts, auditability and fail-closed behavior.
 
@@ -12,7 +12,7 @@ Security is therefore enforced through explicit trust boundaries, least privileg
 
 Components:
 
-- dashboard;
+- Dashboard;
 - control API;
 - reverse proxy.
 
@@ -40,7 +40,7 @@ Components:
 - quota manager;
 - project registry;
 - lease/recovery logic;
-- notification dispatch.
+- GitHub notification/command dispatch.
 
 Allowed responsibilities:
 
@@ -48,7 +48,8 @@ Allowed responsibilities:
 - acquire/release leases;
 - request typed runner operations;
 - persist global state;
-- call provider quota/status APIs through scoped adapters.
+- call provider quota/status APIs through scoped adapters;
+- publish project-scoped GitHub interactions through a dedicated integration.
 
 Forbidden capabilities:
 
@@ -66,7 +67,8 @@ Contains:
 - execution metadata;
 - quota snapshots;
 - audit trail;
-- command state.
+- command state;
+- GitHub delivery deduplication state.
 
 Rules:
 
@@ -99,13 +101,26 @@ Rules:
 - explicit capability policy;
 - timeouts and resource limits;
 - no implicit production credentials;
-- credentials scoped independently from dashboard/worker credentials.
+- credentials scoped independently from Dashboard/worker credentials.
+
+### Zone 5 — GitHub integration
+
+GitHub is the only external project interaction surface.
+
+Rules:
+
+- validate webhook signatures before parsing actionable content;
+- deduplicate delivery IDs and reject stale/replayed command events;
+- treat issue, PR and comment content as untrusted input;
+- authorize the GitHub actor and repository for every control command;
+- use minimum GitHub App/fine-grained permissions;
+- never translate comment text directly into shell or ADE command strings.
 
 ## Primary threats
 
 ### Remote command execution through control inputs
 
-Threat: a malicious dashboard/API/channel payload becomes a shell command on the runner.
+Threat: malicious Dashboard/API/GitHub input becomes a shell command on the runner.
 
 Controls:
 
@@ -119,7 +134,7 @@ Controls:
 
 ### Prompt injection / malicious repository content
 
-Threat: repository text, issue content, README or generated output attempts to instruct an agent to exfiltrate secrets or escape the workspace.
+Threat: repository text, issue/PR content, README or generated output attempts to instruct an agent to exfiltrate secrets or escape the workspace.
 
 Controls:
 
@@ -159,9 +174,23 @@ Controls:
 - project/runner binding validation;
 - response correlation with execution ID.
 
+### Forged or replayed GitHub interaction
+
+Threat: an attacker forges a webhook or replays a previously authorized command.
+
+Controls:
+
+- verify webhook signature;
+- verify repository installation/scope;
+- authorize actor for the requested control action;
+- deduplicate webhook delivery IDs;
+- use command idempotency keys;
+- persist command state before privileged execution;
+- reject unsupported or ambiguous command syntax.
+
 ### Dashboard account compromise
 
-Threat: access to dashboard results in destructive project operations.
+Threat: access to Dashboard results in destructive project operations.
 
 Controls:
 
@@ -201,7 +230,7 @@ Controls:
 
 ### Database or log data leakage
 
-Threat: prompts, source snippets, secrets or tokens become visible through dashboard/logs/backups.
+Threat: prompts, source snippets, secrets or tokens become visible through Dashboard/logs/backups.
 
 Controls:
 
@@ -210,7 +239,7 @@ Controls:
 - payload size/content limits;
 - no raw environment dumps;
 - no full request headers/tokens in errors;
-- sanitized error rendering in dashboard.
+- sanitized error rendering in Dashboard.
 
 ## API and interaction requirements
 
@@ -228,21 +257,24 @@ All internal/external APIs must define:
 
 Unknown fields and unsupported capability requests should be rejected rather than silently accepted.
 
+## Dashboard / control API
+
+- authentication is mandatory before any project state is returned;
+- authorization is evaluated per control command;
+- mutating requests use CSRF/origin protections appropriate to the selected authentication design;
+- privileged actions are audited before and after execution;
+- API error responses are sanitized;
+- no endpoint accepts arbitrary command/script payloads.
+
 ## GitHub
 
 - prefer GitHub App or fine-grained tokens over broad classic PATs;
 - minimum repository permissions required by each operation;
 - webhook signatures must be validated;
-- webhook delivery IDs should be deduplicated;
-- comments/issues are untrusted input;
-- merge/production permissions are not granted to the MVP by default.
-
-## Discord / Slack
-
-- verify platform signatures/tokens;
-- command actor must map to an authorized control-plane identity;
-- channel membership alone is not sufficient authorization for destructive actions;
-- no secrets or raw provider errors in messages;
+- webhook delivery IDs must be deduplicated;
+- actor/repository authorization is required for control commands;
+- comments/issues/PR content are untrusted input;
+- merge/production permissions are not granted to the MVP by default;
 - commands are translated into typed `ControlCommand` objects, never shell/ADE strings.
 
 ## Codex / AI providers
@@ -264,7 +296,7 @@ Control-plane containers:
 - drop capabilities by default;
 - private database network;
 - read-only filesystem where practical;
-- only dashboard port exposed;
+- only Dashboard port exposed;
 - explicit volume allow-list.
 
 Host:
@@ -280,18 +312,19 @@ Host:
 
 The following are release-blocking for the first always-on deployment:
 
-1. authenticated dashboard/control API;
-2. PostgreSQL not publicly exposed;
-3. worker and dashboard have no Docker socket;
-4. runner is not publicly reachable;
-5. authenticated worker-runner protocol with replay protection;
-6. typed runner command contract with no arbitrary shell command;
-7. project workspace containment tests;
-8. secrets/redaction tests;
-9. durable audit events for privileged actions;
-10. dependency/container security checks in CI;
-11. restart/recovery cannot duplicate privileged executions;
-12. production deployment credentials absent from the MVP runner by default.
+1. authenticated Dashboard/control API;
+2. GitHub webhook signature, delivery deduplication and actor authorization enforced;
+3. PostgreSQL not publicly exposed;
+4. worker and Dashboard have no Docker socket;
+5. runner is not publicly reachable;
+6. authenticated worker-runner protocol with replay protection;
+7. typed runner command contract with no arbitrary shell command;
+8. project workspace containment tests;
+9. secrets/redaction tests;
+10. durable audit events for privileged actions;
+11. dependency/container security checks in CI;
+12. restart/recovery cannot duplicate privileged executions;
+13. production deployment credentials absent from the MVP runner by default.
 
 ## Incident response minimum
 
@@ -302,7 +335,7 @@ The system must make it possible to:
 - disable a runner;
 - identify recent privileged actions from audit events;
 - identify which project/workspace an execution touched;
-- stop the runner service without taking PostgreSQL/dashboard data offline;
+- stop the runner service without taking PostgreSQL/Dashboard data offline;
 - restore PostgreSQL from a known backup.
 
 ## Rule
