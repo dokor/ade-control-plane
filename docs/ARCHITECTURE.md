@@ -119,7 +119,7 @@ A runner is an execution environment, not an AI provider.
 
 Initial target:
 
-- `raspberry-local` — Raspberry Pi 5 worker, ARM64, always-on.
+- `raspberry-local` — Raspberry Pi 5 host runner, ARM64, always-on.
 
 Future targets:
 
@@ -198,23 +198,103 @@ The Raspberry may restart at any time. The architecture assumes restartability:
 
 ## Security principles
 
-- least privilege for GitHub/provider credentials;
+Security is a design constraint, not a later hardening phase.
+
+- least privilege for every GitHub/provider/runner credential;
+- deny-by-default network and command capabilities;
+- explicit trust boundaries between dashboard, worker, database, runner, ADE and providers;
 - secret references rather than secret values in model-visible state;
 - redact logs before persistence/display;
 - no production deployment authority by default;
 - channel commands must authenticate the actor and map to explicit permissions;
-- ADE retains responsibility for project-level workspace/tool permissions.
+- ADE retains responsibility for project-level workspace/tool permissions;
+- runner APIs must use authenticated, integrity-protected requests and replay protection;
+- no Docker socket mounted into dashboard or control-plane worker;
+- no direct host shell access from the public-facing dashboard;
+- no arbitrary command strings crossing the control-plane/runner boundary: only typed, versioned commands;
+- all privileged actions must be auditable with actor, project, runner, reason and result;
+- credentials must be scoped per integration where possible and independently rotatable.
 
-## Raspberry deployment target
+See `docs/SECURITY.md` for the threat model and mandatory controls.
 
-The first deployment should remain small:
+## Raspberry deployment target — selected architecture
+
+The selected MVP architecture is **Option C: containerized control plane + isolated host runner**.
 
 ```text
-Docker Compose
-├── control-plane-worker
-├── dashboard
-├── postgres
-└── reverse-proxy (existing infrastructure may provide this)
+Raspberry Pi 5
+│
+├── Docker Compose — control plane trust zone
+│   ├── dashboard / control API
+│   ├── control-plane worker
+│   └── PostgreSQL
+│
+├── existing reverse proxy
+│       └── exposes dashboard/control API only
+│
+└── host runner trust zone
+    └── raspberry-local runner service
+        ├── ADE
+        ├── Codex
+        ├── Git
+        ├── project worktrees
+        └── project build/test tooling
 ```
+
+### Why the runner stays outside the control-plane containers
+
+The runner needs materially stronger privileges than the dashboard or scheduler: local repositories, Git credentials, subprocesses, build tools and potentially Docker/browser capabilities. Keeping it outside the control-plane containers prevents those privileges from leaking into the public-facing application or scheduler process.
+
+The control plane must never obtain the runner's generic shell privileges. It can only submit a constrained execution contract to the runner.
+
+### Network boundaries
+
+- PostgreSQL is reachable only from trusted control-plane services.
+- The runner exposes no public internet endpoint.
+- Dashboard/API is the only externally reachable application component and sits behind the existing reverse proxy/TLS layer.
+- Worker-to-runner communication uses a dedicated authenticated local/private channel.
+- Provider/GitHub outbound access originates only from components that need it.
+- Database, runner management endpoints and internal health endpoints are never published directly.
+
+### Runner boundary contract
+
+The runner receives structured requests similar to:
+
+```text
+executionId
+projectId
+ADE command/capability
+workspace reference
+allowed capability set
+timeout / budget
+correlation nonce
+```
+
+It does **not** accept arbitrary remote shell commands such as `command: "..."`.
+
+The runner validates:
+
+- caller identity;
+- request signature/token;
+- nonce / replay protection;
+- lease/execution identity;
+- project allow-list;
+- requested capability;
+- workspace path containment;
+- timeout and resource policy.
+
+### Container hardening target
+
+For dashboard and worker containers:
+
+- run as non-root;
+- read-only root filesystem where practical;
+- `no-new-privileges`;
+- drop Linux capabilities by default;
+- no `/var/run/docker.sock` mount;
+- no host filesystem mounts except narrowly scoped persistent/config volumes;
+- secrets provided through dedicated secret files/environment injection, never committed;
+- healthchecks without sensitive data;
+- resource limits where practical.
 
 Redis, Kubernetes and distributed orchestration are intentionally not MVP dependencies.
