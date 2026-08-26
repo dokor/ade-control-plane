@@ -34,18 +34,36 @@ The runner is not publicly reachable.
 - explicit cancellation/reconciliation semantics;
 - sanitized responses.
 
-## Transport
+## Selected MVP transport: Unix Domain Socket
 
-The first implementation should prefer a local/private transport with the smallest attack surface.
+For `raspberry-local`, use a **Unix Domain Socket (UDS)** as the initial transport because the worker container and privileged runner live on the same Raspberry host.
 
-Good MVP options:
+Recommended shape:
 
-1. Unix domain socket mounted or proxied into the worker in a narrowly scoped way;
-2. loopback/private HTTP listener bound only to the host/private interface plus strong mutual authentication.
+```text
+Host runtime directory
+/run/ade-control-plane-runner/
+└── runner.sock
+        ▲
+        │ narrowly bind-mounted into worker container
+        │
+control-plane worker
+```
 
-Do not expose the runner through the public reverse proxy.
+The host runner owns the socket. Filesystem owner/group/mode restrict who can connect. The worker container receives access only to the narrow runtime directory/socket, never to the host filesystem broadly.
 
-The exact transport is implementation detail; the application contract below remains stable.
+Use a simple typed request protocol over the socket; HTTP over UDS is acceptable because Node supports Unix socket clients/servers and it avoids inventing custom network framing.
+
+### Why UDS for the MVP
+
+- no TCP runner listener;
+- no runner port to expose/firewall;
+- local filesystem permissions add a trust boundary;
+- easy to keep outside the public reverse proxy;
+- still compatible with application-level HMAC, expiry and anti-replay;
+- transport can later be replaced by authenticated HTTPS/mTLS for remote runners without changing domain contracts.
+
+Do not treat possession of socket access as sufficient authorization by itself: application-level authentication/integrity and replay checks remain required.
 
 ## Request envelope
 
@@ -74,7 +92,7 @@ type RunnerRequest = {
 };
 ```
 
-The authenticated transport/signature covers all fields.
+The authenticated signature covers the canonical request payload and security-relevant headers/metadata.
 
 ## Initial capability set
 
@@ -95,8 +113,6 @@ Future capabilities require a security review and explicit typed input schema.
 
 ### `ade.status`
 
-Input:
-
 ```ts
 {
   projectRef: string;
@@ -107,8 +123,6 @@ Output: normalized ADE project status or transport-neutral failure.
 
 ### `ade.runnable-work`
 
-Input:
-
 ```ts
 {
   projectRef: string;
@@ -118,8 +132,6 @@ Input:
 Output: normalized runnable-work summary or `null`.
 
 ### `ade.advance`
-
-Input:
 
 ```ts
 {
@@ -133,8 +145,6 @@ The runner delegates to ADE. The control plane must not translate this into lowe
 
 ### `ade.apply-decision`
 
-Input:
-
 ```ts
 {
   projectRef: string;
@@ -147,8 +157,6 @@ Input:
 ADE validates the project-level decision semantics.
 
 ### `execution.reconcile`
-
-Input:
 
 ```ts
 {
@@ -177,6 +185,27 @@ The runner rejects a request before touching project files or starting processes
 
 Unknown fields should be rejected for privileged request schemas unless explicitly designed for forward compatibility.
 
+## Authentication and integrity
+
+For the single-host MVP, use a **dedicated worker-runner shared secret** for HMAC authentication over a canonical representation of the request.
+
+The HMAC input should bind at least:
+
+- protocol version;
+- request ID;
+- execution/project IDs;
+- capability;
+- issued/expiry timestamps;
+- nonce;
+- lease identity;
+- canonical serialized input hash/body.
+
+The secret is dedicated to worker<->runner and is not reused for GitHub, PostgreSQL, Dashboard auth or Codex.
+
+Store it outside Git and make rotation possible without rebuilding images.
+
+UDS filesystem permissions are defense in depth, not a replacement for HMAC validation.
+
 ## Replay protection
 
 Use at least:
@@ -184,17 +213,17 @@ Use at least:
 - unique `requestId`;
 - unique nonce;
 - short request expiry;
-- persistent or restart-safe consumed request identity for the relevant replay window;
+- restart-safe consumed request identity for the relevant replay window;
 - execution/lease correlation.
 
-A valid signature on an old request is not enough to authorize replay.
+A valid HMAC on an old request is not enough to authorize replay.
 
 ## Workspace containment
 
 For every operation:
 
 1. map `projectId` to a locally configured canonical root;
-2. resolve/canonicalize requested workspace path;
+2. resolve/canonicalize requested workspace reference;
 3. reject paths outside the root;
 4. reject unsafe symlink escape patterns;
 5. do not accept raw absolute workspace paths from remote input as authority.
@@ -203,7 +232,7 @@ Workspace identifiers should preferably be opaque references mapped by the runne
 
 ## Local process execution
 
-The runner may internally start ADE/Git/build processes, but it must construct those invocations itself from typed inputs.
+The runner may internally start ADE/Git/build processes, but it constructs invocations itself from typed inputs.
 
 Rules:
 
@@ -290,20 +319,31 @@ On runner startup:
 3. expose reconciliation result to the control plane;
 4. never assume a stale lease alone means the previous external action did not complete.
 
-## Authentication recommendation
+## Runtime directory hardening
 
-For one Raspberry MVP, prefer a simple mechanism that is strong and easy to rotate, such as:
+Suggested runtime location:
 
-- dedicated shared secret used for HMAC over canonical request payload plus nonce/expiry; or
-- mutually authenticated local TLS if private HTTP is selected.
+```text
+/run/ade-control-plane-runner/
+```
 
-The secret is dedicated to worker<->runner and not reused for GitHub, Database or Codex.
+Requirements:
 
-Store it outside Git and make rotation possible without rebuilding images.
+- directory created with controlled owner/group/mode;
+- contains only runner IPC/runtime material intended for the worker;
+- socket removed/recreated safely on runner restart;
+- worker container mounts only this directory or socket, not `/run` generally;
+- no secret file needs to be placed beside the socket unless permissions and ownership are explicitly designed for it.
+
+## Remote runners later
+
+A future remote runner may implement the same application contract over HTTPS/mTLS.
+
+Remote transport must be added behind the runner adapter; it must not weaken local runner validation rules or require scheduler changes.
 
 ## Audit
 
-The control plane records the authoritative global audit event. The runner should additionally log safe local security events for:
+The control plane records the authoritative global audit event. The runner additionally logs safe local security events for:
 
 - rejected authentication;
 - replay attempts;
