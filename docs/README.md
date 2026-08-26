@@ -8,12 +8,14 @@ Use this page as the entry point for design and implementation work.
 - [`CODEX_KICKOFF.md`](CODEX_KICKOFF.md) — ready-to-use kickoff prompts for issue #2 and later phases.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — responsibility boundaries and selected Raspberry topology.
 - [`MVP.md`](MVP.md) — MVP scope and acceptance criteria.
+- [`FEATURES.md`](FEATURES.md) — product capabilities, MVP scope and later candidates.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — recommended development order.
 
 ## Core domain
 
 - [`DATA_MODEL.md`](DATA_MODEL.md) — PostgreSQL global-state model and transactional boundaries.
 - [`STATE_MACHINES.md`](STATE_MACHINES.md) — project eligibility, execution, runner, quota and command states.
+- [`CONTROL_COMMANDS.md`](CONTROL_COMMANDS.md) — unified Dashboard/GitHub mutation contract.
 - [`PROJECT_CONFIGURATION.md`](PROJECT_CONFIGURATION.md) — project onboarding/configuration semantics.
 
 ## Interfaces and execution
@@ -22,9 +24,10 @@ Use this page as the entry point for design and implementation work.
 - [`DASHBOARD.md`](DASHBOARD.md) — Dashboard information architecture and control API semantics.
 - [`GITHUB_INTEGRATION.md`](GITHUB_INTEGRATION.md) — GitHub App/webhook/command interaction model.
 
-## Security and operations
+## Security, observability and operations
 
 - [`SECURITY.md`](SECURITY.md) — threat model and release-blocking security gates.
+- [`OBSERVABILITY.md`](OBSERVABILITY.md) — audit/log/metrics/freshness contract.
 - [`OPERATIONS.md`](OPERATIONS.md) — Raspberry deployment, backup/restore, upgrade and incident runbook.
 - [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) — test layers and mandatory failure/security scenarios.
 - [`DECISIONS.md`](DECISIONS.md) — accepted architecture decisions that should not be reopened casually.
