@@ -1,0 +1,10 @@
+# Default ownership
+* @dokor
+
+# Security-sensitive boundaries
+/.github/workflows/ @dokor
+/docs/SECURITY.md @dokor
+/docs/RUNNER_PROTOCOL.md @dokor
+/packages/security/ @dokor
+/packages/runners/ @dokor
+/apps/worker/ @dokor
