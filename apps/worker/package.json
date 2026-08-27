@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@ade-control-plane/ade-client": "workspace:*",
     "@ade-control-plane/core": "workspace:*",
+    "@ade-control-plane/database": "workspace:*",
     "@ade-control-plane/quota": "workspace:*"
   }
 }

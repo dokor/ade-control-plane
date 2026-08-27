@@ -9,6 +9,7 @@ Use this page as the entry point for design and implementation work.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — responsibility boundaries and selected Raspberry topology.
 - [`ADE_ADAPTER.md`](ADE_ADAPTER.md) — versioned ADE client boundary and local CLI transport contract.
 - [`SCHEDULER.md`](SCHEDULER.md) — pure global scheduling gates, ranking and explainable decisions.
+- [`WORKER.md`](WORKER.md) — crash-safe worker recovery, wake-ups and graceful shutdown.
 - [`MVP.md`](MVP.md) — MVP scope and acceptance criteria.
 - [`FEATURES.md`](FEATURES.md) — product capabilities, MVP scope and later candidates.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — recommended development order.
