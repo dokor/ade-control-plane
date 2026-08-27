@@ -1,6 +1,5 @@
 import type {
   AdeAdvanceResult,
-  AdeClient,
   AdeProjectRef,
   AdeRunnableWork,
 } from "@ade-control-plane/ade-client";
@@ -28,11 +27,21 @@ export interface ControlCycleResult {
 }
 
 export interface ControlCycleDependencies {
-  adeClient: AdeClient;
+  /** Implemented by the UDS runner client; never by a worker shell transport. */
+  runnerClient: Pick<RunnerControlPlaneClient, "getRunnableWork" | "advance">;
   getQuotaSnapshot(): Promise<ProviderQuotaSnapshot>;
   getProjects(): Promise<readonly ControlCycleProject[]>;
   getRunnerId(project: ControlCycleProject): Promise<string | null>;
   createExecutionId(project: ControlCycleProject): Promise<string>;
+}
+
+export interface RunnerControlPlaneClient {
+  getRunnableWork(project: AdeProjectRef): Promise<AdeRunnableWork | null>;
+  advance(project: AdeProjectRef, request: { controlPlaneExecutionId: string; workRef: string }): Promise<AdeAdvanceResult>;
+  reconcile(project: AdeProjectRef, executionId: string, adeExecutionRef?: string): Promise<{
+    state: "succeeded" | "failed" | "cancelled" | "unknown" | "running" | "not-found";
+    summary?: string;
+  }>;
 }
 
 /**
@@ -59,7 +68,7 @@ export async function runControlCycle(
   const candidates: RunnableProjectCandidate[] = [];
 
   for (const project of projects) {
-    const work = await dependencies.adeClient.getRunnableWork(project.ade);
+    const work = await dependencies.runnerClient.getRunnableWork(project.ade);
     if (work) runnableWorkByProject.set(project.id, work);
 
     candidates.push({
@@ -95,7 +104,7 @@ export async function runControlCycle(
   }
 
   const executionId = await dependencies.createExecutionId(project);
-  const result = await dependencies.adeClient.advance(project.ade, {
+  const result = await dependencies.runnerClient.advance(project.ade, {
     controlPlaneExecutionId: executionId,
     workRef: work.ref,
   });

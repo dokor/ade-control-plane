@@ -26,6 +26,9 @@ importers:
       '@ade-control-plane/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@ade-control-plane/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       '@ade-control-plane/quota':
         specifier: workspace:*
         version: link:../../packages/quota
@@ -45,6 +48,8 @@ importers:
         version: 8.23.1
 
   packages/quota: {}
+
+  packages/runner-protocol: {}
 
 packages:
 
