@@ -26,6 +26,7 @@ Use this page as the entry point for design and implementation work.
 - [`RUNNER_PROTOCOL.md`](RUNNER_PROTOCOL.md) — secure typed worker-to-host-runner protocol.
 - [`DASHBOARD.md`](DASHBOARD.md) — Dashboard information architecture and control API semantics.
 - [`V0_TASK_API.md`](V0_TASK_API.md) — minimal single-active task lifecycle and HTTP API.
+- [`V0_CODEX_WORKER.md`](V0_CODEX_WORKER.md) — allow-listed Codex/Git/PR execution flow.
 - [`GITHUB_INTEGRATION.md`](GITHUB_INTEGRATION.md) — GitHub App/webhook/command interaction model.
 
 ## Security, observability and operations

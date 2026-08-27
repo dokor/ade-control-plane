@@ -117,3 +117,18 @@ export async function runControlCycle(
     reason: decision.reason,
   };
 }
+
+export {
+  NodeCommandRunner,
+  type CommandInput,
+  type CommandOutput,
+  type CommandResult,
+  type CommandRunner,
+} from "./v0/CommandRunner.js";
+export {
+  matchesGithubRemote,
+  resolveProjectCheckout,
+  type V0ProjectCheckout,
+} from "./v0/ProjectCheckout.js";
+export { V0TaskExecutor, type V0TaskExecutorOptions } from "./v0/V0TaskExecutor.js";
+export { V0TaskWorker, type V0TaskWorkerOptions } from "./v0/V0TaskWorker.js";

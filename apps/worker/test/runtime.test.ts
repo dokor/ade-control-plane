@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+
+import { loadV0WorkerRuntime } from "../src/v0/runtime.js";
+
+test("passes only dedicated credentials to Codex", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ade-v0-runtime-"));
+  try {
+    const githubKey = join(directory, "github-key");
+    const codexKey = join(directory, "codex-key");
+    const codexHome = join(directory, "codex", ".codex");
+    const gitHome = join(directory, "git");
+    await writeFile(githubKey, "github-private-key", "utf8");
+    await writeFile(codexKey, "codex-api-key", "utf8");
+    const config = await loadV0WorkerRuntime({
+      PATH: "/usr/bin",
+      HOME: "/home/worker",
+      DATABASE_URL: "postgres://secret",
+      V0_PROJECT_ROOT: directory,
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_INSTALLATION_ID: "2",
+      GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
+      CODEX_API_KEY_FILE: codexKey,
+      CODEX_HOME: codexHome,
+      V0_GIT_HOME: gitHome,
+    });
+
+    assert.equal(config.codexEnvironment.CODEX_API_KEY, "codex-api-key");
+    assert.equal(config.codexEnvironment.DATABASE_URL, undefined);
+    assert.equal(config.codexEnvironment.GITHUB_APP_PRIVATE_KEY_FILE, undefined);
+    assert.equal(config.gitEnvironment.CODEX_API_KEY, undefined);
+    assert.equal(config.codexEnvironment.HOME, dirname(codexHome));
+    assert.equal(config.gitEnvironment.HOME, gitHome);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
