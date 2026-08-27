@@ -27,6 +27,10 @@ import type {
   RunnerState,
   ScheduledExecutionRecord,
   SchedulerMode,
+  V0TaskLogRecord,
+  V0TaskLogStream,
+  V0TaskRecord,
+  V0TaskStatus,
 } from "./domain.js";
 
 export interface ProjectRegistrationInput {
@@ -248,6 +252,42 @@ export interface AdeDecisionRepository {
   ): Promise<AdeDecisionRecord | null>;
 }
 
+export interface V0TaskCreateInput {
+  id?: string;
+  projectId: string;
+  prompt: string;
+  createdAt: string;
+}
+
+export interface V0TaskTransitionInput {
+  taskId: string;
+  status: Extract<V0TaskStatus, "SUCCESS" | "FAILED" | "CANCELLED">;
+  finishedAt: string;
+  branchName?: string | null;
+  pullRequestNumber?: number | null;
+  pullRequestUrl?: string | null;
+  errorCode?: string | null;
+  errorSummary?: string | null;
+}
+
+export interface V0TaskLogInput {
+  taskId: string;
+  occurredAt: string;
+  stream: V0TaskLogStream;
+  message: string;
+}
+
+export interface V0TaskRepository {
+  create(input: V0TaskCreateInput): Promise<V0TaskRecord>;
+  getById(taskId: string): Promise<V0TaskRecord | null>;
+  list(limit: number): Promise<readonly V0TaskRecord[]>;
+  claimPending(startedAt: string): Promise<V0TaskRecord | null>;
+  requestCancel(taskId: string, requestedAt: string): Promise<V0TaskRecord>;
+  complete(input: V0TaskTransitionInput): Promise<V0TaskRecord>;
+  appendLog(input: V0TaskLogInput): Promise<V0TaskLogRecord | null>;
+  listLogs(taskId: string, limit: number): Promise<readonly V0TaskLogRecord[]>;
+}
+
 export interface ProjectRepository {
   getById(projectId: string): Promise<ProjectRecord | null>;
   getByRepositoryId(repositoryId: string): Promise<ProjectRecord | null>;
@@ -330,6 +370,7 @@ export interface AuditEventRepository {
 }
 
 export interface ControlPlanePersistence {
+  readonly v0Tasks: V0TaskRepository;
   readonly adeDecisions: AdeDecisionRepository;
   readonly githubBotComments: GithubBotCommentRepository;
   readonly githubDeliveries: GithubDeliveryRepository;

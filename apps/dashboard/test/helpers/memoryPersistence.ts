@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ActiveTaskConflictError } from "@ade-control-plane/database";
 
 import type {
   AdeDecisionInput,
@@ -23,6 +24,8 @@ import type {
   ProviderQuotaSnapshotRecord,
   RunnerRecord,
   RunnerState,
+  V0TaskLogRecord,
+  V0TaskRecord,
 } from "@ade-control-plane/database";
 
 /**
@@ -42,6 +45,8 @@ export interface MemoryState {
   deliveries: GithubDeliveryRecord[];
   botComments: GithubBotCommentRecord[];
   decisions: AdeDecisionRecord[];
+  v0Tasks: V0TaskRecord[];
+  v0TaskLogs: V0TaskLogRecord[];
 }
 
 const NOW = "2026-08-27T10:00:00.000Z";
@@ -67,6 +72,8 @@ export function createMemoryState(overrides: Partial<MemoryState> = {}): MemoryS
     deliveries: [],
     botComments: [],
     decisions: [],
+    v0Tasks: [],
+    v0TaskLogs: [],
     ...overrides,
   };
 }
@@ -79,6 +86,86 @@ export function createMemoryPersistence(
   state: MemoryState,
 ): ControlPlanePersistence {
   return {
+    v0Tasks: {
+      async create(input) {
+        if (
+          state.v0Tasks.some(
+            ({ status }) => status === "PENDING" || status === "RUNNING",
+          )
+        ) {
+          throw new ActiveTaskConflictError();
+        }
+        const task: V0TaskRecord = {
+          id: input.id ?? randomUUID(),
+          projectId: input.projectId,
+          prompt: input.prompt,
+          status: "PENDING",
+          cancelRequested: false,
+          branchName: null,
+          pullRequestNumber: null,
+          pullRequestUrl: null,
+          errorCode: null,
+          errorSummary: null,
+          createdAt: input.createdAt,
+          startedAt: null,
+          finishedAt: null,
+          updatedAt: input.createdAt,
+        };
+        state.v0Tasks.push(task);
+        return task;
+      },
+      async getById(taskId) {
+        return state.v0Tasks.find(({ id }) => id === taskId) ?? null;
+      },
+      async list(limit) {
+        return state.v0Tasks.slice(0, limit);
+      },
+      async claimPending(startedAt) {
+        const task = state.v0Tasks.find(({ status }) => status === "PENDING");
+        if (!task) return null;
+        task.status = "RUNNING";
+        task.startedAt = startedAt;
+        task.updatedAt = startedAt;
+        return task;
+      },
+      async requestCancel(taskId, requestedAt) {
+        const task = state.v0Tasks.find(({ id }) => id === taskId);
+        if (!task) throw new Error("Task not found.");
+        if (task.status === "PENDING" || task.status === "RUNNING") {
+          task.cancelRequested = true;
+          task.updatedAt = requestedAt;
+        }
+        if (task.status === "PENDING") {
+          task.status = "CANCELLED";
+          task.finishedAt = requestedAt;
+        }
+        return task;
+      },
+      async complete(input) {
+        const task = state.v0Tasks.find(({ id }) => id === input.taskId);
+        if (!task) throw new Error("Task not found.");
+        task.status = input.status;
+        task.finishedAt = input.finishedAt;
+        task.updatedAt = input.finishedAt;
+        return task;
+      },
+      async appendLog(input) {
+        const log: V0TaskLogRecord = {
+          id: String(state.v0TaskLogs.length + 1),
+          taskId: input.taskId,
+          occurredAt: input.occurredAt,
+          stream: input.stream,
+          message: input.message,
+        };
+        state.v0TaskLogs.push(log);
+        return log;
+      },
+      async listLogs(taskId, limit) {
+        return state.v0TaskLogs
+          .filter((log) => log.taskId === taskId)
+          .slice(0, limit);
+      },
+    },
     settings: {
       async get() {
         return state.settings;

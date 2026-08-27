@@ -18,3 +18,10 @@ export class ExecutionCompletionConflictError extends Error {
     this.name = "ExecutionCompletionConflictError";
   }
 }
+
+export class ActiveTaskConflictError extends Error {
+  public constructor() {
+    super("Another V0 task is already active.");
+    this.name = "ActiveTaskConflictError";
+  }
+}

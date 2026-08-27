@@ -25,13 +25,13 @@ const REDACTIONS: readonly (readonly [RegExp, string])[] = [
 ];
 
 /** Redacts credentials/host details and clamps length for browser display. */
-export function sanitizeText(value: string): string {
+export function sanitizeText(value: string, maximumLength = MAX_SUMMARY_LENGTH): string {
   const redacted = REDACTIONS.reduce(
     (text, [pattern, replacement]) => text.replace(pattern, replacement),
     value.replace(/\s+/g, " ").trim(),
   );
-  return redacted.length > MAX_SUMMARY_LENGTH
-    ? `${redacted.slice(0, MAX_SUMMARY_LENGTH - 1)}…`
+  return redacted.length > maximumLength
+    ? `${redacted.slice(0, maximumLength - 1)}…`
     : redacted;
 }
 

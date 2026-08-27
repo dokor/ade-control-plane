@@ -28,6 +28,10 @@ export type {
   RunnerRegistrationInput,
   RunnerRepository,
   ScheduleExecutionWithLeaseInput,
+  V0TaskCreateInput,
+  V0TaskLogInput,
+  V0TaskRepository,
+  V0TaskTransitionInput,
 } from "./contracts.js";
 export type {
   AdeDecisionRecord,
@@ -59,11 +63,16 @@ export type {
   RunnerState,
   ScheduledExecutionRecord,
   SchedulerMode,
+  V0TaskLogRecord,
+  V0TaskLogStream,
+  V0TaskRecord,
+  V0TaskStatus,
 } from "./domain.js";
 export {
   DatabaseRecordNotFoundError,
   ExecutionCompletionConflictError,
   LeaseConflictError,
+  ActiveTaskConflictError,
 } from "./errors.js";
 export {
   type PostgresConnectionConfig,
