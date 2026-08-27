@@ -2,267 +2,122 @@
 
 ## Goal
 
-Turn the current architecture skeleton into a secure Raspberry-first MVP with the shortest path to a real end-to-end execution.
+Ship a useful production loop quickly while preserving the stronger control-plane foundations that are already implemented.
 
-The plan is intentionally vertical: every phase should leave the repository in a coherent state and reduce uncertainty for the next phase.
+The immediate V0 is:
 
-## Phase 0 — Foundations
+```text
+Dashboard
+→ choose registered project
+→ submit one task
+→ persist execution
+→ launch Codex
+→ branch ade/<task-id>
+→ implement + test
+→ commit + push
+→ GitHub PR
+→ Dashboard shows status/logs/PR
+```
 
-Already established:
+Only one execution is active at a time in V0.
 
-- monorepo TypeScript structure;
-- ADE/control-plane responsibility boundary;
-- initial scheduler domain;
-- ADE client contract;
-- normalized quota domain;
-- bounded worker cycle;
-- security model;
-- Raspberry Option C architecture;
-- Dashboard + GitHub as the only human interfaces.
+## Phase V0.1 — Task/execution path (#23)
 
-Before deeper implementation, keep `AGENTS.md`, architecture and security docs synchronized with behavior.
+Reuse the existing PostgreSQL project registry and execution persistence, but add the minimal product-facing task semantics needed by the V0:
 
-## Phase 1 — Durable control-plane state (#2)
+- project + prompt submission;
+- PENDING/RUNNING/SUCCESS/FAILED/CANCELLED mapping;
+- exactly one active execution;
+- bounded sanitized logs;
+- execution history/detail;
+- cancel intent;
+- atomic state transitions.
 
-### Deliverables
+Do not add fairness, provider routing, parallel tasks or additional queue infrastructure.
 
-- PostgreSQL package and migration runner;
-- project registry persistence;
-- control-plane project states: enabled / paused / disabled;
-- global execution records;
-- durable audit events;
-- execution leases;
-- recovery queries for incomplete executions;
-- repository interfaces separated from SQL implementation.
+## Phase V0.2 — Real Codex → GitHub PR (#24)
 
-### First useful schema
+After #23:
 
-Implement only what the next phases need:
+- resolve project through an explicit allow-list/configuration;
+- prepare/update the local checkout;
+- create `ade/<task-id>`;
+- launch Codex with typed process arguments, never shell-interpolated prompt text;
+- stream bounded sanitized logs;
+- support timeout/cancellation;
+- commit and push changes;
+- create a GitHub PR;
+- persist terminal status + PR reference.
 
-- `projects`;
-- `project_snapshots`;
-- `executions`;
-- `execution_leases`;
-- `audit_events`;
-- `control_commands`;
-- `provider_quota_snapshots`;
-- `runners`.
+A failed/ambiguous action must not silently create duplicate side effects.
 
-See `DATA_MODEL.md`.
+## Phase V0.3 — Task-oriented Dashboard (#25)
 
-### Exit condition
+May start after #23 in parallel with #24 using a fake execution adapter.
 
-Two projects can be registered, paused/resumed and survive process restart. Lease acquisition is atomic.
+The existing authenticated supervision Dashboard remains useful, but V0 needs a dedicated task workflow:
 
-## Phase 2 — Real ADE boundary (#3)
+- project selector;
+- prompt textarea;
+- Run;
+- current execution status;
+- Stop when relevant;
+- recent history;
+- execution detail/logs;
+- PR link;
+- mobile usability;
+- simple polling.
 
-### Recommended first transport
+Do not make advanced quota/runner/scheduler views a dependency of task submission.
 
-Use a local process/CLI adapter for the MVP unless ADE already exposes a more stable machine API by implementation time.
+## Phase V0.4 — Raspberry deployment (#26)
 
-The adapter must normalize transport-specific output into the control-plane contract.
+After #23, #24 and #25:
 
-### Required operations
+- ARM64-compatible Dashboard/worker/PostgreSQL deployment;
+- persistent PostgreSQL volume;
+- runtime secrets;
+- Dashboard authentication behind TLS/reverse proxy;
+- no public DB/worker exposure;
+- no Docker socket;
+- restart policies/healthchecks;
+- backup/update/restart procedure;
+- reboot validation;
+- real end-to-end test: Dashboard → Codex → PR.
 
-- status/capabilities;
-- runnable-work summary;
-- advance one ADE-controlled unit;
-- submit a human decision;
-- reconcile/inspect execution where supported.
+Close umbrella #1 only after this real flow is demonstrated.
 
-### Important rule
+---
 
-The adapter may invoke ADE, but must never inspect repository internals to infer ADE state itself.
+# Advanced roadmap after V0
 
-### Exit condition
+The repository already contains significant advanced foundations. Keep them, but do not force unfinished advanced integrations into the V0 critical path.
 
-One locally registered project can return a normalized status and advance one ADE-managed unit of work through a fake or real runner path.
+## Completed foundations
 
-## Phase 3 — Real Codex quota state (#4)
+- #2 durable PostgreSQL control-plane state;
+- #5 deterministic runner-aware scheduler;
+- #6 crash-safe worker/recovery;
+- #11 secure typed runner/UDS foundation.
 
-### Deliverables
+The ADE adapter implementation also exists and should remain transport-independent.
 
-- provider adapter isolated from quota domain;
-- real quota snapshots;
-- persisted snapshots;
-- reset time handling;
-- stale/unknown quota policy;
-- policy decision recorded with scheduler/audit context.
-
-### Exit condition
-
-The scheduler can deterministically block new work based on real provider quota state and explain why.
-
-## Phase 4 — Runner protocol + local Raspberry runner
-
-This phase makes Option C real.
-
-### Deliverables
-
-- versioned typed worker -> runner request/response contract;
-- authenticated local/private transport;
-- nonce/request expiry/replay protection;
-- runner registration and heartbeat;
-- project allow-list;
-- capability allow-list;
-- workspace containment;
-- execution timeout/cancellation;
-- systemd unit design;
-- structured/redacted runner logs.
-
-See `RUNNER_PROTOCOL.md`.
-
-### MVP runner capabilities
-
-Start narrow:
-
-- `ade.status`;
-- `ade.runnable-work`;
-- `ade.advance`;
-- `ade.apply-decision`.
-
-Do not expose a generic `shell.execute` capability.
-
-### Exit condition
-
-The containerized worker can ask the host runner to execute a typed ADE operation securely without direct host shell access.
-
-## Phase 5 — Complete scheduler (#5)
-
-### Inputs
-
-- persisted project state;
-- ADE runnable summary;
-- quota policy;
-- runner availability/capabilities;
-- active leases;
-- project priority;
-- waiting/aging information.
-
-### Output
-
-A structured `SchedulerDecision` containing:
-
-- selected project/work, if any;
-- selected runner, if any;
-- explicit rejection reasons for other candidates;
-- quota state;
-- next recommended wake-up reason/time.
-
-### Exit condition
-
-Given the same durable state, scheduling is deterministic and testable.
-
-## Phase 6 — Crash-safe H24 worker (#6)
-
-### Deliverables
-
-- event/timer driven worker loop;
-- durable lease before privileged dispatch;
-- heartbeat/lease expiry;
-- idempotent completion handling;
-- startup reconciliation;
-- backoff for infrastructure failures;
-- wake-up on quota reset / control command / timer;
-- graceful shutdown;
-- global pause switch.
-
-### Critical recovery rule
-
-If the worker cannot prove whether a privileged execution completed, it must reconcile rather than blindly retry.
-
-### Exit condition
-
-Kill/restart tests do not duplicate completed work.
-
-## Phase 7 — Dashboard/control API (#7)
-
-Build after durable states exist.
-
-See `DASHBOARD.md`.
-
-### First pages
-
-- `/` — global overview;
-- `/projects/[id]` — project detail/timeline;
-- `/runners` — runner health/capabilities;
-- `/settings` — safe configuration/diagnostics.
-
-### First mutations
-
-- pause/resume project;
-- reprioritize project;
-- retry a known-safe failed control-plane operation;
-- resolve/forward targeted human decision where supported;
-- global scheduling pause/resume.
-
-Every mutation creates an auditable `ControlCommand`.
-
-### Exit condition
-
-The complete system can be supervised from a phone without direct SSH access.
-
-## Phase 8 — GitHub integration (#8)
-
-See `GITHUB_INTEGRATION.md`.
-
-### First capabilities
-
-- signed webhook receiver;
-- delivery deduplication;
-- authorized actor mapping;
-- project/repository mapping;
-- human-required notification comments;
-- status command;
-- targeted decision command;
-- links back to Dashboard for global state.
-
-### Exit condition
-
-A blocked project can request input through GitHub and resume after an authorized targeted decision.
-
-## Phase 9 — Release security closure (#10)
-
-Security work happens in every phase, but before H24 deployment all gates in #10 must be demonstrated.
-
-Examples:
-
-- authentication tests;
-- webhook signature tests;
-- replay tests;
-- path traversal/symlink escape tests;
-- redaction tests;
-- Docker hardening verification;
-- dependency/container/action scanning;
-- backup access controls;
-- credential rotation runbook.
-
-## Phase 10 — Raspberry deployment (#9)
-
-### Control-plane Compose
-
-- Dashboard/control API;
-- worker;
-- PostgreSQL.
-
-### Host
-
-- `ade-control-plane-runner` systemd service;
-- ADE + Codex + Git/build tools;
-- dedicated Unix account;
-- dedicated workspace root;
-- scoped secrets.
-
-### Exit condition
-
-A clean Raspberry deployment can be installed, upgraded, restarted, backed up and rolled back without losing durable control-plane state.
-
-## Recommended first Codex session
-
-Start with **issue #2**.
-
-Suggested session objective:
-
-> Implement the minimal PostgreSQL persistence foundation for the project registry, execution leases and audit events described by issue #2 and `docs/DATA_MODEL.md`. Keep interfaces framework-independent, add migrations and tests, and do not implement unrelated Dashboard/GitHub features.
-
-Then move to #3 only when #2 is green and reviewed.
+## Post-V0 order
+
+1. finish/verify ADE integration edge cases where needed;
+2. finish real Codex quota ingestion (#4);
+3. finish global supervision Dashboard gaps if any (#7);
+4. GitHub project command/notification interface (#8);
+5. full security release gates (#10);
+6. advanced Raspberry control-plane topology/deployment (#9) if still distinct from #26;
+7. remote runners/multi-machine only after real need appears.
+
+## Invariants across both V0 and advanced work
+
+- ADE owns project-delivery semantics.
+- Control Plane owns global orchestration and operational state.
+- No arbitrary shell command is exposed by public or runner interfaces.
+- Secrets stay out of prompts, logs, persisted raw payloads and Git.
+- Ambiguous external side effects require reconciliation before retry.
+- Prefer PostgreSQL already present over introducing Redis/Kafka/etc.
+- Do not add a feature to V0 unless it is required for Dashboard → Codex → PR or for minimum safe deployment.
