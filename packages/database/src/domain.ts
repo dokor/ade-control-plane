@@ -176,3 +176,15 @@ export interface CompletionResult {
   applied: boolean;
   releasedLease: boolean;
 }
+
+export type SchedulerMode = "running" | "paused" | "safe_mode";
+
+export interface ControlPlaneSettingsRecord {
+  schedulerMode: SchedulerMode;
+  quotaThrottledPercent: number;
+  quotaDrainingPercent: number;
+  quotaBlockedPercent: number;
+  quotaStaleAfterMs: number;
+  updatedAt: string;
+  updatedBy: string | null;
+}

@@ -9,6 +9,8 @@ import type {
   ControlCommandRepository,
   ControlCommandStatusUpdate,
   ControlPlanePersistence,
+  ControlPlaneSettingsRepository,
+  ControlPlaneSettingsUpdate,
   ExecutionCompletionInput,
   ExecutionLeaseRepository,
   ExecutionRepository,
@@ -27,6 +29,7 @@ import type {
   AuditEventRecord,
   CompletionResult,
   ControlCommandRecord,
+  ControlPlaneSettingsRecord,
   ExecutionLeaseRecord,
   ExecutionRecord,
   JsonObject,
@@ -39,6 +42,7 @@ import type {
   RunnerRecord,
   RunnerState,
   ScheduledExecutionRecord,
+  SchedulerMode,
 } from "../domain.js";
 import {
   DatabaseRecordNotFoundError,
@@ -82,6 +86,11 @@ function toStringArray(value: unknown): readonly string[] {
   }
 
   return value.map((entry) => String(entry));
+}
+
+/** Clamps caller-provided page sizes so a Dashboard request cannot scan a table. */
+function boundedLimit(limit: number, maximum = 200): number {
+  return Math.min(Math.max(Math.trunc(limit) || 1, 1), maximum);
 }
 
 function mapProject(row: TimestampRow): ProjectRecord {
@@ -272,6 +281,66 @@ async function queryRequired<Row extends TimestampRow>(
   return expectOne(result.rows, notFoundMessage);
 }
 
+function mapControlPlaneSettings(row: TimestampRow): ControlPlaneSettingsRecord {
+  return {
+    schedulerMode: row.scheduler_mode as SchedulerMode,
+    quotaThrottledPercent: Number(row.quota_throttled_percent),
+    quotaDrainingPercent: Number(row.quota_draining_percent),
+    quotaBlockedPercent: Number(row.quota_blocked_percent),
+    quotaStaleAfterMs: Number(row.quota_stale_after_ms),
+    updatedAt: toIsoString(row.updated_at) ?? "",
+    updatedBy: row.updated_by === null ? null : String(row.updated_by),
+  };
+}
+
+class PostgresControlPlaneSettingsRepository
+  implements ControlPlaneSettingsRepository
+{
+  public constructor(private readonly pool: Pool) {}
+
+  public async get(): Promise<ControlPlaneSettingsRecord> {
+    const row = await queryRequired(
+      this.pool,
+      "SELECT * FROM control_plane_settings WHERE id = 'singleton'",
+      [],
+      "Control plane settings row is missing; run migrations.",
+    );
+    return mapControlPlaneSettings(row);
+  }
+
+  public async update(
+    update: ControlPlaneSettingsUpdate,
+  ): Promise<ControlPlaneSettingsRecord> {
+    const row = await queryRequired(
+      this.pool,
+      `
+        UPDATE control_plane_settings
+        SET
+          scheduler_mode = COALESCE($1, scheduler_mode),
+          quota_throttled_percent = COALESCE($2, quota_throttled_percent),
+          quota_draining_percent = COALESCE($3, quota_draining_percent),
+          quota_blocked_percent = COALESCE($4, quota_blocked_percent),
+          quota_stale_after_ms = COALESCE($5, quota_stale_after_ms),
+          updated_at = $6,
+          updated_by = $7
+        WHERE id = 'singleton'
+        RETURNING *
+      `,
+      [
+        update.schedulerMode ?? null,
+        update.quotaThrottledPercent ?? null,
+        update.quotaDrainingPercent ?? null,
+        update.quotaBlockedPercent ?? null,
+        update.quotaStaleAfterMs ?? null,
+        update.updatedAt,
+        update.updatedBy,
+      ],
+      "Failed to update control plane settings.",
+    );
+    return mapControlPlaneSettings(row);
+  }
+}
+
 class PostgresProjectRepository implements ProjectRepository {
   public constructor(private readonly pool: Pool) {}
 
@@ -449,6 +518,25 @@ class PostgresProjectSnapshotRepository implements ProjectSnapshotRepository {
       [projectId],
     );
     return row ? mapProjectSnapshot(row) : null;
+  }
+
+  public async listLatestForProjects(
+    projectIds: readonly string[],
+  ): Promise<readonly ProjectSnapshotRecord[]> {
+    if (projectIds.length === 0) {
+      return [];
+    }
+
+    const result = await this.pool.query(
+      `
+        SELECT DISTINCT ON (project_id) *
+        FROM project_snapshots
+        WHERE project_id = ANY($1::uuid[])
+        ORDER BY project_id, observed_at DESC
+      `,
+      [[...projectIds]],
+    );
+    return result.rows.map(mapProjectSnapshot);
   }
 }
 
@@ -654,6 +742,35 @@ class PostgresExecutionRepository implements ExecutionRepository {
     startedAt: string,
   ): Promise<ExecutionRecord> {
     return this.updateInFlightStatus(executionId, "running", startedAt);
+  }
+
+  public async listActive(): Promise<readonly ExecutionRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM executions
+        WHERE status IN ('queued', 'leased', 'dispatched', 'running')
+        ORDER BY requested_at DESC
+      `,
+    );
+    return result.rows.map(mapExecution);
+  }
+
+  public async listByProjectId(
+    projectId: string,
+    limit: number,
+  ): Promise<readonly ExecutionRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM executions
+        WHERE project_id = $1
+        ORDER BY requested_at DESC
+        LIMIT $2
+      `,
+      [projectId, boundedLimit(limit)],
+    );
+    return result.rows.map(mapExecution);
   }
 
   public async scheduleWithLease(
@@ -951,6 +1068,23 @@ class PostgresControlCommandRepository implements ControlCommandRepository {
     return result.rows.map(mapControlCommand);
   }
 
+  public async listForProject(
+    projectId: string,
+    limit: number,
+  ): Promise<readonly ControlCommandRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM control_commands
+        WHERE project_id = $1
+        ORDER BY received_at DESC
+        LIMIT $2
+      `,
+      [projectId, boundedLimit(limit)],
+    );
+    return result.rows.map(mapControlCommand);
+  }
+
   public async recordReceipt(
     input: ControlCommandReceiptInput,
   ): Promise<ControlCommandRecord> {
@@ -1062,6 +1196,36 @@ class PostgresAuditEventRepository implements AuditEventRepository {
         ORDER BY occurred_at ASC
       `,
       [executionId],
+    );
+    return result.rows.map(mapAuditEvent);
+  }
+
+  public async listForProject(
+    projectId: string,
+    limit: number,
+  ): Promise<readonly AuditEventRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM audit_events
+        WHERE project_id = $1
+        ORDER BY occurred_at DESC
+        LIMIT $2
+      `,
+      [projectId, boundedLimit(limit)],
+    );
+    return result.rows.map(mapAuditEvent);
+  }
+
+  public async listRecent(limit: number): Promise<readonly AuditEventRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM audit_events
+        ORDER BY occurred_at DESC
+        LIMIT $1
+      `,
+      [boundedLimit(limit)],
     );
     return result.rows.map(mapAuditEvent);
   }
@@ -1205,11 +1369,13 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
   public readonly projects: ProjectRepository;
   public readonly providerQuotaSnapshots: ProviderQuotaSnapshotRepository;
   public readonly runners: RunnerRepository;
+  public readonly settings: ControlPlaneSettingsRepository;
 
   private readonly pool: Pool;
 
   public constructor(config: PostgresConnectionConfig) {
     this.pool = createPool(config);
+    this.settings = new PostgresControlPlaneSettingsRepository(this.pool);
     this.projects = new PostgresProjectRepository(this.pool);
     this.projectSnapshots = new PostgresProjectSnapshotRepository(this.pool);
     this.runners = new PostgresRunnerRepository(this.pool);

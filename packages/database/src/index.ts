@@ -5,6 +5,8 @@ export type {
   ControlCommandRepository,
   ControlCommandStatusUpdate,
   ControlPlanePersistence,
+  ControlPlaneSettingsRepository,
+  ControlPlaneSettingsUpdate,
   ExecutionCompletionInput,
   ExecutionLeaseRepository,
   ExecutionRepository,
@@ -26,6 +28,7 @@ export type {
   ControlCommandRecord,
   ControlCommandSource,
   ControlCommandStatus,
+  ControlPlaneSettingsRecord,
   ExecutionLeaseRecord,
   ExecutionRecord,
   ExecutionStatus,
@@ -41,6 +44,7 @@ export type {
   RunnerRecord,
   RunnerState,
   ScheduledExecutionRecord,
+  SchedulerMode,
 } from "./domain.js";
 export {
   DatabaseRecordNotFoundError,

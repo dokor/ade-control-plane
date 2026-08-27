@@ -1,0 +1,25 @@
+{
+  "name": "@ade-control-plane/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ade-control-plane/core": "workspace:*",
+    "@ade-control-plane/database": "workspace:*",
+    "@ade-control-plane/quota": "workspace:*",
+    "next": "15.5.2",
+    "react": "19.1.1",
+    "react-dom": "19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9"
+  }
+}

@@ -289,3 +289,80 @@ Dashboard V1 is useful when:
 - waiting-human state is actionable;
 - mobile layout is usable;
 - no direct privileged runner operation is exposed from the public request path.
+## MVP implementation
+
+`apps/dashboard` is a Next.js App Router application rendered on the server.
+It reads through `@ade-control-plane/database` repositories and writes only
+through the control command pipeline.
+
+### Modules
+
+| Module | Responsibility |
+| --- | --- |
+| `src/lib/session.ts` | HMAC-signed session token, cookie serialization, scrypt password verification |
+| `src/lib/control.ts` | Command vocabulary, read/mutation authorization, origin check, payload validation |
+| `src/lib/retry.ts` | Retry classification (`safe` / `reconcile-first` / `never`) |
+| `src/lib/commands.ts` | authorize → validate → persist `ControlCommand` + audit → apply |
+| `src/lib/readModel.ts` | Overview and project view models, scheduler explanation, attention queue |
+| `src/lib/sanitize.ts` | Redaction of tokens, DSNs, environment and host paths |
+
+### Authentication
+
+Application-layer sessions, chosen for a single-operator homelab deployment
+with no external identity provider:
+
+- the operator password is stored as a scrypt hash
+  (`DASHBOARD_PASSWORD_HASH_FILE`), never in plaintext;
+- a successful sign-in mints an HMAC-signed token
+  (`DASHBOARD_SESSION_SECRET_FILE`) carrying subject, rights and expiry;
+- the token travels in a `Secure`, `HttpOnly`, `SameSite=Lax` cookie;
+- every protected page verifies the session server-side per request, so direct
+  access to the app cannot bypass authentication even if a reverse proxy is
+  misconfigured. No proxy header is trusted as an identity source.
+
+Generate the hash with:
+
+```bash
+pnpm --filter @ade-control-plane/dashboard exec tsx scripts/hash-password.ts
+```
+
+### Mutation path
+
+```text
+browser fetch POST /api/control
+→ verify session cookie
+→ authorizeMutation: read right, mutate right, same-origin
+→ validateCommand: typed payload, priority bounds, retry classification
+→ controlCommands.recordReceipt + auditEvents.append (identity recorded first)
+→ repository state mutation
+→ command marked applied + audited
+```
+
+`POST /api/control` is the only mutation endpoint and accepts only the typed
+command vocabulary. There is no generic shell, path, process or SQL parameter
+reachable from the browser, and `execution.safe-retry` records intent only —
+dispatch stays with the worker.
+
+Rejections before authentication are audited as `security` events and never
+create a `control_commands` row; rejections after authentication are persisted
+as `rejected` commands so operator mistakes stay auditable.
+
+### Safe retry
+
+Retryability is always recomputed from the persisted execution record. A
+client-supplied `retryability` can only be ignored, never trusted: only
+`safe` proceeds, while `reconcile-first` and `never` are refused with
+`RETRY_NOT_SAFE`.
+
+### Live updates
+
+Server reads plus controlled polling (`DASHBOARD_REFRESH_SECONDS`, default 15s)
+via `router.refresh()`, paused while the tab is hidden. No SSE or WebSocket, and
+the scheduler never depends on a connected browser.
+
+### Global state
+
+`control_plane_settings` (migration `002`) holds the global scheduler mode and
+quota thresholds as a single durable row. It defaults to `paused`: privileged
+dispatch must be an explicit, audited human decision rather than a deployment
+side effect.

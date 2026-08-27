@@ -1,5 +1,6 @@
 import type {
   AuditEventRecord,
+  ControlPlaneSettingsRecord,
   CompletionResult,
   ControlCommandRecord,
   ControlCommandSource,
@@ -18,6 +19,7 @@ import type {
   RunnerRecord,
   RunnerState,
   ScheduledExecutionRecord,
+  SchedulerMode,
 } from "./domain.js";
 
 export interface ProjectRegistrationInput {
@@ -152,6 +154,21 @@ export interface AuditEventInput {
   metadata?: JsonObject;
 }
 
+export interface ControlPlaneSettingsUpdate {
+  schedulerMode?: SchedulerMode;
+  quotaThrottledPercent?: number;
+  quotaDrainingPercent?: number;
+  quotaBlockedPercent?: number;
+  quotaStaleAfterMs?: number;
+  updatedAt: string;
+  updatedBy: string;
+}
+
+export interface ControlPlaneSettingsRepository {
+  get(): Promise<ControlPlaneSettingsRecord>;
+  update(update: ControlPlaneSettingsUpdate): Promise<ControlPlaneSettingsRecord>;
+}
+
 export interface ProjectRepository {
   getById(projectId: string): Promise<ProjectRecord | null>;
   list(): Promise<readonly ProjectRecord[]>;
@@ -163,6 +180,10 @@ export interface ProjectRepository {
 export interface ProjectSnapshotRepository {
   append(input: ProjectSnapshotInput): Promise<ProjectSnapshotRecord>;
   getLatestByProjectId(projectId: string): Promise<ProjectSnapshotRecord | null>;
+  /** Latest snapshot per project, used by the Dashboard overview read model. */
+  listLatestForProjects(
+    projectIds: readonly string[],
+  ): Promise<readonly ProjectSnapshotRecord[]>;
 }
 
 export interface RunnerRepository {
@@ -175,6 +196,8 @@ export interface RunnerRepository {
 
 export interface ExecutionRepository {
   getById(executionId: string): Promise<ExecutionRecord | null>;
+  listActive(): Promise<readonly ExecutionRecord[]>;
+  listByProjectId(projectId: string, limit: number): Promise<readonly ExecutionRecord[]>;
   markDispatched(executionId: string, startedAt: string): Promise<ExecutionRecord>;
   markRunning(executionId: string, startedAt: string): Promise<ExecutionRecord>;
   scheduleWithLease(
@@ -211,6 +234,7 @@ export interface ProviderQuotaSnapshotRepository {
 export interface ControlCommandRepository {
   getById(commandId: string): Promise<ControlCommandRecord | null>;
   list(): Promise<readonly ControlCommandRecord[]>;
+  listForProject(projectId: string, limit: number): Promise<readonly ControlCommandRecord[]>;
   recordReceipt(input: ControlCommandReceiptInput): Promise<ControlCommandRecord>;
   updateStatus(
     commandId: string,
@@ -221,9 +245,12 @@ export interface ControlCommandRepository {
 export interface AuditEventRepository {
   append(input: AuditEventInput): Promise<AuditEventRecord>;
   listForExecution(executionId: string): Promise<readonly AuditEventRecord[]>;
+  listForProject(projectId: string, limit: number): Promise<readonly AuditEventRecord[]>;
+  listRecent(limit: number): Promise<readonly AuditEventRecord[]>;
 }
 
 export interface ControlPlanePersistence {
+  readonly settings: ControlPlaneSettingsRepository;
   readonly projects: ProjectRepository;
   readonly projectSnapshots: ProjectSnapshotRepository;
   readonly runners: RunnerRepository;
