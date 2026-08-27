@@ -1,6 +1,13 @@
 import type {
+  AdeDecisionRecord,
+  AdeDecisionStatus,
   AuditEventRecord,
+  BotCommentPurpose,
   ControlPlaneSettingsRecord,
+  GithubBotCommentRecord,
+  GithubDeliveryRecord,
+  GithubDeliveryStatus,
+  GithubSubjectType,
   CompletionResult,
   ControlCommandRecord,
   ControlCommandSource,
@@ -169,8 +176,81 @@ export interface ControlPlaneSettingsRepository {
   update(update: ControlPlaneSettingsUpdate): Promise<ControlPlaneSettingsRecord>;
 }
 
+export interface GithubDeliveryReceiptInput {
+  id?: string;
+  deliveryId: string;
+  event: string;
+  action: string;
+  repositoryGithubId: string;
+  projectId?: string | null;
+  actorRef?: string | null;
+  subjectType?: GithubSubjectType | null;
+  subjectNumber?: number | null;
+  commentId?: string | null;
+  receivedAt: string;
+}
+
+export interface GithubDeliveryOutcome {
+  status: Extract<GithubDeliveryStatus, "rejected" | "ignored" | "processed">;
+  rejectionCode?: string | null;
+  controlCommandId?: string | null;
+  processedAt?: string | null;
+}
+
+export interface GithubDeliveryReceipt {
+  record: GithubDeliveryRecord;
+  /** True when this delivery ID had already been recorded. */
+  duplicate: boolean;
+}
+
+export interface GithubDeliveryRepository {
+  getByDeliveryId(deliveryId: string): Promise<GithubDeliveryRecord | null>;
+  /** Insert-or-detect: a replayed delivery ID never produces a second effect. */
+  recordReceipt(input: GithubDeliveryReceiptInput): Promise<GithubDeliveryReceipt>;
+  updateOutcome(
+    id: string,
+    outcome: GithubDeliveryOutcome,
+  ): Promise<GithubDeliveryRecord>;
+  listRecent(limit: number): Promise<readonly GithubDeliveryRecord[]>;
+}
+
+export interface GithubBotCommentRepository {
+  find(
+    projectId: string,
+    purpose: BotCommentPurpose,
+    subjectType: GithubSubjectType,
+    subjectNumber: number,
+  ): Promise<GithubBotCommentRecord | null>;
+  remember(record: GithubBotCommentRecord): Promise<GithubBotCommentRecord>;
+}
+
+export interface AdeDecisionInput {
+  id?: string;
+  projectId: string;
+  decisionRef: string;
+  prompt: string;
+  options: readonly string[];
+  status?: AdeDecisionStatus;
+  observedAt: string;
+}
+
+export interface AdeDecisionRepository {
+  getByRef(projectId: string, decisionRef: string): Promise<AdeDecisionRecord | null>;
+  listOpenByProjectId(projectId: string): Promise<readonly AdeDecisionRecord[]>;
+  upsert(input: AdeDecisionInput): Promise<AdeDecisionRecord>;
+  /** Resolves only an open decision; a replayed resolution returns null. */
+  resolve(
+    projectId: string,
+    decisionRef: string,
+    option: string,
+    resolvedBy: string,
+    resolvedAt: string,
+  ): Promise<AdeDecisionRecord | null>;
+}
+
 export interface ProjectRepository {
   getById(projectId: string): Promise<ProjectRecord | null>;
+  getByRepositoryId(repositoryId: string): Promise<ProjectRecord | null>;
   list(): Promise<readonly ProjectRecord[]>;
   register(input: ProjectRegistrationInput): Promise<ProjectRecord>;
   updatePriority(projectId: string, priority: number): Promise<ProjectRecord>;
@@ -250,6 +330,9 @@ export interface AuditEventRepository {
 }
 
 export interface ControlPlanePersistence {
+  readonly adeDecisions: AdeDecisionRepository;
+  readonly githubBotComments: GithubBotCommentRepository;
+  readonly githubDeliveries: GithubDeliveryRepository;
   readonly settings: ControlPlaneSettingsRepository;
   readonly projects: ProjectRepository;
   readonly projectSnapshots: ProjectSnapshotRepository;

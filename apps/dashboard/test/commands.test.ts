@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { submitControlCommand } from "../src/lib/commands.js";
+import { submitDashboardCommand } from "../src/lib/commands.js";
 import { classifyRetryability } from "../src/lib/retry.js";
 import {
   createMemoryPersistence,
@@ -26,7 +26,7 @@ function context(state: MemoryState, overrides: Partial<{ identity: typeof opera
 
 test("pause goes through a persisted ControlCommand and an audit record", async () => {
   const state = createMemoryState({ projects: [project()] });
-  const outcome = await submitControlCommand(context(state), {
+  const outcome = await submitDashboardCommand(context(state), {
     type: "project.pause",
     payload: { projectId: project().id },
   });
@@ -48,10 +48,10 @@ test("pause goes through a persisted ControlCommand and an audit record", async 
 
 test("global pause and safe mode change durable scheduler mode and are audited", async () => {
   const state = createMemoryState();
-  await submitControlCommand(context(state), { type: "global.pause", payload: {} });
+  await submitDashboardCommand(context(state), { type: "global.pause", payload: {} });
   assert.equal(state.settings.schedulerMode, "paused");
 
-  await submitControlCommand(context(state), { type: "global.safe-mode", payload: {} });
+  await submitDashboardCommand(context(state), { type: "global.safe-mode", payload: {} });
   assert.equal(state.settings.schedulerMode, "safe_mode");
   assert.equal(state.settings.updatedBy, "dokor");
   assert.ok(state.auditEvents.every(({ category }) => category === "control"));
@@ -60,7 +60,7 @@ test("global pause and safe mode change durable scheduler mode and are audited",
 test("an unauthenticated mutation is denied and never creates a command row", async () => {
   const state = createMemoryState({ projects: [project()] });
   await assert.rejects(
-    submitControlCommand(context(state, { identity: null }), {
+    submitDashboardCommand(context(state, { identity: null }), {
       type: "project.pause",
       payload: { projectId: project().id },
     }),
@@ -76,7 +76,7 @@ test("an unauthenticated mutation is denied and never creates a command row", as
 test("a cross-origin mutation is rejected as CSRF", async () => {
   const state = createMemoryState({ projects: [project()] });
   await assert.rejects(
-    submitControlCommand(context(state, { requestOrigin: "https://evil.example" }), {
+    submitDashboardCommand(context(state, { requestOrigin: "https://evil.example" }), {
       type: "project.pause",
       payload: { projectId: project().id },
     }),
@@ -94,7 +94,7 @@ test("safe retry is refused for a reconcile-first execution and recorded as reje
   assert.equal(classifyRetryability(ambiguous), "reconcile-first");
 
   await assert.rejects(
-    submitControlCommand(context(state), {
+    submitDashboardCommand(context(state), {
       type: "execution.safe-retry",
       payload: { executionId: ambiguous.id, retryability: "safe" },
     }),
@@ -109,7 +109,7 @@ test("safe retry is accepted for a classified-safe execution without dispatching
   const failed = execution({ status: "failed", errorCode: "RUNNER_UNAVAILABLE" });
   const state = createMemoryState({ projects: [project()], executions: [failed] });
 
-  const outcome = await submitControlCommand(context(state), {
+  const outcome = await submitDashboardCommand(context(state), {
     type: "execution.safe-retry",
     payload: { executionId: failed.id },
   });
@@ -122,13 +122,13 @@ test("safe retry is accepted for a classified-safe execution without dispatching
 
 test("runner drain and disable are audited state changes", async () => {
   const state = createMemoryState({ runners: [runner()] });
-  await submitControlCommand(context(state), {
+  await submitDashboardCommand(context(state), {
     type: "runner.drain",
     payload: { runnerId: runner().id },
   });
   assert.equal(state.runners[0]?.state, "draining");
 
-  await submitControlCommand(context(state), {
+  await submitDashboardCommand(context(state), {
     type: "runner.disable",
     payload: { runnerId: runner().id },
   });
@@ -143,10 +143,10 @@ test("an idempotency key does not apply the same command twice", async () => {
     payload: { projectId: project().id, priority: 30 },
     idempotencyKey: "key-1",
   };
-  await submitControlCommand(context(state), request);
+  await submitDashboardCommand(context(state), request);
   state.projects[0] = { ...project(), priority: 30 };
 
-  const replay = await submitControlCommand(context(state), request);
+  const replay = await submitDashboardCommand(context(state), request);
   assert.equal(replay.summary, "Command was already applied.");
   assert.equal(state.commands.length, 1);
 });

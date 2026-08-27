@@ -8,7 +8,7 @@ let store: Promise<ControlPlanePersistence> | null = null;
 
 /**
  * One pooled store per server process. The Dashboard only ever reads through
- * repositories and writes through `submitControlCommand`; it never opens an
+ * repositories and writes through the control command pipeline; it never opens an
  * ad-hoc connection or runs raw SQL from a request handler.
  */
 export function getPersistence(): Promise<ControlPlanePersistence> {

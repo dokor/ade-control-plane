@@ -130,6 +130,33 @@ export default async function ProjectPage({
         </div>
       </section>
 
+      {detail.openDecisions.length > 0 ? (
+        <section>
+          <h2>Decisions waiting on you</h2>
+          <div className="list">
+            {detail.openDecisions.map((decision) => (
+              <article key={decision.decisionRef} className="panel">
+                <div className="row">
+                  <strong>{decision.decisionRef}</strong>
+                  <span className="muted">{formatInstant(decision.observedAt)}</span>
+                </div>
+                <p className="detail">{decision.prompt}</p>
+                <p className="detail">
+                  Resolve from the linked issue or pull request with one of:
+                </p>
+                <ul className="detail">
+                  {decision.githubCommands.map((command) => (
+                    <li key={command}>
+                      <code>{command}</code>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {detail.humanDecisions.length > 0 ? (
         <section>
           <h2>Human decisions</h2>

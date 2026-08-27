@@ -9,6 +9,7 @@ import {
   type SchedulerRunner,
 } from "@ade-control-plane/core";
 import type {
+  AdeDecisionRecord,
   AuditEventRecord,
   ControlCommandRecord,
   ControlPlanePersistence,
@@ -137,12 +138,22 @@ export interface OverviewViewModel {
   projects: readonly ProjectView[];
 }
 
+export interface DecisionView {
+  decisionRef: string;
+  prompt: string;
+  options: readonly string[];
+  observedAt: string;
+  /** Exact GitHub syntax an authorized actor can paste on the issue or PR. */
+  githubCommands: readonly string[];
+}
+
 export interface ProjectDetailViewModel {
   project: ProjectView;
   schedulerMode: SchedulerMode;
   executions: readonly ExecutionView[];
   timeline: readonly TimelineEntry[];
   humanDecisions: readonly AttentionItem[];
+  openDecisions: readonly DecisionView[];
   availableActions: {
     canPause: boolean;
     canResume: boolean;
@@ -256,10 +267,11 @@ export async function buildProjectDetail(
   const view =
     overview.projects.find(({ id }) => id === project.id) ??
     toProjectView(project, null, null, null, now);
-  const [executions, auditEvents, commands] = await Promise.all([
+  const [executions, auditEvents, commands, decisions] = await Promise.all([
     persistence.executions.listByProjectId(project.id, 20),
     persistence.auditEvents.listForProject(project.id, 30),
     persistence.controlCommands.listForProject(project.id, 20),
+    persistence.adeDecisions.listOpenByProjectId(project.id),
   ]);
   const executionViews = executions.map((execution) =>
     toExecutionView(execution, project.name),
@@ -274,12 +286,29 @@ export async function buildProjectDetail(
     humanDecisions: overview.attention.filter(
       (item) => item.projectId === project.id,
     ),
+    openDecisions: decisions.map(toDecisionView),
     availableActions: {
       canPause: project.state === "enabled",
       canResume: project.state !== "enabled",
       canReprioritize: project.state !== "disabled",
       safeRetryExecutionId: safeRetry?.id ?? null,
     },
+  };
+}
+
+/**
+ * Only decisions ADE has actually exposed are shown, with only the options it
+ * offered. Neither the Dashboard nor GitHub can invent a decision payload.
+ */
+function toDecisionView(decision: AdeDecisionRecord): DecisionView {
+  return {
+    decisionRef: decision.decisionRef,
+    prompt: sanitizeText(decision.prompt),
+    options: decision.options,
+    observedAt: decision.observedAt,
+    githubCommands: decision.options.map(
+      (option) => `@ade decide ${decision.decisionRef} ${option}`,
+    ),
   };
 }
 

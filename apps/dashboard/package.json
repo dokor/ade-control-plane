@@ -13,6 +13,7 @@
   "dependencies": {
     "@ade-control-plane/core": "workspace:*",
     "@ade-control-plane/database": "workspace:*",
+    "@ade-control-plane/github": "workspace:*",
     "@ade-control-plane/quota": "workspace:*",
     "next": "15.5.2",
     "react": "19.1.1",

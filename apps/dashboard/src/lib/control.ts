@@ -12,7 +12,8 @@ export type ControlCommandType =
   | "runner.drain"
   | "runner.disable"
   | "runner.enable"
-  | "execution.safe-retry";
+  | "execution.safe-retry"
+  | "ade.decide";
 
 export const CONTROL_COMMAND_TYPES: readonly ControlCommandType[] = [
   "project.pause",
@@ -25,6 +26,7 @@ export const CONTROL_COMMAND_TYPES: readonly ControlCommandType[] = [
   "runner.disable",
   "runner.enable",
   "execution.safe-retry",
+  "ade.decide",
 ];
 
 /** Commands that require an explicit confirmation and a durable audit record. */
@@ -35,6 +37,7 @@ export const SENSITIVE_COMMAND_TYPES: readonly ControlCommandType[] = [
   "runner.disable",
   "runner.enable",
   "execution.safe-retry",
+  "ade.decide",
 ];
 
 export function isControlCommandType(value: unknown): value is ControlCommandType {
@@ -58,7 +61,13 @@ export type ValidatedControlCommand =
   | { type: "runner.drain"; runnerId: string }
   | { type: "runner.disable"; runnerId: string }
   | { type: "runner.enable"; runnerId: string }
-  | { type: "execution.safe-retry"; executionId: string; retryability: Retryability };
+  | { type: "execution.safe-retry"; executionId: string; retryability: Retryability }
+  | {
+      type: "ade.decide";
+      projectId: string;
+      decisionRef: string;
+      option: string;
+    };
 
 export const MINIMUM_PRIORITY = 0;
 export const MAXIMUM_PRIORITY = 100;
@@ -161,6 +170,13 @@ export function validateCommand(
     case "runner.disable":
     case "runner.enable":
       return { type, runnerId: requireId(record, "runnerId") };
+    case "ade.decide":
+      return {
+        type,
+        projectId: requireId(record, "projectId"),
+        decisionRef: requireReference(record.decisionRef, "decisionRef"),
+        option: requireReference(record.option, "option"),
+      };
     case "execution.safe-retry": {
       const retryability = record.retryability;
       if (retryability !== "safe") {
@@ -190,6 +206,20 @@ function requireId(record: Record<string, unknown>, field: string): string {
   const value = record[field];
   if (typeof value !== "string" || !/^[0-9a-fA-F-]{36}$/.test(value)) {
     throw new ControlError("INVALID_COMMAND", `Field ${field} must be an identifier.`);
+  }
+  return value;
+}
+
+const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * Decision references and options are opaque tokens supplied by ADE. They are
+ * validated as a closed character set so nothing shell-like or structurally
+ * surprising can travel further into the control plane.
+ */
+function requireReference(value: unknown, field: string): string {
+  if (typeof value !== "string" || !REFERENCE.test(value)) {
+    throw new ControlError("INVALID_COMMAND", `Field ${field} is not a valid reference.`);
   }
   return value;
 }

@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
 
 import type {
+  AdeDecisionInput,
+  AdeDecisionRecord,
   AuditEventInput,
   AuditEventRecord,
+  BotCommentPurpose,
   ControlCommandReceiptInput,
   ControlCommandRecord,
   ControlCommandStatusUpdate,
@@ -10,6 +13,10 @@ import type {
   ControlPlaneSettingsRecord,
   ControlPlaneSettingsUpdate,
   ExecutionRecord,
+  GithubBotCommentRecord,
+  GithubDeliveryReceiptInput,
+  GithubDeliveryRecord,
+  GithubSubjectType,
   ProjectControlState,
   ProjectRecord,
   ProjectSnapshotRecord,
@@ -32,6 +39,9 @@ export interface MemoryState {
   quotaSnapshots: ProviderQuotaSnapshotRecord[];
   commands: ControlCommandRecord[];
   auditEvents: AuditEventRecord[];
+  deliveries: GithubDeliveryRecord[];
+  botComments: GithubBotCommentRecord[];
+  decisions: AdeDecisionRecord[];
 }
 
 const NOW = "2026-08-27T10:00:00.000Z";
@@ -54,6 +64,9 @@ export function createMemoryState(overrides: Partial<MemoryState> = {}): MemoryS
     quotaSnapshots: [],
     commands: [],
     auditEvents: [],
+    deliveries: [],
+    botComments: [],
+    decisions: [],
     ...overrides,
   };
 }
@@ -80,9 +93,141 @@ export function createMemoryPersistence(
         return state.settings;
       },
     },
+    githubDeliveries: {
+      async getByDeliveryId(deliveryId) {
+        return state.deliveries.find((entry) => entry.deliveryId === deliveryId) ?? null;
+      },
+      async recordReceipt(input: GithubDeliveryReceiptInput) {
+        const existing = state.deliveries.find(
+          (entry) => entry.deliveryId === input.deliveryId,
+        );
+        if (existing) return { record: existing, duplicate: true };
+
+        const record: GithubDeliveryRecord = {
+          id: input.id ?? randomUUID(),
+          deliveryId: input.deliveryId,
+          event: input.event,
+          action: input.action,
+          repositoryGithubId: input.repositoryGithubId,
+          projectId: input.projectId ?? null,
+          actorRef: input.actorRef ?? null,
+          subjectType: input.subjectType ?? null,
+          subjectNumber: input.subjectNumber ?? null,
+          commentId: input.commentId ?? null,
+          status: "received",
+          rejectionCode: null,
+          controlCommandId: null,
+          receivedAt: input.receivedAt,
+          processedAt: null,
+        };
+        state.deliveries.push(record);
+        return { record, duplicate: false };
+      },
+      async updateOutcome(id, outcome) {
+        const index = state.deliveries.findIndex((entry) => entry.id === id);
+        const delivery = state.deliveries[index];
+        if (index < 0 || !delivery) throw new Error("Delivery not found.");
+        const updated: GithubDeliveryRecord = {
+          ...delivery,
+          status: outcome.status,
+          rejectionCode: outcome.rejectionCode ?? delivery.rejectionCode,
+          controlCommandId: outcome.controlCommandId ?? delivery.controlCommandId,
+          processedAt: outcome.processedAt ?? delivery.processedAt,
+        };
+        state.deliveries[index] = updated;
+        return updated;
+      },
+      async listRecent(limit) {
+        return state.deliveries.slice(0, limit);
+      },
+    },
+    githubBotComments: {
+      async find(
+        projectId: string,
+        purpose: BotCommentPurpose,
+        subjectType: GithubSubjectType,
+        subjectNumber: number,
+      ) {
+        return (
+          state.botComments.find(
+            (entry) =>
+              entry.projectId === projectId &&
+              entry.purpose === purpose &&
+              entry.subjectType === subjectType &&
+              entry.subjectNumber === subjectNumber,
+          ) ?? null
+        );
+      },
+      async remember(record: GithubBotCommentRecord) {
+        const index = state.botComments.findIndex(
+          (entry) =>
+            entry.projectId === record.projectId &&
+            entry.purpose === record.purpose &&
+            entry.subjectType === record.subjectType &&
+            entry.subjectNumber === record.subjectNumber,
+        );
+        if (index >= 0) state.botComments[index] = record;
+        else state.botComments.push(record);
+        return record;
+      },
+    },
+    adeDecisions: {
+      async getByRef(projectId, decisionRef) {
+        return (
+          state.decisions.find(
+            (entry) =>
+              entry.projectId === projectId && entry.decisionRef === decisionRef,
+          ) ?? null
+        );
+      },
+      async listOpenByProjectId(projectId) {
+        return state.decisions.filter(
+          (entry) => entry.projectId === projectId && entry.status === "open",
+        );
+      },
+      async upsert(input: AdeDecisionInput) {
+        const record: AdeDecisionRecord = {
+          id: input.id ?? randomUUID(),
+          projectId: input.projectId,
+          decisionRef: input.decisionRef,
+          prompt: input.prompt,
+          options: [...input.options],
+          status: input.status ?? "open",
+          resolvedOption: null,
+          resolvedBy: null,
+          observedAt: input.observedAt,
+          resolvedAt: null,
+        };
+        state.decisions.push(record);
+        return record;
+      },
+      async resolve(projectId, decisionRef, option, resolvedBy, resolvedAt) {
+        const index = state.decisions.findIndex(
+          (entry) =>
+            entry.projectId === projectId &&
+            entry.decisionRef === decisionRef &&
+            entry.status === "open",
+        );
+        const decision = state.decisions[index];
+        if (index < 0 || !decision) return null;
+
+        const updated: AdeDecisionRecord = {
+          ...decision,
+          status: "resolved",
+          resolvedOption: option,
+          resolvedBy,
+          resolvedAt,
+        };
+        state.decisions[index] = updated;
+        return updated;
+      },
+    },
     projects: {
       async getById(projectId) {
         return state.projects.find(({ id }) => id === projectId) ?? null;
+      },
+      async getByRepositoryId(repositoryId) {
+        return state.projects.find((entry) => entry.repositoryId === repositoryId) ?? null;
       },
       async list() {
         return [...state.projects];
