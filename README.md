@@ -85,6 +85,11 @@ Recommended first implementation task: **GitHub issue #2 — PostgreSQL persiste
 
 Then follow [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
 
+Persistence commands:
+
+- `pnpm --filter @ade-control-plane/database migrate` applies versioned PostgreSQL migrations using `DATABASE_URL` or `DATABASE_URL_FILE`.
+- `pnpm --filter @ade-control-plane/database test` runs the PostgreSQL integration suite when `TEST_DATABASE_URL` is set.
+
 ## Documentation
 
 The complete documentation index is in [`docs/README.md`](docs/README.md).
