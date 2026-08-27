@@ -1,0 +1,21 @@
+[Unit]
+Description=ADE Control Plane raspberry-local runner
+After=network.target
+
+[Service]
+Type=simple
+User=ade-runner
+Group=ade-runner
+RuntimeDirectory=ade-control-plane-runner
+RuntimeDirectoryMode=0750
+EnvironmentFile=/etc/ade-control-plane-runner/runner.env
+ExecStart=/usr/bin/node /opt/ade-control-plane/runner/server.mjs
+Restart=on-failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/ade-workspaces /run/ade-control-plane-runner
+
+[Install]
+WantedBy=multi-user.target

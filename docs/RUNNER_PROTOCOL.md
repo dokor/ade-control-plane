@@ -52,6 +52,8 @@ control-plane worker
 
 The host runner owns the socket. Filesystem owner/group/mode restrict who can connect. The worker container receives access only to the narrow runtime directory/socket, never to the host filesystem broadly.
 
+The MVP systemd unit template is [`../deploy/systemd/ade-control-plane-runner.service`](../deploy/systemd/ade-control-plane-runner.service). It runs as the dedicated `ade-runner` account, creates `/run/ade-control-plane-runner` with mode `0750`, and only grants write access to the configured workspace root and runtime directory. The production service entrypoint must bind the UDS through `@ade-control-plane/runner-protocol`; it must not add a TCP listener.
+
 Use a simple typed request protocol over the socket; HTTP over UDS is acceptable because Node supports Unix socket clients/servers and it avoids inventing custom network framing.
 
 ### Why UDS for the MVP
