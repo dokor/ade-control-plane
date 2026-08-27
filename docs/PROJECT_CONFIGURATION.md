@@ -6,11 +6,14 @@ A project registration tells ADE Control Plane how to supervise one ADE-managed 
 
 Project configuration is orchestration metadata only.
 
+A project may be **existing or new**. The Control Plane must not care how the repository was created; it only requires a valid repository mapping plus supported ADE control-plane entry points/capabilities.
+
 ## Principles
 
 - configuration must be versioned;
 - project identity is stable and explicit;
 - repository identity is explicit;
+- existing and newly initialized ADE projects use the same registration contract;
 - local workspace details are runner-owned where possible;
 - required runner capabilities are declarative;
 - quota/scheduling overrides are optional and bounded;
@@ -40,6 +43,11 @@ scheduling:
 ade:
   adapter: local-runner
   projectRef: argos
+  requiredCapabilities:
+    - status
+    - runnable-work
+    - advance
+    - apply-decision
 
 runner:
   preferred: raspberry-local
@@ -71,6 +79,8 @@ Recommended fields:
 - default branch only if useful for display/integration routing.
 
 GitHub repository mapping is used for routing and authorization, not as the only internal identity.
+
+The same mapping applies whether ADE was introduced at repository creation or later on an existing project.
 
 ## Scheduling configuration
 
@@ -120,7 +130,11 @@ Possible fields:
 
 - adapter kind/version;
 - opaque `projectRef` understood by the runner/ADE adapter;
-- required ADE capability version.
+- required ADE capability version;
+- supported entry points such as status, runnable-work, advance and apply-decision;
+- optional capability for GitHub-backed work references when ADE exposes it.
+
+A project is orchestration-compatible when the configured ADE adapter can successfully negotiate the required capability/version contract. It does **not** need to have been scaffolded by ADE Control Plane.
 
 Do not store:
 
@@ -168,6 +182,8 @@ Registration must reject:
 - duplicate slug/repository identity conflicts;
 - invalid priority range;
 - unknown adapter;
+- missing required ADE entry points/capabilities;
+- incompatible ADE capability/version negotiation;
 - impossible runner capability schema;
 - secret-looking values in fields intended only for references where detectable;
 - direct host absolute paths in control-plane-managed configuration if runner-local mapping is the selected design.
@@ -176,14 +192,15 @@ Registration must reject:
 
 Suggested Dashboard flow:
 
-1. enter/select GitHub repository;
+1. enter/select any GitHub repository, existing or new;
 2. choose project slug/name;
-3. verify ADE project reference through runner capability check;
-4. inspect compatible runners;
-5. set priority;
-6. save project disabled or paused initially;
-7. run read-only `ade.status` health check;
-8. explicitly enable scheduling.
+3. configure ADE project reference/adapter;
+4. negotiate required ADE entry points/capabilities read-only;
+5. inspect compatible runners;
+6. set priority;
+7. save project disabled or paused initially;
+8. run read-only `ade.status` + runnable-work compatibility check;
+9. explicitly enable scheduling.
 
 The first registration should not immediately start privileged development work before configuration/health verification succeeds.
 
