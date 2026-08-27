@@ -96,21 +96,28 @@ The repository already contains significant advanced foundations. Keep them, but
 ## Completed foundations
 
 - #2 durable PostgreSQL control-plane state;
+- #3 transport-independent ADE adapter;
 - #5 deterministic runner-aware scheduler;
 - #6 crash-safe worker/recovery;
+- #7 authenticated global supervision Dashboard/control API;
 - #11 secure typed runner/UDS foundation.
 
-The ADE adapter implementation also exists and should remain transport-independent.
+Do not reopen or rebuild these unless a concrete defect or missing acceptance path is identified.
 
-## Post-V0 order
+## Remaining post-V0 order
 
-1. finish/verify ADE integration edge cases where needed;
-2. finish real Codex quota ingestion (#4);
-3. finish global supervision Dashboard gaps if any (#7);
-4. GitHub project command/notification interface (#8);
-5. full security release gates (#10);
-6. advanced Raspberry control-plane topology/deployment (#9) if still distinct from #26;
-7. remote runners/multi-machine only after real need appears.
+Two tracks can begin independently after V0:
+
+1. #4 — connect the **real Codex quota source** to the already implemented quota domain;
+2. #8 — implement the GitHub App/webhook command and notification surface.
+
+Then:
+
+3. #10 — close the full security/release-hardening gates once GitHub and deployment-facing surfaces exist;
+4. #9 — complete the advanced H24 Raspberry topology/deployment after #10;
+5. remote runners/multi-machine only after a demonstrated need.
+
+#9 remains distinct from #26: #26 ships the first simple V0; #9 validates the stronger long-running control-plane topology and operational hardening.
 
 ## Invariants across both V0 and advanced work
 
