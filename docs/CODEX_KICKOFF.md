@@ -1,90 +1,119 @@
 # Codex Kickoff
 
-## Current priority: production V0
+## Current priority: deploy the production V0
 
-The immediate target is **Dashboard → one Codex task → branch → PR → logs**.
+The immediate target remains **Dashboard → one Codex task → branch → PR → logs**, but #23, #24 and #25 are already merged.
 
-Do not start from the old advanced-roadmap order. Use the current issue sequence below.
+The next implementation issue is therefore **#26**.
 
-## 1. Start with #23
+## 1. Work on #26 — first Raspberry deployment
 
 Suggested prompt:
 
 ```text
-Work on issue #23 in dokor/ade-control-plane.
+Work on issue #26 in dokor/ade-control-plane.
 
-Before changing code, read AGENTS.md, docs/IMPLEMENTATION_PLAN.md, docs/DATA_MODEL.md, docs/SECURITY.md and the issue body.
+Before changing code, read:
+- AGENTS.md
+- docs/PRODUCT_TARGET.md
+- docs/FIRST_DEPLOYMENT.md
+- docs/SECRET_MATRIX.md
+- docs/RELEASE_CHECKLIST.md
+- docs/OPERATIONS.md
+- docs/SECURITY.md
+- issue #26 and its latest comments
 
-Goal: implement the minimal V0 task/execution path using the existing PostgreSQL project registry and persistence. We need project + prompt submission, exactly one active execution, PENDING/RUNNING/SUCCESS/FAILED/CANCELLED semantics, bounded sanitized logs, history/detail and cancel intent.
+#23, #24 and #25 are already merged. Do not rebuild the task API, V0 Codex worker or task Dashboard unless #26 reveals a concrete deployment bug.
 
-Keep the change focused on #23. Do not implement Codex execution, the task Dashboard, Docker deployment, quota routing, advanced fairness or remote runners in this issue.
+Goal: package the existing V0 for the real Raspberry Pi 5 / ARM64 target with Dashboard/control API, worker and PostgreSQL, persistent SSD-backed data, runtime secret injection, healthchecks/restart policy, private DB/worker networking, no Docker socket and the existing reverse-proxy/TLS model.
 
-Preserve the existing advanced execution/recovery model where useful instead of replacing it unnecessarily. Add migrations/contracts only where V0 task semantics need them.
+The final acceptance is not only `docker compose up -d`. Follow docs/FIRST_DEPLOYMENT.md and prove a real deployed Dashboard task reaches Codex, modifies only the allow-listed repository, creates ade/<task-id>, pushes a commit and opens a real GitHub PR. Then verify restart/reboot preserves history.
 
-Run pnpm typecheck and pnpm test. Add tests for single-active-execution concurrency/idempotence and unsafe log/prompt handling.
+Keep deployment changes focused. Do not add Kubernetes, Redis, distributed runners, multi-provider routing or automatic production deployment of generated projects.
 
-When complete, open a PR that closes #23 and clearly documents persistence, failure/recovery and security behavior.
+Run pnpm typecheck/tests plus Compose/build validation. Document any Raspberry-only manual validation that cannot run in GitHub-hosted CI.
+
+When complete, open a PR that closes #26 only if the real Raspberry acceptance evidence is available; otherwise merge the deployable code and leave #26 open with the remaining runtime proof clearly documented.
 ```
 
-## 2. Then #24 — real Codex → PR
+## 2. After the manual deployment — #36 automatic Control Plane deployment
 
 ```text
-Work on issue #24 after #23 is merged.
+Work on issue #36 only after the #26 deployment path has been proven manually.
 
-Read AGENTS.md, docs/IMPLEMENTATION_PLAN.md, docs/SECURITY.md and issue #24.
+Read docs/CD_DEPLOYMENT.md, docs/SECRET_MATRIX.md, docs/RELEASE_CHECKLIST.md and issue #36.
 
-Implement the smallest real Codex execution path for one registered/allowed project: prepare checkout, create ade/<task-id>, launch Codex without shell interpolation, capture bounded sanitized logs, support timeout/cancel, commit, push and create a GitHub PR. Persist terminal status and PR reference through the #23 execution model.
-
-Do not add multi-agent routing, fairness, quota scheduling, auto-merge or distributed runners.
+Implement GitHub Actions CD from a trusted successful main SHA to the Raspberry using the documented dedicated ade-deploy identity and a narrow allow-listed host deploy wrapper. Do not grant generic sudo/root/Docker authority to the Actions runner. Serialize deployments, run controlled migrations/update, verify healthchecks, record the deployed SHA and keep a documented manual fallback/rollback path.
 ```
 
-## 3. #25 can run in parallel after #23
+## 3. Then connect real Codex quota — #4
 
 ```text
-Work on issue #25 after #23 is merged. You may use a fake execution adapter while #24 is in progress.
+Work on issue #4 after the first deployment is stable enough to exercise real quota reads.
 
-Build the task-oriented mobile Dashboard flow: select project, enter prompt, Run, current status, Stop, recent history, execution logs/detail and PR link. Keep polling simple. Reuse the existing authentication/session/security infrastructure.
+Read docs/QUOTA_HISTORY.md and issue #4.
 
-Do not make advanced quota/runner/scheduler controls a prerequisite for submitting a V0 task.
+Connect the real supported Codex/App Server quota source behind the existing provider adapter. Persist one normalized successful snapshot per useful observation, keep a rolling 30-day history, never invent missing percentages, preserve freshness/stale semantics and expose only normalized safe data to scheduling/Dashboard.
 ```
 
-## 4. Finish the V0 with #26
+## 4. Then multi-project orchestration — #37
 
 ```text
-Work on issue #26 only after #23, #24 and #25 are merged.
+Work on issue #37 after #26 is proven and preferably after real quota observation is available.
 
-Package the V0 for Raspberry/ARM64 with Dashboard, worker and PostgreSQL, persistent data, runtime secrets, healthchecks/restart policy, no public DB/worker port and no Docker socket. Document install/update/restart/backup.
+Read docs/PRODUCT_TARGET.md, docs/PROJECT_ONBOARDING.md, docs/MULTI_PROJECT_ACCEPTANCE.md, docs/SCHEDULER.md, docs/GITHUB_INTEGRATION.md and issue #37.
 
-The final acceptance test is real: from the deployed Dashboard, submit a task and obtain a GitHub PR with visible logs/status.
+Goal: move from the single-task production V0 to the intended always-on ADE orchestrator across X existing/new ADE-compatible projects. ADE remains source of truth for project-local ordering/runnable state. The Control Plane builds only a derived global queue/read model, chooses among ADE-reported runnable work and continues other projects while one waits for human input.
+
+Do not reconstruct ADE's delivery graph from GitHub issue text or labels.
 ```
 
-## 5. Close #1 after the real end-to-end proof
+## 5. Finish GitHub proactive attention flow — #8
 
-#1 is the V0 umbrella. It closes only when the deployed Dashboard/mobile flow produces a real GitHub PR and survives restart with its history intact.
+The inbound GitHub command path is already largely implemented. The remaining important behavior is proactive project-scoped notification when ADE/worker reports meaningful human attention, such as waiting-human or intervention-required failure.
+
+Use `docs/GITHUB_APP_SETUP.md` and `docs/GITHUB_INTEGRATION.md` as the contract.
+
+## 6. Advanced H24 qualification
+
+After the useful multi-project product loop works:
+
+- #11 — complete the real secure host runner service/executor integration;
+- #10 — demonstrate remaining security/release gates with runtime evidence;
+- #9 — qualify the advanced always-on Raspberry topology/operations.
 
 ## Already completed foundations
 
-Do not reopen or reimplement these unless a concrete V0 bug requires it:
+Do not reopen or reimplement these unless a concrete bug requires it:
 
 - #2 PostgreSQL durable state;
-- #3 ADE adapter;
-- #5 deterministic scheduler;
-- #6 crash-safe worker/recovery;
-- #7 global supervision Dashboard/control API.
+- #3 typed ADE adapter foundation;
+- #5 deterministic scheduler foundation;
+- #6 crash-safe worker/recovery foundation;
+- #7 global supervision Dashboard/control API;
+- #23 V0 task/execution API;
+- #24 V0 real Codex → branch/commit/push/PR code path;
+- #25 task-oriented Dashboard.
 
-The secure runner **protocol foundation** exists, but #11 has been reopened because the real host-service executor/integration is still incomplete.
+The secure runner protocol foundation also exists, but #11 remains open because the complete host runtime/executor integration is not yet qualified.
 
-## Post-V0
+## Product target reminder
 
-Remaining advanced roadmap issues are not blockers for #23–#26:
+The single-task V0 is a deployment milestone, not the final product.
 
-- #4 real Codex quota ingestion;
-- #8 GitHub project commands/notifications;
-- #11 complete host runner service/integration;
-- #10 full release-hardening/security closure after #8/#11;
-- #9 advanced Raspberry topology/deployment after #10.
+The target remains:
 
-Security is still continuous: minimum safe auth, secret handling, sanitization, process isolation and network exposure rules remain mandatory in the V0.
+```text
+X ADE-compatible projects
+→ ADE reports project-local runnable work / human gates
+→ Control Plane builds global queue
+→ scheduler chooses next eligible project/work item
+→ ADE executes
+→ GitHub issues/PRs/decisions carry project interaction
+→ Dashboard supervises progress, queues, human attention, quota history and runner health
+```
+
+A `waiting-human` project must not freeze unrelated runnable projects.
 
 ## Review questions after each Codex PR
 
@@ -98,3 +127,4 @@ Ask:
 - Is every privileged mutation auditable?
 - Are retries safe or should they reconcile first?
 - Did the change introduce a new public/privileged capability that needs threat-model documentation?
+- Does this move us toward the multi-project product target rather than only polishing the V0?
