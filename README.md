@@ -1,160 +1,128 @@
 # ADE Control Plane
 
-ADE Control Plane is the multi-project orchestration layer that supervises AI Delivery Engine (ADE) projects.
+ADE Control Plane is a small always-on control surface for launching AI coding work against registered projects and following the result from a Dashboard.
 
-ADE remains responsible for understanding and executing work inside a single project. ADE Control Plane stays above that boundary: it decides which project should run, on which runner, under which quota policy, and exposes the global state through the Dashboard and GitHub.
+## V0 mission
 
-## Responsibility boundary
-
-### ADE owns
-
-- project understanding and context packs;
-- delivery graph and project-level `ProjectRun` state;
-- execution loops for one task or graph node;
-- agent/provider execution contracts;
-- worktrees, Git changes, tests, quality gates and PR preparation;
-- project-level human decisions and delivery evidence.
-
-### ADE Control Plane owns
-
-- registry of managed projects;
-- scheduling and prioritization across projects;
-- global provider/quota policies;
-- runner selection and availability;
-- pause/resume/priority controls across projects;
-- global persistence, leases and audit events;
-- GitHub control and notification integration;
-- the multi-project Dashboard.
-
-The control plane must not duplicate ADE's project delivery logic. It consumes ADE through a stable adapter/client contract.
-
-## Human interfaces
-
-The product has exactly two human-facing surfaces:
-
-- **Dashboard** for global supervision and control;
-- **GitHub** for project-level interactions around issues, PRs, validations and targeted decisions.
-
-## Target deployment
-
-The first production target is a Raspberry Pi 5 running continuously with an SSD.
-
-The selected architecture keeps the privileged execution runner outside the control-plane containers:
+Ship one useful loop before adding orchestration features:
 
 ```text
-User
-  │
-  ├── Dashboard
-  └── GitHub
-        │
-        ▼
-Docker Compose
-  ├── Dashboard / control API
-  ├── control-plane worker
-  └── PostgreSQL
-        │
-        │ typed + authenticated runner protocol
-        ▼
-Host: raspberry-local runner
-  ├── ADE
-  ├── Codex
-  ├── Git
-  └── isolated project workspaces/build tooling
+Dashboard
+→ choose project
+→ describe task
+→ create execution
+→ one Codex worker runs
+→ branch ade/<task-id>
+→ commit + push
+→ GitHub pull request
+→ Dashboard shows status + logs + PR link
 ```
 
-The worker never receives generic host-shell or Docker-socket privilege.
+The V0 is successful when this flow runs reliably on the Raspberry and can be started from a phone.
 
-## MVP
+## Scope rule
 
-1. Register multiple ADE projects.
-2. Persist global control state, leases and audit history in PostgreSQL.
-3. Ask ADE which projects have runnable work through a stable adapter.
-4. Read real provider/Codex quota state and apply deterministic quota policy.
-5. Select a compatible runner/project deterministically.
-6. Dispatch typed ADE capabilities to the secure host runner.
-7. Survive crashes/restarts through reconciliation without duplicate privileged work.
-8. Expose global state and controls in the Dashboard.
-9. Use GitHub for project-level notifications and targeted commands/decisions.
-10. Deploy the control plane through Docker Compose and the runner through systemd on Raspberry Pi 5.
+Before the first production deployment, every feature must answer:
 
-## Start developing
+> Is this required for Dashboard → Codex → PR?
 
-For Codex or any automated coding agent, read [`AGENTS.md`](AGENTS.md) first.
+If not, it is post-V0.
 
-Recommended first implementation task: **GitHub issue #2 — PostgreSQL persistence / project registry / leases / audit**.
+### Included in V0
 
-Then follow [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+- registered projects;
+- one active execution at a time;
+- Codex as the only coding agent;
+- PostgreSQL persistence already present in the repository;
+- execution states `PENDING | RUNNING | SUCCESS | FAILED | CANCELLED`;
+- bounded/sanitized logs;
+- dedicated Git branch per task;
+- commit, push and GitHub PR creation;
+- minimal mobile-friendly Dashboard;
+- Stop/Cancel;
+- Docker Compose deployment on Raspberry;
+- minimum production security: protected Dashboard, private DB/worker, no Docker socket, secrets outside prompts/logs/repository.
 
-Persistence commands:
+### Explicitly post-V0
 
-- `pnpm --filter @ade-control-plane/database migrate` applies versioned PostgreSQL migrations using `DATABASE_URL` or `DATABASE_URL_FILE`.
-- `pnpm --filter @ade-control-plane/database test` runs the PostgreSQL integration suite when `TEST_DATABASE_URL` is set.
+- multiple agents/providers;
+- Claude/Gemini routing;
+- quota/cost routing;
+- advanced multi-project scheduling/fairness;
+- concurrent tasks;
+- Git worktrees;
+- reviewer agents;
+- auto-merge;
+- GitHub commands as a control interface;
+- Redis/Kafka/Kubernetes;
+- complex MCP integration;
+- local models;
+- distributed runners;
+- advanced UDS/HMAC runner protocol unless production usage demonstrates it is required.
 
-## Documentation
+Existing documentation and issues describing these capabilities are retained as roadmap material. They are not dependencies for V0 unless issue #1 says otherwise.
 
-The complete documentation index is in [`docs/README.md`](docs/README.md).
+## V0 delivery order
 
-Core references:
+Work issue-first in this order:
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — boundaries and topology;
-- [`docs/MVP.md`](docs/MVP.md) — MVP acceptance criteria;
-- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model and release-blocking gates;
-- [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) — durable state and transactions;
-- [`docs/STATE_MACHINES.md`](docs/STATE_MACHINES.md) — explicit execution/recovery states;
-- [`docs/RUNNER_PROTOCOL.md`](docs/RUNNER_PROTOCOL.md) — privileged host boundary;
-- [`docs/DASHBOARD.md`](docs/DASHBOARD.md) — global control surface;
-- [`docs/GITHUB_INTEGRATION.md`](docs/GITHUB_INTEGRATION.md) — project interaction surface;
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — Raspberry operations/runbook;
-- [`docs/TESTING_STRATEGY.md`](docs/TESTING_STRATEGY.md) — mandatory crash/security scenarios;
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — accepted architecture decisions.
+1. **#23** — task/execution API with one active job;
+2. **#24** — run Codex and produce a branch/PR;
+3. **#25** — minimal mobile-friendly Dashboard;
+4. **#26** — Raspberry Docker Compose deployment.
 
-## Repository layout
+Issue **#1** is the source of truth for V0 scope and Definition of Done.
+
+## Existing persistence
+
+PostgreSQL persistence has already been implemented. Keep it. Replacing it with SQLite would add migration work without improving the first user flow.
+
+Useful commands:
+
+- `pnpm --filter @ade-control-plane/database migrate`
+- `pnpm --filter @ade-control-plane/database test`
+- `pnpm typecheck`
+- `pnpm test`
+
+## Architecture boundary
+
+ADE may still own project-specific delivery logic where it is used. ADE Control Plane should not recreate project delivery graphs or project-specific planning.
+
+For V0, the control plane only needs enough project configuration to safely launch Codex in an allow-listed repository and record the resulting execution/PR.
+
+## Security baseline
+
+Keep security simple but real:
+
+- never commit provider/GitHub credentials;
+- never put secrets or full environments into model prompts or persisted logs;
+- do not mount `/var/run/docker.sock` into the Dashboard or worker;
+- keep PostgreSQL and worker private;
+- protect the Dashboard before exposing it through the reverse proxy;
+- only operate on explicitly registered/allow-listed repositories;
+- pass process arguments without shell interpolation of user prompts;
+- bound and sanitize stdout/stderr;
+- do not auto-merge generated PRs in V0.
+
+The more advanced threat model in `docs/SECURITY.md` remains useful roadmap guidance, but V0 must not be blocked by controls for capabilities that V0 does not expose.
+
+## Repository
 
 ```text
 apps/
-  worker/          long-running control-plane scheduler/daemon
-  dashboard/       Next.js Dashboard and control API
+  worker/          executes the single active coding task
+  dashboard/       minimal Dashboard + control API (V0 work)
 packages/
-  core/            project registry and scheduler domain
-  ade-client/      adapter contract between the control plane and ADE
-  quota/           provider usage and quota policy
-  runners/         secure runner contracts/adapters
-  github/          GitHub webhook, commands and notification integration
-  security/        auth, authorization, signing/redaction helpers
-  database/        persistence contracts and migrations
+  database/        PostgreSQL persistence
+  core/            reusable domain primitives where still useful
+  ade-client/      existing ADE boundary; keep only what V0 actually needs
+  quota/           roadmap code; not on the V0 critical path
 docs/
-  ...              architecture, contracts, security and operations
+  MVP.md            V0 source of truth together with issue #1
 ```
 
-Some packages/apps are planned and will be created by their implementation issues rather than as empty abstractions.
+Do not create abstractions or packages solely because they appear in older architecture documents.
 
-## Engineering principles
+## For coding agents
 
-- No project-specific delivery logic belongs in this repository.
-- ADE is accessed through explicit, versioned contracts.
-- State required for crash recovery is persisted before acknowledging a privileged transition.
-- Scheduling is deterministic and explainable.
-- Quota and budget limits are hard control-plane gates, never hints to an LLM.
-- Runners use least privilege and do not expose secrets to model context.
-- Raspberry-first does not mean Raspberry-only: runner capabilities stay abstracted.
-- Dashboard and GitHub share a typed command/audit model; neither contains scheduling rules.
-- Ambiguous execution outcome becomes `unknown/reconciling`, never an automatic retry.
-- Security issue #10 is release-blocking for the H24 deployment.
-
-## Current backlog
-
-- #1 — MVP epic;
-- #2 — persistence / registry / leases / audit;
-- #3 — ADE adapter;
-- #4 — Codex/provider quota adapter;
-- #5 — runner-aware scheduler;
-- #6 — crash-safe H24 worker;
-- #7 — Dashboard/control API;
-- #8 — GitHub commands/notifications;
-- #9 — Raspberry Docker Compose deployment;
-- #10 — security architecture and release gates;
-- #11 — secure host runner/protocol.
-
-## Status
-
-Architecture, threat model, implementation plan, durable-state model, runner protocol, Dashboard/GitHub contracts, operations runbook and testing strategy are prepared. The next code milestone is issue #2.
+Read `AGENTS.md` and the target GitHub issue before making changes. The current V0 issue must override legacy implementation ordering in older docs.

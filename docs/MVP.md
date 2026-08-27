@@ -1,161 +1,158 @@
-# MVP
+# MVP V0
 
 ## Goal
 
-Prove that one always-on Raspberry can supervise several ADE projects, respect provider quotas, survive restarts and expose useful progress without moving project-delivery responsibility out of ADE.
+Put ADE Control Plane in production quickly by proving one complete, useful coding loop.
 
-## Human interfaces
-
-The MVP exposes exactly two human-facing interfaces:
-
-- **Dashboard** for global supervision and control;
-- **GitHub** for project-level interactions around issues, PRs, validations and targeted decisions.
-
-## End-to-end scenario
-
-The MVP is complete when this flow works:
+V0 is complete when this works reliably:
 
 ```text
-Raspberry boots
-→ worker loads registered projects
-→ worker refreshes quota state
-→ worker asks ADE which projects have runnable work
-→ scheduler selects one project deterministically
-→ worker acquires a lease
-→ worker selects the host runner
-→ worker asks ADE to advance one unit of work
-→ ADE executes/coordinates the project-level work through the runner
-→ control plane persists the result and timeline
-→ Dashboard reflects the new state
-→ if a targeted human decision is required, expose it in Dashboard and/or GitHub
-→ otherwise select the next project
-→ if quota policy blocks new work, wait until reset
-→ after restart, reconcile and resume without replaying completed work
+User opens Dashboard
+→ selects a registered project
+→ enters a task
+→ presses Run
+→ execution is persisted
+→ one Codex worker starts
+→ branch ade/<task-id> is created
+→ Codex changes the repository and runs its checks
+→ changes are committed and pushed
+→ GitHub pull request is opened
+→ Dashboard shows final status, logs and PR link
 ```
 
-## MVP scope
+The flow must be usable from a phone and run on the Raspberry deployment target.
 
-### Included
+## Included
 
-- monorepo TypeScript;
-- project registry;
-- ADE client contract and local adapter;
-- deterministic multi-project scheduler;
-- normalized quota model and policy engine;
-- Raspberry host runner registration/capabilities;
-- PostgreSQL persistence;
-- long-running worker with leases/restart recovery;
-- Dashboard with project list, status, timeline, quotas and control actions;
-- pause/resume/reprioritize controls;
-- GitHub integration for project-level notifications, commands and targeted decisions;
-- Docker Compose deployment for the control plane on Raspberry Pi 5/ARM64;
-- isolated runner service on the Raspberry host;
-- security release gates from `docs/SECURITY.md`.
+- registered projects;
+- task prompt entry;
+- one active execution globally;
+- Codex only;
+- PostgreSQL persistence already present in the repository;
+- states `PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `CANCELLED`;
+- bounded/sanitized execution logs;
+- dedicated Git branch per task;
+- commit + push + GitHub PR creation;
+- Stop/Cancel for the active task;
+- execution history;
+- minimal responsive Dashboard;
+- polling for status/log refresh;
+- Docker Compose deployment on Raspberry/ARM64;
+- minimum security required for this exact attack surface.
 
-### Explicitly deferred
+## Explicitly deferred
 
-- multiple simultaneous workers across several machines;
-- Kubernetes;
-- Redis unless PostgreSQL proves insufficient;
-- automatic production deployment;
-- control-plane interpretation of ADE delivery graphs;
-- control-plane prompts or specialist agents;
-- complex billing/cost accounting;
-- advanced fairness algorithms.
+The following do not block V0:
 
-## Initial scheduling policy
+- multi-agent and provider routing;
+- Claude/Gemini integrations;
+- quota/cost manager;
+- advanced multi-project scheduler;
+- fairness/aging/priority scoring;
+- concurrent tasks;
+- Git worktrees;
+- reviewer agents;
+- automatic merge;
+- GitHub comments/webhooks as a control interface;
+- Redis, Kafka or Kubernetes;
+- distributed workers/runners;
+- local AI models;
+- complex MCP orchestration;
+- advanced runner protocol/HMAC/UDS unless a real V0 deployment blocker requires it.
 
-For the first implementation, keep selection explainable:
+Older docs/issues describing these capabilities are retained as roadmap material only.
 
-1. discard disabled or paused projects;
-2. discard projects for which ADE reports no runnable work;
-3. discard projects blocked by global quota policy;
-4. discard projects with no compatible available runner;
-5. discard work with an active lease;
-6. order by explicit project priority descending;
-7. break ties by oldest successful execution / longest waiting time;
-8. acquire a lease before dispatch.
+## Why PostgreSQL stays
 
-The selected project records a human-readable selection reason.
+PostgreSQL persistence has already landed. Replacing working persistence with SQLite would consume time without improving the V0 user experience. V0 simplification applies to **new complexity**, not finished infrastructure.
 
-## Initial quota policy
+## Execution model
 
-Use normalized thresholds configurable per provider/account. A reasonable default for Codex-style windows:
+There is exactly one active execution slot.
 
-| Usage | State | Behaviour |
-| --- | --- | --- |
-| < 70% | normal | normal scheduling |
-| 70–85% | throttled | single execution, avoid low-priority work |
-| 85–95% | draining | finish current work, only short/high-priority work |
-| >= 95% | blocked | start nothing until reset |
+A second task may be recorded as pending only if the chosen implementation explicitly supports it; otherwise the API should reject the request clearly. V0 does not need a general queue scheduler.
 
-These thresholds are policy, not assumptions about provider guarantees, and must remain configurable.
-
-## Dashboard V1
-
-### Global view
-
-- provider quota gauges and reset time;
-- runner health;
-- projects ordered by current scheduling priority;
-- current status: running, ready, waiting-human, waiting-quota, paused, failed, completed;
-- current work and next work summary from ADE;
-- latest event and last successful execution.
-
-### Project view
-
-- ADE-reported delivery stage/milestone;
-- current node/task;
-- global scheduling state;
-- execution timeline;
-- waiting reason;
-- quota/runner used for recent executions;
-- pause/resume and priority controls;
-- link to repository/PR/decision when available.
-
-## GitHub V1
-
-GitHub complements the Dashboard instead of duplicating it.
-
-It should support:
-
-- targeted notifications on issues/PRs when human input is required;
-- status, pause, resume, retry, priority and decision commands where appropriate;
-- actor authorization and repository scoping;
-- signed/deduplicated webhook processing;
-- links back to the Dashboard for global state and controls.
-
-## First deployment
-
-Target architecture:
+Minimum transitions:
 
 ```text
-Docker Compose
-├── dashboard / control API
-├── control-plane worker
-└── PostgreSQL
-
-Raspberry host
-└── raspberry-local runner
-    ├── ADE
-    ├── Codex
-    ├── Git
-    └── project worktrees/build tooling
+PENDING → RUNNING → SUCCESS
+                  ↘ FAILED
+                  ↘ CANCELLED
 ```
 
-The reverse proxy terminates TLS and exposes only the Dashboard/control API. PostgreSQL and worker stay private. The runner is a separate host service and is never publicly exposed.
+No automatic retry is required.
+
+## Git behavior
+
+For each execution:
+
+1. resolve the project through an allow-listed configuration;
+2. prepare the local checkout safely;
+3. create `ade/<task-id>` from the configured base branch;
+4. launch Codex without shell-interpolating the user prompt;
+5. capture bounded/sanitized logs;
+6. on successful useful changes, commit and push;
+7. create a GitHub PR against the configured base branch;
+8. persist branch and PR metadata.
+
+V0 never pushes generated changes directly to the base branch and never auto-merges the PR.
+
+## Dashboard V0
+
+A single simple surface is enough:
+
+- project selector;
+- task textarea;
+- Run button;
+- current execution/status;
+- Stop button while running;
+- recent executions;
+- execution logs/detail;
+- PR link when available.
+
+Polling is preferred over SSE/WebSockets until production usage proves it insufficient.
+
+## Security baseline
+
+Release-blocking for V0:
+
+- no provider/GitHub credentials committed;
+- no secrets/full environment persisted in logs or passed to model context;
+- Dashboard protected before external exposure;
+- worker and PostgreSQL private;
+- no Docker socket mounted;
+- repository execution is allow-list based;
+- prompts are not interpolated into shell command strings;
+- stdout/stderr are bounded and sanitized;
+- cancellation only targets the active execution process;
+- generated PRs require human review/merge.
+
+Controls that protect capabilities not present in V0 are roadmap items, not blockers.
+
+## Delivery issues
+
+1. #23 — task/execution API with a single active job;
+2. #24 — Codex execution and GitHub PR creation;
+3. #25 — minimal mobile-friendly Dashboard;
+4. #26 — Raspberry Docker Compose deployment.
 
 ## Acceptance criteria
 
-- at least two projects can be registered;
-- only one project is selected when a single runner slot is available;
-- scheduler output includes an explainable selection reason;
-- a quota block prevents dispatch and records the next eligible reset/check;
-- pausing one project lets another eligible project run;
-- worker restart does not duplicate completed execution;
-- a human-blocked ADE project is skipped until the decision is resolved;
-- Dashboard shows project status, recent timeline, runner and quota state;
-- GitHub can surface and resolve at least one targeted human-required state;
-- the control plane starts from Docker Compose on Raspberry ARM64 and persists PostgreSQL data on SSD-backed storage;
-- the isolated host runner can be restarted independently and reconciles safely with the control plane;
-- mandatory security gates are satisfied before the deployment is considered H24-ready.
+- [ ] A registered project can be selected from the Dashboard.
+- [ ] A task prompt can be submitted.
+- [ ] Only one execution is active at a time.
+- [ ] The execution reaches an explicit final status.
+- [ ] Codex runs against the allow-listed repository.
+- [ ] A dedicated `ade/<task-id>` branch is used.
+- [ ] Useful generated changes are committed and pushed.
+- [ ] A GitHub PR is created automatically after successful execution.
+- [ ] The Dashboard shows sanitized logs and the PR link.
+- [ ] Stop/Cancel terminates the active Codex execution cleanly.
+- [ ] Restarting services does not erase execution history.
+- [ ] `docker compose up -d` works on the Raspberry target.
+- [ ] The Dashboard is usable from a phone.
+- [ ] The full Dashboard → Codex → PR path has been exercised against a real test repository.
+
+## Scope gate
+
+Before first production, a proposed feature must be necessary for **Dashboard → Codex → PR**. Otherwise defer it until after V0 is running in real use.
