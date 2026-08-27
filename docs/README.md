@@ -20,7 +20,10 @@ Use this page as the entry point for design and implementation work.
 - [`DATA_MODEL.md`](DATA_MODEL.md) — PostgreSQL global-state model and transactional boundaries.
 - [`STATE_MACHINES.md`](STATE_MACHINES.md) — project eligibility, execution, runner, quota and command states.
 - [`CONTROL_COMMANDS.md`](CONTROL_COMMANDS.md) — unified Dashboard/GitHub mutation contract.
-- [`PROJECT_CONFIGURATION.md`](PROJECT_CONFIGURATION.md) — project onboarding/configuration semantics.
+- [`PROJECT_CONFIGURATION.md`](PROJECT_CONFIGURATION.md) — project configuration semantics.
+- [`PROJECT_ONBOARDING.md`](PROJECT_ONBOARDING.md) — one compatibility/onboarding path for existing and new ADE-managed repositories.
+- [`QUOTA_HISTORY.md`](QUOTA_HISTORY.md) — simple Codex quota observation, freshness and rolling 30-day retention contract.
+- [`MULTI_PROJECT_ACCEPTANCE.md`](MULTI_PROJECT_ACCEPTANCE.md) — black-box acceptance scenarios for the multi-project queue/orchestrator target.
 
 ## Interfaces and execution
 
@@ -29,12 +32,17 @@ Use this page as the entry point for design and implementation work.
 - [`V0_TASK_API.md`](V0_TASK_API.md) — minimal single-active task lifecycle and HTTP API.
 - [`V0_CODEX_WORKER.md`](V0_CODEX_WORKER.md) — allow-listed Codex/Git/PR execution flow.
 - [`GITHUB_INTEGRATION.md`](GITHUB_INTEGRATION.md) — GitHub App/webhook/command interaction model.
+- [`GITHUB_APP_SETUP.md`](GITHUB_APP_SETUP.md) — minimal GitHub App permissions, webhook and actor-authorization setup.
 
 ## Security, observability and operations
 
 - [`SECURITY.md`](SECURITY.md) — threat model and release-blocking security gates.
+- [`SECRET_MATRIX.md`](SECRET_MATRIX.md) — credential ownership, separation and rotation responsibilities.
+- [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) — production qualification checklist and evidence expected before release.
 - [`OBSERVABILITY.md`](OBSERVABILITY.md) — audit/log/metrics/freshness contract.
-- [`OPERATIONS.md`](OPERATIONS.md) — Raspberry deployment, backup/restore, upgrade and incident runbook.
+- [`OPERATIONS.md`](OPERATIONS.md) — Raspberry backup/restore, upgrade and incident runbook.
+- [`FIRST_DEPLOYMENT.md`](FIRST_DEPLOYMENT.md) — concrete #26 first-deployment and real E2E checklist.
+- [`CD_DEPLOYMENT.md`](CD_DEPLOYMENT.md) — #36 GitHub Actions/self-hosted Raspberry deployment security model.
 - [`TESTING_STRATEGY.md`](TESTING_STRATEGY.md) — test layers and mandatory failure/security scenarios.
 - [`DECISIONS.md`](DECISIONS.md) — accepted architecture decisions that should not be reopened casually.
 
