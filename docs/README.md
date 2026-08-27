@@ -7,6 +7,7 @@ Use this page as the entry point for design and implementation work.
 - [`../AGENTS.md`](../AGENTS.md) — mandatory instructions for Codex/automated coding agents.
 - [`CODEX_KICKOFF.md`](CODEX_KICKOFF.md) — ready-to-use kickoff prompts for issue #2 and later phases.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — responsibility boundaries and selected Raspberry topology.
+- [`ADE_ADAPTER.md`](ADE_ADAPTER.md) — versioned ADE client boundary and local CLI transport contract.
 - [`MVP.md`](MVP.md) — MVP scope and acceptance criteria.
 - [`FEATURES.md`](FEATURES.md) — product capabilities, MVP scope and later candidates.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — recommended development order.
