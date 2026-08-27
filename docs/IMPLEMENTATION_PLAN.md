@@ -99,23 +99,23 @@ The repository already contains significant advanced foundations. Keep them, but
 - #3 transport-independent ADE adapter;
 - #5 deterministic runner-aware scheduler;
 - #6 crash-safe worker/recovery;
-- #7 authenticated global supervision Dashboard/control API;
-- #11 secure typed runner/UDS foundation.
+- #7 authenticated global supervision Dashboard/control API.
 
-Do not reopen or rebuild these unless a concrete defect or missing acceptance path is identified.
+The `runner-protocol` package already provides substantial UDS/HMAC/replay/containment foundations, but #11 remains open until the real host-service executor and worker integration exist.
 
 ## Remaining post-V0 order
 
-Two tracks can begin independently after V0:
+Three tracks can begin independently after V0:
 
 1. #4 — connect the **real Codex quota source** to the already implemented quota domain;
-2. #8 — implement the GitHub App/webhook command and notification surface.
+2. #8 — implement the GitHub App/webhook command and notification surface;
+3. #11 — complete the real Raspberry host runner service/executor and worker↔UDS integration.
 
 Then:
 
-3. #10 — close the full security/release-hardening gates once GitHub and deployment-facing surfaces exist;
-4. #9 — complete the advanced H24 Raspberry topology/deployment after #10;
-5. remote runners/multi-machine only after a demonstrated need.
+4. #10 — close the full security/release-hardening gates once GitHub, runner and deployment-facing surfaces exist;
+5. #9 — complete the advanced H24 Raspberry topology/deployment after #10;
+6. remote runners/multi-machine only after a demonstrated need.
 
 #9 remains distinct from #26: #26 ships the first simple V0; #9 validates the stronger long-running control-plane topology and operational hardening.
 
