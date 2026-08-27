@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { submitControlCommand } from "../../../lib/commands.js";
+import { submitDashboardCommand } from "../../../lib/commands.js";
 import { loadDashboardConfig } from "../../../lib/config.js";
 import { getPersistence } from "../../../lib/persistence.js";
 import { sanitizeError } from "../../../lib/sanitize.js";
@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? (body as Record<string, unknown>)
         : {};
 
-    const outcome = await submitControlCommand(
+    const outcome = await submitDashboardCommand(
       {
         persistence: await getPersistence(),
         identity: session,

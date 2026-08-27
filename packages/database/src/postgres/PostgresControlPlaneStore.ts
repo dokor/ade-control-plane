@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 
 import type {
+  AdeDecisionInput,
+  AdeDecisionRepository,
   AuditEventInput,
   AuditEventRepository,
   ControlCommandReceiptInput,
@@ -14,6 +16,11 @@ import type {
   ExecutionCompletionInput,
   ExecutionLeaseRepository,
   ExecutionRepository,
+  GithubBotCommentRepository,
+  GithubDeliveryOutcome,
+  GithubDeliveryReceipt,
+  GithubDeliveryReceiptInput,
+  GithubDeliveryRepository,
   LeaseAcquisitionInput,
   ProjectRegistrationInput,
   ProjectRepository,
@@ -26,12 +33,19 @@ import type {
   ScheduleExecutionWithLeaseInput,
 } from "../contracts.js";
 import type {
+  AdeDecisionRecord,
+  AdeDecisionStatus,
   AuditEventRecord,
+  BotCommentPurpose,
   CompletionResult,
   ControlCommandRecord,
   ControlPlaneSettingsRecord,
   ExecutionLeaseRecord,
   ExecutionRecord,
+  GithubBotCommentRecord,
+  GithubDeliveryRecord,
+  GithubDeliveryStatus,
+  GithubSubjectType,
   JsonObject,
   JsonValue,
   ProjectControlState,
@@ -281,6 +295,275 @@ async function queryRequired<Row extends TimestampRow>(
   return expectOne(result.rows, notFoundMessage);
 }
 
+function mapGithubDelivery(row: TimestampRow): GithubDeliveryRecord {
+  return {
+    id: String(row.id),
+    deliveryId: String(row.delivery_id),
+    event: String(row.event),
+    action: String(row.action),
+    repositoryGithubId: String(row.repository_github_id),
+    projectId: row.project_id === null ? null : String(row.project_id),
+    actorRef: row.actor_ref === null ? null : String(row.actor_ref),
+    subjectType: row.subject_type === null ? null : (row.subject_type as GithubSubjectType),
+    subjectNumber: row.subject_number === null ? null : Number(row.subject_number),
+    commentId: row.comment_id === null ? null : String(row.comment_id),
+    status: row.status as GithubDeliveryStatus,
+    rejectionCode: row.rejection_code === null ? null : String(row.rejection_code),
+    controlCommandId:
+      row.control_command_id === null ? null : String(row.control_command_id),
+    receivedAt: toIsoString(row.received_at) ?? "",
+    processedAt: toIsoString(row.processed_at),
+  };
+}
+
+function mapGithubBotComment(row: TimestampRow): GithubBotCommentRecord {
+  return {
+    projectId: String(row.project_id),
+    purpose: row.purpose as BotCommentPurpose,
+    subjectType: row.subject_type as GithubSubjectType,
+    subjectNumber: Number(row.subject_number),
+    commentId: String(row.comment_id),
+    updatedAt: toIsoString(row.updated_at) ?? "",
+  };
+}
+
+function mapAdeDecision(row: TimestampRow): AdeDecisionRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    decisionRef: String(row.decision_ref),
+    prompt: String(row.prompt),
+    options: toStringArray(row.options),
+    status: row.status as AdeDecisionStatus,
+    resolvedOption: row.resolved_option === null ? null : String(row.resolved_option),
+    resolvedBy: row.resolved_by === null ? null : String(row.resolved_by),
+    observedAt: toIsoString(row.observed_at) ?? "",
+    resolvedAt: toIsoString(row.resolved_at),
+  };
+}
+
+class PostgresGithubDeliveryRepository implements GithubDeliveryRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async getByDeliveryId(deliveryId: string): Promise<GithubDeliveryRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      "SELECT * FROM github_deliveries WHERE delivery_id = $1",
+      [deliveryId],
+    );
+    return row ? mapGithubDelivery(row) : null;
+  }
+
+  public async recordReceipt(
+    input: GithubDeliveryReceiptInput,
+  ): Promise<GithubDeliveryReceipt> {
+    const inserted = await queryOptional(
+      this.pool,
+      `
+        INSERT INTO github_deliveries (
+          id, delivery_id, event, action, repository_github_id, project_id,
+          actor_ref, subject_type, subject_number, comment_id, status, received_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'received', $11)
+        ON CONFLICT (delivery_id) DO NOTHING
+        RETURNING *
+      `,
+      [
+        input.id ?? randomUUID(),
+        input.deliveryId,
+        input.event,
+        input.action,
+        input.repositoryGithubId,
+        input.projectId ?? null,
+        input.actorRef ?? null,
+        input.subjectType ?? null,
+        input.subjectNumber ?? null,
+        input.commentId ?? null,
+        input.receivedAt,
+      ],
+    );
+
+    if (inserted) {
+      return { record: mapGithubDelivery(inserted), duplicate: false };
+    }
+
+    const existing = await queryRequired(
+      this.pool,
+      "SELECT * FROM github_deliveries WHERE delivery_id = $1",
+      [input.deliveryId],
+      "Duplicate GitHub delivery could not be read back.",
+    );
+    return { record: mapGithubDelivery(existing), duplicate: true };
+  }
+
+  public async updateOutcome(
+    id: string,
+    outcome: GithubDeliveryOutcome,
+  ): Promise<GithubDeliveryRecord> {
+    const row = await queryRequired(
+      this.pool,
+      `
+        UPDATE github_deliveries
+        SET status = $2,
+            rejection_code = COALESCE($3, rejection_code),
+            control_command_id = COALESCE($4, control_command_id),
+            processed_at = COALESCE($5, processed_at)
+        WHERE id = $1
+        RETURNING *
+      `,
+      [
+        id,
+        outcome.status,
+        outcome.rejectionCode ?? null,
+        outcome.controlCommandId ?? null,
+        outcome.processedAt ?? null,
+      ],
+      "GitHub delivery could not be updated.",
+    );
+    return mapGithubDelivery(row);
+  }
+
+  public async listRecent(limit: number): Promise<readonly GithubDeliveryRecord[]> {
+    const result = await this.pool.query(
+      "SELECT * FROM github_deliveries ORDER BY received_at DESC LIMIT $1",
+      [boundedLimit(limit)],
+    );
+    return result.rows.map(mapGithubDelivery);
+  }
+}
+
+class PostgresGithubBotCommentRepository implements GithubBotCommentRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async find(
+    projectId: string,
+    purpose: BotCommentPurpose,
+    subjectType: GithubSubjectType,
+    subjectNumber: number,
+  ): Promise<GithubBotCommentRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      `
+        SELECT *
+        FROM github_bot_comments
+        WHERE project_id = $1 AND purpose = $2
+          AND subject_type = $3 AND subject_number = $4
+      `,
+      [projectId, purpose, subjectType, subjectNumber],
+    );
+    return row ? mapGithubBotComment(row) : null;
+  }
+
+  public async remember(
+    record: GithubBotCommentRecord,
+  ): Promise<GithubBotCommentRecord> {
+    const row = await queryRequired(
+      this.pool,
+      `
+        INSERT INTO github_bot_comments (
+          project_id, purpose, subject_type, subject_number, comment_id, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (project_id, purpose, subject_type, subject_number)
+        DO UPDATE SET comment_id = EXCLUDED.comment_id, updated_at = EXCLUDED.updated_at
+        RETURNING *
+      `,
+      [
+        record.projectId,
+        record.purpose,
+        record.subjectType,
+        record.subjectNumber,
+        record.commentId,
+        record.updatedAt,
+      ],
+      "Bot comment mapping could not be stored.",
+    );
+    return mapGithubBotComment(row);
+  }
+}
+
+class PostgresAdeDecisionRepository implements AdeDecisionRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async getByRef(
+    projectId: string,
+    decisionRef: string,
+  ): Promise<AdeDecisionRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      "SELECT * FROM ade_decisions WHERE project_id = $1 AND decision_ref = $2",
+      [projectId, decisionRef],
+    );
+    return row ? mapAdeDecision(row) : null;
+  }
+
+  public async listOpenByProjectId(
+    projectId: string,
+  ): Promise<readonly AdeDecisionRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM ade_decisions
+        WHERE project_id = $1 AND status = 'open'
+        ORDER BY observed_at DESC
+      `,
+      [projectId],
+    );
+    return result.rows.map(mapAdeDecision);
+  }
+
+  public async upsert(input: AdeDecisionInput): Promise<AdeDecisionRecord> {
+    const row = await queryRequired(
+      this.pool,
+      `
+        INSERT INTO ade_decisions (
+          id, project_id, decision_ref, prompt, options, status, observed_at
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+        ON CONFLICT (project_id, decision_ref)
+        DO UPDATE SET prompt = EXCLUDED.prompt,
+                      options = EXCLUDED.options,
+                      observed_at = EXCLUDED.observed_at
+        RETURNING *
+      `,
+      [
+        input.id ?? randomUUID(),
+        input.projectId,
+        input.decisionRef,
+        input.prompt,
+        JSON.stringify([...input.options]),
+        input.status ?? "open",
+        input.observedAt,
+      ],
+      "ADE decision could not be stored.",
+    );
+    return mapAdeDecision(row);
+  }
+
+  public async resolve(
+    projectId: string,
+    decisionRef: string,
+    option: string,
+    resolvedBy: string,
+    resolvedAt: string,
+  ): Promise<AdeDecisionRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      `
+        UPDATE ade_decisions
+        SET status = 'resolved',
+            resolved_option = $3,
+            resolved_by = $4,
+            resolved_at = $5
+        WHERE project_id = $1 AND decision_ref = $2 AND status = 'open'
+        RETURNING *
+      `,
+      [projectId, decisionRef, option, resolvedBy, resolvedAt],
+    );
+    return row ? mapAdeDecision(row) : null;
+  }
+}
+
 function mapControlPlaneSettings(row: TimestampRow): ControlPlaneSettingsRecord {
   return {
     schedulerMode: row.scheduler_mode as SchedulerMode,
@@ -343,6 +626,15 @@ class PostgresControlPlaneSettingsRepository
 
 class PostgresProjectRepository implements ProjectRepository {
   public constructor(private readonly pool: Pool) {}
+
+  public async getByRepositoryId(repositoryId: string): Promise<ProjectRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      "SELECT * FROM projects WHERE repository_id = $1",
+      [repositoryId],
+    );
+    return row ? mapProject(row) : null;
+  }
 
   public async getById(projectId: string): Promise<ProjectRecord | null> {
     const row = await queryOptional(
@@ -1361,7 +1653,10 @@ function isTerminalStatus(status: ExecutionRecord["status"]): boolean {
 }
 
 export class PostgresControlPlaneStore implements ControlPlanePersistence {
+  public readonly adeDecisions: AdeDecisionRepository;
   public readonly auditEvents: AuditEventRepository;
+  public readonly githubBotComments: GithubBotCommentRepository;
+  public readonly githubDeliveries: GithubDeliveryRepository;
   public readonly controlCommands: ControlCommandRepository;
   public readonly executionLeases: ExecutionLeaseRepository;
   public readonly executions: ExecutionRepository;
@@ -1386,6 +1681,9 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
     );
     this.controlCommands = new PostgresControlCommandRepository(this.pool);
     this.auditEvents = new PostgresAuditEventRepository(this.pool);
+    this.githubDeliveries = new PostgresGithubDeliveryRepository(this.pool);
+    this.githubBotComments = new PostgresGithubBotCommentRepository(this.pool);
+    this.adeDecisions = new PostgresAdeDecisionRepository(this.pool);
   }
 
   public async close(): Promise<void> {

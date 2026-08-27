@@ -188,3 +188,51 @@ export interface ControlPlaneSettingsRecord {
   updatedAt: string;
   updatedBy: string | null;
 }
+
+export type GithubDeliveryStatus = "received" | "rejected" | "ignored" | "processed";
+
+export type GithubSubjectType = "issue" | "pull_request";
+
+export type BotCommentPurpose = "status" | "waiting-human" | "failure";
+
+export type AdeDecisionStatus = "open" | "resolved" | "cancelled";
+
+export interface GithubDeliveryRecord {
+  id: string;
+  deliveryId: string;
+  event: string;
+  action: string;
+  repositoryGithubId: string;
+  projectId: string | null;
+  actorRef: string | null;
+  subjectType: GithubSubjectType | null;
+  subjectNumber: number | null;
+  commentId: string | null;
+  status: GithubDeliveryStatus;
+  rejectionCode: string | null;
+  controlCommandId: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+}
+
+export interface GithubBotCommentRecord {
+  projectId: string;
+  purpose: BotCommentPurpose;
+  subjectType: GithubSubjectType;
+  subjectNumber: number;
+  commentId: string;
+  updatedAt: string;
+}
+
+export interface AdeDecisionRecord {
+  id: string;
+  projectId: string;
+  decisionRef: string;
+  prompt: string;
+  options: readonly string[];
+  status: AdeDecisionStatus;
+  resolvedOption: string | null;
+  resolvedBy: string | null;
+  observedAt: string;
+  resolvedAt: string | null;
+}

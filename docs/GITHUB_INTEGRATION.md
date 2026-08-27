@@ -236,3 +236,111 @@ ADE reports waiting-human decision D42
 ```
 
 At no point does the GitHub webhook handler execute a shell command or bypass ADE decision semantics.
+## MVP implementation
+
+`packages/github` holds the adapter and contains no scheduling rules. The public
+webhook endpoint lives in the Dashboard (`apps/dashboard`), which is the only
+public HTTP surface.
+
+### Modules
+
+| Module | Responsibility |
+| --- | --- |
+| `src/signature.ts` | Size limit, `X-Hub-Signature-256` verification over raw bytes, header and event checks |
+| `src/events.ts` | Minimal normalization of `issue_comment` / `issues` / `pull_request` |
+| `src/commandParser.ts` | Closed `@ade` grammar with strictly validated arguments |
+| `src/authorization.ts` | Repository, installation and actor allow-lists, per-command-class policy |
+| `src/notifications.ts` | Bot comment rendering and single-comment upsert |
+| `src/appAuth.ts` | GitHub App JWT and short-lived installation tokens |
+| `src/client.ts` | Comment-only GitHub API surface plus a deterministic test double |
+
+`apps/dashboard/src/lib/githubWebhook.ts` orchestrates one delivery, and
+`apps/dashboard/src/app/api/github/webhook/route.ts` exposes it.
+
+### Delivery pipeline
+
+```text
+POST /api/github/webhook
+→ size limit
+→ raw body read once
+→ signature verified before the payload is parsed
+→ delivery ID and event required
+→ delivery ID deduplicated in github_deliveries
+→ repository numeric ID resolved to a registered project
+→ @ade command parsed from the comment
+→ installation and actor authorized
+→ typed ControlCommand persisted + audited
+→ worker observes durable state
+```
+
+Nothing on this path executes ADE, Codex, Git or a host shell. The most a
+delivery ever does is persist a command the worker picks up later.
+
+### Why the signature comes before parsing
+
+An unverified body never reaches a parser, and nothing is persisted until the
+signature checks out — so an unsigned flood cannot grow any table.
+
+### Authorization
+
+A valid signature proves GitHub sent the delivery, not that the human may drive
+the control plane. Four checks run separately:
+
+- the numeric repository ID must map to a registered project — `owner/name` from
+  the payload is display data and is never trusted for routing;
+- the installation ID must be allow-listed when `GITHUB_ALLOWED_INSTALLATION_IDS`
+  is set;
+- the actor's numeric ID must be allow-listed, and bot senders are always
+  refused so the control plane's own comments cannot drive it;
+- mutating commands may require a stricter allow-list than reads.
+
+An unauthorized actor gets no bot reply: the control plane does not confirm to a
+stranger that it manages the repository. The refusal is audited.
+
+### Command grammar
+
+```text
+@ade status
+@ade pause
+@ade resume
+@ade retry
+@ade priority <0-100>
+@ade decide <decision-ref> <option>
+```
+
+Only the first directive in a comment is honoured, directives inside code fences
+and blockquotes are ignored — so quoting someone else's command cannot replay it
+— and every argument is validated against a closed character set. Unknown verbs
+are refused rather than guessed. GitHub text never becomes a shell string or a
+raw ADE command.
+
+### Facts the caller cannot assert
+
+Retryability is recomputed from the persisted execution record, and a decision
+option must be one ADE actually exposed and recorded in `ade_decisions`. A
+comment can therefore never widen what a command is allowed to do. `retry` on an
+ambiguous outcome is refused with `RETRY_NOT_SAFE` and answered in plain
+language.
+
+### Idempotency
+
+Two independent layers:
+
+- transport: `github_deliveries.delivery_id` is unique, so a redelivered ID has
+  zero extra effect;
+- command: the idempotency key is derived from comment identity plus command
+  type, so the same directive arriving under a new delivery ID resolves to the
+  same `control_commands` row.
+
+Resolving an already-resolved decision is a no-op rather than a second effect.
+
+### Comment strategy
+
+`github_bot_comments` maps (project, purpose, subject) to the comment the control
+plane authored. Repeated state changes about one subject update that comment
+instead of appending a thread, and human-authored comments are never referenced
+or rewritten. Every outbound message passes through an independent redactor, so
+tokens, DSNs, environment fragments and host paths cannot reach a comment.
+
+Global quota, runner and scheduler views stay in the Dashboard and are linked
+rather than mirrored.
