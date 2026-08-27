@@ -5,7 +5,8 @@ Use this page as the entry point for design and implementation work.
 ## Start here
 
 - [`../AGENTS.md`](../AGENTS.md) — mandatory instructions for Codex/automated coding agents.
-- [`CODEX_KICKOFF.md`](CODEX_KICKOFF.md) — ready-to-use kickoff prompts for issue #2 and later phases.
+- [`PRODUCT_TARGET.md`](PRODUCT_TARGET.md) — canonical product goal: orchestrate ADE across existing/new projects, GitHub-backed work queues, human gates and 30-day Codex quota history.
+- [`CODEX_KICKOFF.md`](CODEX_KICKOFF.md) — ready-to-use kickoff prompts for the current implementation phases.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — responsibility boundaries and selected Raspberry topology.
 - [`ADE_ADAPTER.md`](ADE_ADAPTER.md) — versioned ADE client boundary and local CLI transport contract.
 - [`SCHEDULER.md`](SCHEDULER.md) — pure global scheduling gates, ranking and explainable decisions.
@@ -41,7 +42,8 @@ Use this page as the entry point for design and implementation work.
 
 When a topic overlaps ADE and ADE Control Plane:
 
-- project-delivery semantics belong to ADE;
-- multi-project scheduling/control/runner/quota/audit belongs here.
+- project-delivery semantics, dependency ordering and project-local runnable state belong to ADE;
+- multi-project selection, global queue/read models, runner/quota/control/audit belong here;
+- GitHub issue/PR references may cross the boundary, but the Control Plane must not reconstruct ADE's delivery graph.
 
-If documentation conflicts, `SECURITY.md` and the architecture boundary must be preserved until the conflict is explicitly resolved.
+If documentation conflicts, `PRODUCT_TARGET.md`, `SECURITY.md` and the architecture boundary must be preserved until the conflict is explicitly resolved.
