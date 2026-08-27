@@ -1,11 +1,9 @@
 {
-  "name": "@ade-control-plane/quota",
+  "name": "@ade-control-plane/runner-protocol",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
+  "exports": { ".": "./src/index.ts" },
   "scripts": {
     "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"

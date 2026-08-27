@@ -96,9 +96,8 @@ export async function runControlCycle(
 
   const executionId = await dependencies.createExecutionId(project);
   const result = await dependencies.adeClient.advance(project.ade, {
-    workId: work.id,
-    runnerId,
-    executionId,
+    controlPlaneExecutionId: executionId,
+    workRef: work.ref,
   });
 
   return {
