@@ -1,70 +1,8 @@
-export type QuotaState = "normal" | "throttled" | "draining" | "blocked";
-
-export interface ProviderQuotaSnapshot {
-  provider: string;
-  accountId: string;
-  usedPercent: number;
-  capturedAt: string;
-  resetsAt?: string;
-  windowDurationMinutes?: number;
-}
-
-export interface QuotaPolicyThresholds {
-  throttledAtPercent: number;
-  drainingAtPercent: number;
-  blockedAtPercent: number;
-}
-
-export const DEFAULT_QUOTA_THRESHOLDS: QuotaPolicyThresholds = {
-  throttledAtPercent: 70,
-  drainingAtPercent: 85,
-  blockedAtPercent: 95,
-};
-
-export interface QuotaDecision {
-  state: QuotaState;
-  canStartWork: boolean;
-  reason: string;
-  resetsAt?: string;
-}
-
-export function evaluateQuota(
-  snapshot: ProviderQuotaSnapshot,
-  thresholds: QuotaPolicyThresholds = DEFAULT_QUOTA_THRESHOLDS,
-): QuotaDecision {
-  const { usedPercent } = snapshot;
-
-  if (usedPercent >= thresholds.blockedAtPercent) {
-    return {
-      state: "blocked",
-      canStartWork: false,
-      reason: `Provider quota usage is ${usedPercent}%, at or above the ${thresholds.blockedAtPercent}% blocking threshold.`,
-      ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
-    };
-  }
-
-  if (usedPercent >= thresholds.drainingAtPercent) {
-    return {
-      state: "draining",
-      canStartWork: true,
-      reason: `Provider quota usage is ${usedPercent}%; only short or high-priority work should start.`,
-      ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
-    };
-  }
-
-  if (usedPercent >= thresholds.throttledAtPercent) {
-    return {
-      state: "throttled",
-      canStartWork: true,
-      reason: `Provider quota usage is ${usedPercent}%; concurrency should be reduced.`,
-      ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
-    };
-  }
-
-  return {
-    state: "normal",
-    canStartWork: true,
-    reason: `Provider quota usage is ${usedPercent}%; normal scheduling is allowed.`,
-    ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
-  };
-}
+export type QuotaState = "normal" | "throttled" | "draining" | "blocked" | "unknown";
+export interface ProviderQuotaSnapshot { provider: string; accountRef: string; usedPercent: number | null; observedAt: string; expiresAt?: string; resetsAt?: string; metadata?: Readonly<Record<string, string>>; }
+export interface QuotaPolicy { throttledAtPercent: number; drainingAtPercent: number; blockedAtPercent: number; staleAfterMs: number; allowStartWhenUnknown: boolean; }
+export const DEFAULT_QUOTA_POLICY: QuotaPolicy = { throttledAtPercent: 70, drainingAtPercent: 85, blockedAtPercent: 95, staleAfterMs: 300_000, allowStartWhenUnknown: false };
+export interface QuotaDecision { state: QuotaState; canStartWork: boolean; reason: string; resetsAt?: string; refreshRequired: boolean; }
+export function evaluateQuota(snapshot: ProviderQuotaSnapshot, policy: QuotaPolicy = DEFAULT_QUOTA_POLICY, asOf = new Date().toISOString()): QuotaDecision { const resetsAt = snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}; const stale = Date.parse(snapshot.observedAt) + policy.staleAfterMs <= Date.parse(asOf) || (snapshot.expiresAt !== undefined && Date.parse(snapshot.expiresAt) <= Date.parse(asOf)); if (snapshot.usedPercent === null || stale) return { state: "unknown", canStartWork: policy.allowStartWhenUnknown, reason: snapshot.usedPercent === null ? "Provider quota usage is unavailable." : "Provider quota snapshot is stale.", refreshRequired: true, ...resetsAt }; const usage = snapshot.usedPercent; if (usage >= policy.blockedAtPercent) return { state: "blocked", canStartWork: false, reason: "Provider quota is blocked.", refreshRequired: false, ...resetsAt }; if (usage >= policy.drainingAtPercent) return { state: "draining", canStartWork: true, reason: "Provider quota is draining.", refreshRequired: false, ...resetsAt }; if (usage >= policy.throttledAtPercent) return { state: "throttled", canStartWork: true, reason: "Provider quota is throttled.", refreshRequired: false, ...resetsAt }; return { state: "normal", canStartWork: true, reason: "Provider quota allows normal scheduling.", refreshRequired: false, ...resetsAt }; }
+export interface HeaderReader { get(name: string): string | null; }
+export function normalizeOpenAiRateLimitHeaders(input: { accountRef: string; headers: HeaderReader; observedAt: string }): ProviderQuotaSnapshot { const number = (name: string): number | null => { const value = input.headers.get(name); return value !== null && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : null; }; const limit = number("x-ratelimit-limit-tokens"); const remaining = number("x-ratelimit-remaining-tokens"); const match = /^(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(input.headers.get("x-ratelimit-reset-tokens") ?? ""); const seconds = match ? Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0) : null; const resetsAt = seconds !== null ? new Date(Date.parse(input.observedAt) + seconds * 1000).toISOString() : undefined; return { provider: "openai", accountRef: input.accountRef, usedPercent: limit !== null && remaining !== null && limit > 0 ? Math.min(100, Math.max(0, ((limit - remaining) / limit) * 100)) : null, observedAt: input.observedAt, ...(resetsAt ? { resetsAt } : {}), metadata: { bucket: "tokens", source: "rate-limit-headers" } }; }
