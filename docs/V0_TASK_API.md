@@ -28,6 +28,12 @@ All endpoints require the signed Dashboard session. Mutations additionally requi
 
 Task prompts are limited to 20,000 characters. Each log message is redacted and limited to 4 KiB, with a durable 1 MiB aggregate limit per task. Responses expose stable error codes and correlation IDs instead of raw exceptions.
 
+## Dashboard workflow
+
+The authenticated `/tasks` page is the V0 task runway. It lists enabled projects, accepts one focused prompt and disables submission while a `PENDING` or `RUNNING` task owns the global slot. Status and history refresh through the Dashboard polling interval; no long-lived browser connection is required.
+
+Each `/tasks/{id}` detail page shows the durable lifecycle state, branch, safe GitHub pull-request link, sanitized error summary and up to 2,000 sanitized log entries. `PENDING` tasks can be cancelled and `RUNNING` tasks can be stopped from either page. Pull-request links are rendered only when they use HTTPS on `github.com`; external task content is always rendered as text.
+
 ## Recovery
 
 The durable status is the source of truth after restart. The V0 worker may claim only `PENDING`; it must reconcile an existing `RUNNING` task before doing more privileged work. Unknown completion state must not be retried implicitly.
