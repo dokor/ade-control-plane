@@ -1,128 +1,122 @@
 # ADE Control Plane
 
-ADE Control Plane is a small always-on control surface for launching AI coding work against registered projects and following the result from a Dashboard.
+ADE Control Plane is the multi-project orchestration layer that supervises AI Delivery Engine (ADE) projects.
 
-## V0 mission
+ADE remains responsible for understanding and executing work inside a single project. ADE Control Plane stays above that boundary: it decides which project should run, on which runner, under which quota policy, and exposes the global state through the Dashboard and GitHub.
 
-Ship one useful loop before adding orchestration features:
+## Responsibility boundary
+
+### ADE owns
+
+- project understanding and context packs;
+- delivery graph and project-level `ProjectRun` state;
+- execution loops for one task or graph node;
+- agent/provider execution contracts;
+- worktrees, Git changes, tests, quality gates and PR preparation;
+- project-level human decisions and delivery evidence.
+
+### ADE Control Plane owns
+
+- registry of managed projects;
+- scheduling and prioritization across projects;
+- global provider/quota policies;
+- runner selection and availability;
+- pause/resume/priority controls across projects;
+- global persistence and audit events;
+- GitHub control and notification integration;
+- the multi-project dashboard.
+
+The control plane must not duplicate ADE's project delivery logic. It consumes ADE through a stable adapter/client contract.
+
+## Human interfaces
+
+The product has exactly two human-facing surfaces:
+
+- **Dashboard** for global supervision and control;
+- **GitHub** for project-level interactions around issues, PRs, validations and targeted decisions.
+
+## Target deployment
+
+The first production target is a Raspberry Pi 5 running continuously with an SSD. The control plane is containerized while the privileged local runner stays isolated on the Raspberry host. Heavy or incompatible tasks can later be dispatched to remote runners or GitHub Actions.
 
 ```text
-Dashboard
-→ choose project
-→ describe task
-→ create execution
-→ one Codex worker runs
-→ branch ade/<task-id>
-→ commit + push
-→ GitHub pull request
-→ Dashboard shows status + logs + PR link
+User
+  │
+  ├── Dashboard
+  └── GitHub
+        │
+        ▼
+ADE Control Plane
+  ├── Project Registry
+  ├── Scheduler
+  ├── Quota Manager
+  ├── Runner Manager
+  ├── GitHub Integration
+  └── Global persistence
+        │
+        ▼
+raspberry-local runner
+  ├── ADE
+  ├── Codex
+  ├── Git
+  └── project worktrees
 ```
 
-The V0 is successful when this flow runs reliably on the Raspberry and can be started from a phone.
+## Current delivery order
 
-## Scope rule
+The immediate goal is the smallest production V0: **Dashboard → one Codex task → branch → PR → logs**.
 
-Before the first production deployment, every feature must answer:
+Work in this order:
 
-> Is this required for Dashboard → Codex → PR?
+1. **#23** — minimal task/execution API with one active job;
+2. **#24** — execute Codex locally and create the branch/commit/push/PR flow;
+3. **#25** — task-oriented mobile Dashboard; it can progress in parallel with #24 after #23;
+4. **#26** — Raspberry/Docker Compose deployment and real end-to-end validation;
+5. **#1** closes when the full V0 works from Dashboard/mobile to a real GitHub PR.
 
-If not, it is post-V0.
+Advanced orchestration features that are already implemented remain available, but they are not blockers for this first production loop. Remaining advanced roadmap work (for example real Codex quota ingestion, GitHub command interface, full security/release hardening) comes after the V0 unless it is required to ship safely.
 
-### Included in V0
+## MVP architecture capabilities
 
-- registered projects;
-- one active execution at a time;
-- Codex as the only coding agent;
-- PostgreSQL persistence already present in the repository;
-- execution states `PENDING | RUNNING | SUCCESS | FAILED | CANCELLED`;
-- bounded/sanitized logs;
-- dedicated Git branch per task;
-- commit, push and GitHub PR creation;
-- minimal mobile-friendly Dashboard;
-- Stop/Cancel;
-- Docker Compose deployment on Raspberry;
-- minimum production security: protected Dashboard, private DB/worker, no Docker socket, secrets outside prompts/logs/repository.
+The repository already contains foundations for:
 
-### Explicitly post-V0
+- durable PostgreSQL project/execution/control state;
+- a typed ADE adapter;
+- deterministic multi-project scheduling;
+- crash-safe worker recovery;
+- a typed secure runner protocol;
+- an authenticated global supervision Dashboard.
 
-- multiple agents/providers;
-- Claude/Gemini routing;
-- quota/cost routing;
-- advanced multi-project scheduling/fairness;
-- concurrent tasks;
-- Git worktrees;
-- reviewer agents;
-- auto-merge;
-- GitHub commands as a control interface;
-- Redis/Kafka/Kubernetes;
-- complex MCP integration;
-- local models;
-- distributed runners;
-- advanced UDS/HMAC runner protocol unless production usage demonstrates it is required.
+The V0 should reuse these foundations where they reduce work, without forcing the advanced scheduler/runner/quota features into the critical path.
 
-Existing documentation and issues describing these capabilities are retained as roadmap material. They are not dependencies for V0 unless issue #1 says otherwise.
+See [`docs/README.md`](docs/README.md) for the design documentation index.
 
-## V0 delivery order
-
-Work issue-first in this order:
-
-1. **#23** — task/execution API with one active job;
-2. **#24** — run Codex and produce a branch/PR;
-3. **#25** — minimal mobile-friendly Dashboard;
-4. **#26** — Raspberry Docker Compose deployment.
-
-Issue **#1** is the source of truth for V0 scope and Definition of Done.
-
-## Existing persistence
-
-PostgreSQL persistence has already been implemented. Keep it. Replacing it with SQLite would add migration work without improving the first user flow.
-
-Useful commands:
-
-- `pnpm --filter @ade-control-plane/database migrate`
-- `pnpm --filter @ade-control-plane/database test`
-- `pnpm typecheck`
-- `pnpm test`
-
-## Architecture boundary
-
-ADE may still own project-specific delivery logic where it is used. ADE Control Plane should not recreate project delivery graphs or project-specific planning.
-
-For V0, the control plane only needs enough project configuration to safely launch Codex in an allow-listed repository and record the resulting execution/PR.
-
-## Security baseline
-
-Keep security simple but real:
-
-- never commit provider/GitHub credentials;
-- never put secrets or full environments into model prompts or persisted logs;
-- do not mount `/var/run/docker.sock` into the Dashboard or worker;
-- keep PostgreSQL and worker private;
-- protect the Dashboard before exposing it through the reverse proxy;
-- only operate on explicitly registered/allow-listed repositories;
-- pass process arguments without shell interpolation of user prompts;
-- bound and sanitize stdout/stderr;
-- do not auto-merge generated PRs in V0.
-
-The more advanced threat model in `docs/SECURITY.md` remains useful roadmap guidance, but V0 must not be blocked by controls for capabilities that V0 does not expose.
-
-## Repository
+## Repository layout
 
 ```text
 apps/
-  worker/          executes the single active coding task
-  dashboard/       minimal Dashboard + control API (V0 work)
+  worker/          long-running control-plane worker/recovery logic
+  dashboard/       Next.js dashboard and control API
 packages/
-  database/        PostgreSQL persistence
-  core/            reusable domain primitives where still useful
-  ade-client/      existing ADE boundary; keep only what V0 actually needs
-  quota/           roadmap code; not on the V0 critical path
+  core/            project registry and scheduler domain
+  ade-client/      adapter contract between the control plane and ADE
+  quota/           provider usage and quota policy
+  runner-protocol/ secure Raspberry runner contract and UDS helpers
+  database/        persistence contracts and migrations
+deploy/
+  systemd/         host-service units
 docs/
-  MVP.md            V0 source of truth together with issue #1
+  architecture, security, operations and implementation contracts
 ```
 
-Do not create abstractions or packages solely because they appear in older architecture documents.
+## Engineering principles
 
-## For coding agents
-
-Read `AGENTS.md` and the target GitHub issue before making changes. The current V0 issue must override legacy implementation ordering in older docs.
+- No project-specific delivery logic belongs in this repository.
+- ADE is accessed through explicit, versioned contracts.
+- State required for crash recovery is persisted before acknowledging a transition.
+- Scheduling is deterministic and explainable.
+- Quota and budget limits are hard control-plane gates, never hints to an LLM.
+- Runners use least privilege and do not expose secrets to model context.
+- Raspberry-first does not mean Raspberry-only: runner capabilities stay abstracted.
+- Dashboard and GitHub share a typed command/audit model; neither contains scheduling rules.
+- Production deployment authority for generated projects is not granted automatically in the V0.
