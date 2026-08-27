@@ -31,6 +31,10 @@ import type {
   RunnerRegistrationInput,
   RunnerRepository,
   ScheduleExecutionWithLeaseInput,
+  V0TaskCreateInput,
+  V0TaskLogInput,
+  V0TaskRepository,
+  V0TaskTransitionInput,
 } from "../contracts.js";
 import type {
   AdeDecisionRecord,
@@ -57,8 +61,11 @@ import type {
   RunnerState,
   ScheduledExecutionRecord,
   SchedulerMode,
+  V0TaskLogRecord,
+  V0TaskRecord,
 } from "../domain.js";
 import {
+  ActiveTaskConflictError,
   DatabaseRecordNotFoundError,
   ExecutionCompletionConflictError,
   LeaseConflictError,
@@ -185,6 +192,36 @@ function mapExecution(row: TimestampRow): ExecutionRecord {
     errorSummary: row.error_summary === null ? null : String(row.error_summary),
     createdAt: toIsoString(row.created_at) ?? "",
     updatedAt: toIsoString(row.updated_at) ?? "",
+  };
+}
+
+function mapV0Task(row: TimestampRow): V0TaskRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    prompt: String(row.prompt),
+    status: row.status as V0TaskRecord["status"],
+    cancelRequested: Boolean(row.cancel_requested),
+    branchName: row.branch_name === null ? null : String(row.branch_name),
+    pullRequestNumber:
+      row.pull_request_number === null ? null : Number(row.pull_request_number),
+    pullRequestUrl: row.pull_request_url === null ? null : String(row.pull_request_url),
+    errorCode: row.error_code === null ? null : String(row.error_code),
+    errorSummary: row.error_summary === null ? null : String(row.error_summary),
+    createdAt: toIsoString(row.created_at) ?? "",
+    startedAt: toIsoString(row.started_at),
+    finishedAt: toIsoString(row.finished_at),
+    updatedAt: toIsoString(row.updated_at) ?? "",
+  };
+}
+
+function mapV0TaskLog(row: TimestampRow): V0TaskLogRecord {
+  return {
+    id: String(row.id),
+    taskId: String(row.task_id),
+    occurredAt: toIsoString(row.occurred_at) ?? "",
+    stream: row.stream as V0TaskLogRecord["stream"],
+    message: String(row.message),
   };
 }
 
@@ -1643,6 +1680,171 @@ async function insertAuditEvent(
   );
 }
 
+class PostgresV0TaskRepository implements V0TaskRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async create(input: V0TaskCreateInput): Promise<V0TaskRecord> {
+    const prompt = input.prompt.trim();
+    if (!prompt || prompt.length > 20_000) {
+      throw new Error("Task prompt must contain between 1 and 20000 characters.");
+    }
+    try {
+      const result = await this.pool.query<TimestampRow>(
+        `INSERT INTO v0_tasks (id, project_id, prompt, status, created_at, updated_at)
+         VALUES ($1, $2, $3, 'PENDING', $4, $4) RETURNING *`,
+        [input.id ?? randomUUID(), input.projectId, prompt, input.createdAt],
+      );
+      return mapV0Task(expectOne(result.rows, "Failed to create V0 task."));
+    } catch (error) {
+      if (isUniqueViolation(error, "v0_tasks_single_active_idx")) {
+        throw new ActiveTaskConflictError();
+      }
+      throw error;
+    }
+  }
+
+  public async getById(taskId: string): Promise<V0TaskRecord | null> {
+    const result = await this.pool.query<TimestampRow>(
+      "SELECT * FROM v0_tasks WHERE id = $1",
+      [taskId],
+    );
+    return result.rows[0] ? mapV0Task(result.rows[0]) : null;
+  }
+
+  public async list(limit: number): Promise<readonly V0TaskRecord[]> {
+    const result = await this.pool.query<TimestampRow>(
+      "SELECT * FROM v0_tasks ORDER BY created_at DESC, id DESC LIMIT $1",
+      [boundedLimit(limit, 100)],
+    );
+    return result.rows.map(mapV0Task);
+  }
+
+  public async claimPending(startedAt: string): Promise<V0TaskRecord | null> {
+    return withTransaction(this.pool, async (client) => {
+      const selected = await client.query<TimestampRow>(
+        "SELECT id FROM v0_tasks WHERE status = 'PENDING' ORDER BY created_at ASC FOR UPDATE SKIP LOCKED LIMIT 1",
+      );
+      const row = selected.rows[0];
+      if (!row) return null;
+      const updated = await client.query<TimestampRow>(
+        "UPDATE v0_tasks SET status = 'RUNNING', started_at = $2, updated_at = $2 WHERE id = $1 AND status = 'PENDING' RETURNING *",
+        [row.id, startedAt],
+      );
+      return updated.rows[0] ? mapV0Task(updated.rows[0]) : null;
+    });
+  }
+
+  public async requestCancel(taskId: string, requestedAt: string): Promise<V0TaskRecord> {
+    const result = await this.pool.query<TimestampRow>(
+      `UPDATE v0_tasks SET cancel_requested = true,
+       status = CASE WHEN status = 'PENDING' THEN 'CANCELLED' ELSE status END,
+       finished_at = CASE WHEN status = 'PENDING' THEN $2 ELSE finished_at END,
+       updated_at = $2
+       WHERE id = $1 AND status IN ('PENDING', 'RUNNING') RETURNING *`,
+      [taskId, requestedAt],
+    );
+    const row = result.rows[0];
+    if (row) return mapV0Task(row);
+    const current = await this.getById(taskId);
+    if (!current) {
+      throw new DatabaseRecordNotFoundError(`V0 task ${taskId} was not found.`);
+    }
+    return current;
+  }
+
+  public async complete(input: V0TaskTransitionInput): Promise<V0TaskRecord> {
+    const result = await this.pool.query<TimestampRow>(
+      `UPDATE v0_tasks SET status = $2, finished_at = $3, updated_at = $3,
+       branch_name = COALESCE($4, branch_name), pull_request_number = COALESCE($5, pull_request_number),
+       pull_request_url = COALESCE($6, pull_request_url), error_code = $7, error_summary = $8
+       WHERE id = $1 AND status = 'RUNNING' RETURNING *`,
+      [
+        input.taskId,
+        input.status,
+        input.finishedAt,
+        input.branchName ?? null,
+        input.pullRequestNumber ?? null,
+        input.pullRequestUrl ?? null,
+        input.errorCode ?? null,
+        truncateUtf8(sanitizeV0Log(input.errorSummary ?? ""), 4096) || null,
+      ],
+    );
+    const updated = result.rows[0];
+    if (updated) return mapV0Task(updated);
+    const current = await this.getById(input.taskId);
+    if (!current) {
+      throw new DatabaseRecordNotFoundError(`V0 task ${input.taskId} was not found.`);
+    }
+    if (current.status !== input.status) {
+      throw new ExecutionCompletionConflictError(
+        `V0 task ${input.taskId} is already ${current.status}.`,
+      );
+    }
+    return current;
+  }
+
+  public async appendLog(input: V0TaskLogInput): Promise<V0TaskLogRecord | null> {
+    const message = truncateUtf8(sanitizeV0Log(input.message), 4096);
+    if (!message) return null;
+    return withTransaction(this.pool, async (client) => {
+      const task = await client.query(
+        "SELECT id FROM v0_tasks WHERE id = $1 FOR UPDATE",
+        [input.taskId],
+      );
+      if (task.rowCount === 0) {
+        throw new DatabaseRecordNotFoundError(`V0 task ${input.taskId} was not found.`);
+      }
+      const size = await client.query<{ bytes: string }>(
+        "SELECT COALESCE(SUM(octet_length(message)), 0)::text AS bytes FROM v0_task_logs WHERE task_id = $1",
+        [input.taskId],
+      );
+      const remaining = 1_048_576 - Number(size.rows[0]?.bytes ?? 0);
+      if (remaining <= 0) return null;
+      const result = await client.query<TimestampRow>(
+        "INSERT INTO v0_task_logs (task_id, occurred_at, stream, message) VALUES ($1, $2, $3, $4) RETURNING *",
+        [input.taskId, input.occurredAt, input.stream, truncateUtf8(message, remaining)],
+      );
+      return mapV0TaskLog(expectOne(result.rows, "Failed to append V0 task log."));
+    });
+  }
+
+  public async listLogs(taskId: string, limit: number): Promise<readonly V0TaskLogRecord[]> {
+    const result = await this.pool.query<TimestampRow>(
+      "SELECT * FROM v0_task_logs WHERE task_id = $1 ORDER BY id ASC LIMIT $2",
+      [taskId, boundedLimit(limit, 2000)],
+    );
+    return result.rows.map(mapV0TaskLog);
+  }
+}
+
+function truncateUtf8(value: string, maximumBytes: number): string {
+  const buffer = Buffer.from(value, "utf8");
+  if (buffer.length <= maximumBytes) return value;
+  return buffer.subarray(0, maximumBytes).toString("utf8").replace(/\uFFFD$/u, "");
+}
+
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "23505" &&
+    "constraint" in error &&
+    (error as { constraint?: unknown }).constraint === constraint
+  );
+}
+
+function sanitizeV0Log(value: string): string {
+  return value
+    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{10,}/g, "[redacted-token]")
+    .replace(/\bsk-[A-Za-z0-9-_]{10,}/g, "[redacted-token]")
+    .replace(/\b(?:password|secret|token|authorization)\b\s*[:=]\s*\S+/gi, "[redacted-secret]")
+    .replace(/postgres(?:ql)?:\/\/\S+/gi, "[redacted-dsn]")
+    .replace(/(?:\/(?:home|root|run|etc|var|Users)|[A-Za-z]:\\)[^\s"']*/g, "[redacted-path]")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function isTerminalStatus(status: ExecutionRecord["status"]): boolean {
   return (
     status === "succeeded" ||
@@ -1653,6 +1855,7 @@ function isTerminalStatus(status: ExecutionRecord["status"]): boolean {
 }
 
 export class PostgresControlPlaneStore implements ControlPlanePersistence {
+  public readonly v0Tasks: V0TaskRepository;
   public readonly adeDecisions: AdeDecisionRepository;
   public readonly auditEvents: AuditEventRepository;
   public readonly githubBotComments: GithubBotCommentRepository;
@@ -1684,6 +1887,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
     this.githubDeliveries = new PostgresGithubDeliveryRepository(this.pool);
     this.githubBotComments = new PostgresGithubBotCommentRepository(this.pool);
     this.adeDecisions = new PostgresAdeDecisionRepository(this.pool);
+    this.v0Tasks = new PostgresV0TaskRepository(this.pool);
   }
 
   public async close(): Promise<void> {

@@ -20,9 +20,18 @@ importers:
 
   apps/dashboard:
     dependencies:
+      '@ade-control-plane/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@ade-control-plane/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@ade-control-plane/github':
+        specifier: workspace:*
+        version: link:../../packages/github
+      '@ade-control-plane/quota':
+        specifier: workspace:*
+        version: link:../../packages/quota
       next:
         specifier: 15.5.2
         version: 15.5.2(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
@@ -68,6 +77,8 @@ importers:
       '@types/pg':
         specifier: ^8.15.5
         version: 8.23.1
+
+  packages/github: {}
 
   packages/quota: {}
 

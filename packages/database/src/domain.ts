@@ -236,3 +236,36 @@ export interface AdeDecisionRecord {
   observedAt: string;
   resolvedAt: string | null;
 }
+
+export type V0TaskStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCESS"
+  | "FAILED"
+  | "CANCELLED";
+export type V0TaskLogStream = "system" | "stdout" | "stderr";
+
+export interface V0TaskRecord {
+  id: string;
+  projectId: string;
+  prompt: string;
+  status: V0TaskStatus;
+  cancelRequested: boolean;
+  branchName: string | null;
+  pullRequestNumber: number | null;
+  pullRequestUrl: string | null;
+  errorCode: string | null;
+  errorSummary: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  updatedAt: string;
+}
+
+export interface V0TaskLogRecord {
+  id: string;
+  taskId: string;
+  occurredAt: string;
+  stream: V0TaskLogStream;
+  message: string;
+}

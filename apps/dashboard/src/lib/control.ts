@@ -96,13 +96,25 @@ export function authorizeMutation(
   expectedOrigin: string,
   commandType: ControlCommandType | string,
 ): DashboardIdentity {
+  const authorized = authorizeBrowserMutation(identity, requestOrigin, expectedOrigin);
+  if (!isControlCommandType(commandType)) {
+    throw new ControlError("UNKNOWN_COMMAND", "Unknown control command.");
+  }
+  return authorized;
+}
+
+export function authorizeBrowserMutation(
+  identity: DashboardIdentity | null | undefined,
+  requestOrigin: string | null | undefined,
+  expectedOrigin: string,
+): DashboardIdentity {
   if (!identity || !identity.canRead) {
     throw new ControlError("UNAUTHENTICATED", "Authentication is required.");
   }
   if (!identity.canMutate) {
     throw new ControlError(
       "FORBIDDEN",
-      `Identity is not allowed to submit ${String(commandType)}.`,
+      "Identity is not allowed to mutate control-plane state.",
     );
   }
   if (!isSameOrigin(requestOrigin, expectedOrigin)) {
@@ -110,9 +122,6 @@ export function authorizeMutation(
       "CSRF_REJECTED",
       "The request origin does not match the Dashboard origin.",
     );
-  }
-  if (!isControlCommandType(commandType)) {
-    throw new ControlError("UNKNOWN_COMMAND", "Unknown control command.");
   }
   return identity;
 }
