@@ -70,8 +70,9 @@ Do not reopen or reimplement these unless a concrete V0 bug requires it:
 - #3 ADE adapter;
 - #5 deterministic scheduler;
 - #6 crash-safe worker/recovery;
-- #7 global supervision Dashboard/control API;
-- #11 secure typed runner foundation.
+- #7 global supervision Dashboard/control API.
+
+The secure runner **protocol foundation** exists, but #11 has been reopened because the real host-service executor/integration is still incomplete.
 
 ## Post-V0
 
@@ -79,7 +80,8 @@ Remaining advanced roadmap issues are not blockers for #23–#26:
 
 - #4 real Codex quota ingestion;
 - #8 GitHub project commands/notifications;
-- #10 full release-hardening/security closure;
+- #11 complete host runner service/integration;
+- #10 full release-hardening/security closure after #8/#11;
 - #9 advanced Raspberry topology/deployment after #10.
 
 Security is still continuous: minimum safe auth, secret handling, sanitization, process isolation and network exposure rules remain mandatory in the V0.
