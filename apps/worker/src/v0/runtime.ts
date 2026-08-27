@@ -1,0 +1,107 @@
+import { readFile } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path";
+
+export interface V0WorkerRuntimeConfig {
+  projectRoot: string;
+  codexExecutable: string;
+  codexEnvironment: Readonly<Record<string, string>>;
+  gitEnvironment: Readonly<Record<string, string>>;
+  taskTimeoutMs: number;
+  idleDelayMs: number;
+  github: {
+    appId: string;
+    installationId: string;
+    privateKey: string;
+  };
+}
+
+export async function loadV0WorkerRuntime(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<V0WorkerRuntimeConfig> {
+  const projectRoot = requiredAbsolute(env.V0_PROJECT_ROOT, "V0_PROJECT_ROOT");
+  const appId = required(env.GITHUB_APP_ID, "GITHUB_APP_ID");
+  const installationId = required(
+    env.GITHUB_APP_INSTALLATION_ID,
+    "GITHUB_APP_INSTALLATION_ID",
+  );
+  const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
+  if (!privateKey) throw new Error("GITHUB_APP_PRIVATE_KEY_FILE must reference a secret.");
+  const codexApiKey = await readSecret(env, "CODEX_API_KEY");
+  const codexHome = requiredAbsolute(env.CODEX_HOME, "CODEX_HOME");
+  const gitHome = requiredAbsolute(env.V0_GIT_HOME, "V0_GIT_HOME");
+
+  const childBase = safeChildEnvironment(env);
+  const codexEnvironment = {
+    ...childBase,
+    HOME: dirname(codexHome),
+    CODEX_HOME: codexHome,
+    ...(codexApiKey ? { CODEX_API_KEY: codexApiKey } : {}),
+  };
+  return {
+    projectRoot,
+    codexExecutable: env.CODEX_EXECUTABLE?.trim() || "codex",
+    codexEnvironment,
+    gitEnvironment: {
+      ...childBase,
+      HOME: gitHome,
+      ...(env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: env.SSH_AUTH_SOCK } : {}),
+      GIT_CONFIG_NOSYSTEM: "1",
+    },
+    taskTimeoutMs: positiveInteger(env.V0_TASK_TIMEOUT_SECONDS, 3_600) * 1_000,
+    idleDelayMs: positiveInteger(env.V0_WORKER_IDLE_SECONDS, 2) * 1_000,
+    github: { appId, installationId, privateKey },
+  };
+}
+
+function safeChildEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {
+  const safe: Record<string, string> = {};
+  for (const name of [
+    "PATH",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "TMPDIR",
+    "XDG_CONFIG_HOME",
+    "SYSTEMROOT",
+    "COMSPEC",
+    "PATHEXT",
+  ]) {
+    const value = env[name];
+    if (value) safe[name] = value;
+  }
+  return safe;
+}
+
+async function readSecret(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): Promise<string | null> {
+  const filePath = env[`${name}_FILE`]?.trim();
+  if (filePath) {
+    const value = (await readFile(filePath, "utf8")).trim();
+    return value || null;
+  }
+  return env[name]?.trim() || null;
+}
+
+function required(value: string | undefined, name: string): string {
+  const trimmed = value?.trim();
+  if (!trimmed) throw new Error(`${name} must be set.`);
+  return trimmed;
+}
+
+function requiredAbsolute(value: string | undefined, name: string): string {
+  const path = required(value, name);
+  if (!isAbsolute(path)) throw new Error(`${name} must be an absolute path.`);
+  return path;
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error("V0 worker duration configuration must be a positive integer.");
+  }
+  return parsed;
+}

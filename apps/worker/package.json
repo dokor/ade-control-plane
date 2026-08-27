@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:v0": "tsx src/v0/main.ts",
+    "start:v0": "tsx src/v0/main.ts",
     "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
@@ -12,6 +14,7 @@
     "@ade-control-plane/ade-client": "workspace:*",
     "@ade-control-plane/core": "workspace:*",
     "@ade-control-plane/database": "workspace:*",
+    "@ade-control-plane/github": "workspace:*",
     "@ade-control-plane/quota": "workspace:*"
   }
 }

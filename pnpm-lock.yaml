@@ -60,6 +60,9 @@ importers:
       '@ade-control-plane/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@ade-control-plane/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       '@ade-control-plane/quota':
         specifier: workspace:*
         version: link:../../packages/quota
