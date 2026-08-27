@@ -23,6 +23,14 @@ const CONTENT_SECURITY_POLICY = [
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  webpack(webpackConfig) {
+    webpackConfig.resolve.extensionAlias = {
+      ".js": [".ts", ".tsx", ".js"],
+      ".mjs": [".mts", ".mjs"],
+      ".cjs": [".cts", ".cjs"],
+    };
+    return webpackConfig;
+  },
   async headers() {
     return [
       {
