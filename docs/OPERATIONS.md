@@ -181,6 +181,26 @@ Minimum operational health signals:
 
 Avoid collecting secrets or full prompts/source in metrics.
 
+## H24 host qualification
+
+After a deployment has started normally, run the repository-provided,
+read-only qualification command on the Raspberry:
+
+```bash
+/opt/ade-control-plane/deploy/bin/qualify-h24 --require-backup
+```
+
+It verifies the resolved Compose configuration, healthchecks, non-root and
+read-only application containers, dropped capabilities, private PostgreSQL and
+worker ports, absence of Docker socket mounts, loopback Dashboard binding, and
+the active `ade-runner` systemd service with its UDS socket. It only reports
+pass/fail facts and never reads secret contents or database rows.
+
+This command is evidence, not a replacement for the required restore exercise:
+use the restore sequence above with a disposable/known instance, then retain a
+sanitized record of the deployed SHA, backup timestamp, reconciliation result
+and approving operator in the #9 sign-off.
+
 ## Disk pressure
 
 The control plane should detect/report low disk space before Git worktrees, PostgreSQL or logs exhaust the SSD.

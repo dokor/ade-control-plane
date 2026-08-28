@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Read-only qualification for the advanced Raspberry topology. It deliberately
+# does not start services, alter scheduler state, inspect secret contents, or
+# perform a restore. Run it after Compose and the host runner are already up.
+
+readonly APP_DIR="${ADE_CONTROL_PLANE_DIR:-/opt/ade-control-plane}"
+readonly COMPOSE_FILE="${APP_DIR}/compose.yaml"
+readonly RUNNER_UNIT="ade-control-plane-runner.service"
+readonly RUNNER_SOCKET="${RUNNER_SOCKET_PATH:-/run/ade-control-plane-runner/runner.sock}"
+readonly BACKUP_DIR="${ADE_BACKUP_DIR:-/srv/ade-control-plane/backups}"
+readonly MAX_BACKUP_AGE_DAYS="${ADE_MAX_BACKUP_AGE_DAYS:-7}"
+require_backup=false
+
+die() { printf 'H24 qualification failed: %s\n' "$1" >&2; exit 1; }
+note() { printf 'H24 qualification: %s\n' "$1"; }
+
+if [[ "${1:-}" == "--require-backup" ]]; then
+  require_backup=true
+elif [[ "$#" -ne 0 ]]; then
+  die "usage: qualify-h24 [--require-backup]"
+fi
+
+[[ -f "$COMPOSE_FILE" ]] || die "Compose file is missing at the fixed application path"
+command -v docker >/dev/null || die "docker is unavailable"
+command -v systemctl >/dev/null || die "systemctl is unavailable"
+command -v curl >/dev/null || die "curl is unavailable"
+command -v find >/dev/null || die "find is unavailable"
+
+compose=(docker compose --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
+"${compose[@]}" config --quiet || die "Compose configuration is invalid"
+
+container_id() {
+  local service="$1"
+  local id
+  id="$("${compose[@]}" ps -q "$service")"
+  [[ -n "$id" ]] || die "$service has no running container"
+  printf '%s\n' "$id"
+}
+
+inspect() { docker inspect --format "$2" "$1"; }
+
+assert_service_is_hardened() {
+  local service="$1" id user read_only privileges capabilities
+  id="$(container_id "$service")"
+  user="$(inspect "$id" '{{.Config.User}}')"
+  read_only="$(inspect "$id" '{{.HostConfig.ReadonlyRootfs}}')"
+  privileges="$(inspect "$id" '{{json .HostConfig.SecurityOpt}}')"
+  capabilities="$(inspect "$id" '{{json .HostConfig.CapDrop}}')"
+  [[ -n "$user" && "$user" != "0" && "$user" != "root" ]] || die "$service runs as root"
+  [[ "$read_only" == "true" ]] || die "$service root filesystem is writable"
+  [[ "$privileges" == *"no-new-privileges:true"* ]] || die "$service lacks no-new-privileges"
+  [[ "$capabilities" == *"ALL"* ]] || die "$service does not drop all Linux capabilities"
+  note "$service is non-root, read-only and capability-restricted"
+}
+
+assert_healthy() {
+  local service="$1" id health
+  id="$(container_id "$service")"
+  health="$(inspect "$id" '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}')"
+  [[ "$health" == "healthy" ]] || die "$service health is $health"
+}
+
+assert_no_published_port() {
+  local service="$1" id ports
+  id="$(container_id "$service")"
+  ports="$(inspect "$id" '{{json .NetworkSettings.Ports}}')"
+  [[ "$ports" == "null" || "$ports" == "{}" ]] || die "$service publishes a host port"
+}
+
+for service in dashboard worker; do
+  assert_service_is_hardened "$service"
+  assert_healthy "$service"
+done
+assert_healthy postgres
+assert_no_published_port postgres
+assert_no_published_port worker
+
+for service in dashboard worker; do
+  id="$(container_id "$service")"
+  mounts="$(inspect "$id" '{{range .Mounts}}{{println .Source}}{{end}}')"
+  [[ "$mounts" != *"docker.sock"* ]] || die "$service mounts a Docker socket"
+done
+
+dashboard_id="$(container_id dashboard)"
+dashboard_bindings="$(inspect "$dashboard_id" '{{json .NetworkSettings.Ports}}')"
+[[ "$dashboard_bindings" == *'127.0.0.1'* ]] || die "Dashboard is not loopback-bound"
+
+systemctl is-active --quiet "$RUNNER_UNIT" || die "host runner service is not active"
+runner_user="$(systemctl show --property=User --value "$RUNNER_UNIT")"
+[[ "$runner_user" == "ade-runner" ]] || die "host runner does not use ade-runner"
+[[ -S "$RUNNER_SOCKET" ]] || die "host runner socket is unavailable"
+note "host runner is active under ade-runner with a Unix socket"
+
+if "$require_backup"; then
+  [[ -d "$BACKUP_DIR" ]] || die "backup directory is unavailable"
+  find "$BACKUP_DIR" -type f -mtime "-$((MAX_BACKUP_AGE_DAYS + 1))" -print -quit | grep -q . \
+    || die "no backup newer than ${MAX_BACKUP_AGE_DAYS} day(s)"
+  note "recent backup evidence is present"
+fi
+
+note "qualification passed; record only this sanitized result, deployed SHA, task/PR evidence and restore exercise separately"
