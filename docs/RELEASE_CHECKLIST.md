@@ -6,6 +6,20 @@ Turn issue #10 security gates and the deployment acceptance criteria into one ch
 
 This checklist records evidence; it does not replace automated tests.
 
+## Automated repository gates
+
+The CI workflow is expected to prove the following on every pull request and
+`main` commit, using a disposable PostgreSQL service and only synthetic Compose
+secret files:
+
+- lockfile-respecting dependency installation;
+- TypeScript and the complete test suite, including PostgreSQL integration tests;
+- Compose configuration resolves with the required runtime inputs;
+- no Docker socket reference is introduced in the Compose/Docker build surface.
+
+The workflow never receives production secret values and does not start the
+application stack or the privileged host runner.
+
 ## Build / source
 
 - [ ] Exact Git SHA identified.

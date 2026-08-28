@@ -16,6 +16,23 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ade_control_plane_test
+          POSTGRES_USER: ade_control_plane_test
+          POSTGRES_PASSWORD: test-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ade_control_plane_test -d ade_control_plane_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql://ade_control_plane_test:test-only-password@127.0.0.1:5432/ade_control_plane_test
 
     steps:
       - name: Checkout
@@ -33,7 +50,24 @@ jobs:
 
       # Enable setup-node pnpm cache once pnpm-lock.yaml is committed.
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Compose security boundary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          secrets_dir="$RUNNER_TEMP/ade-compose-secrets"
+          mkdir -p "$secrets_dir"
+          for secret in postgres_password database_url dashboard_session_secret dashboard_password_hash github_app_private_key codex_api_key runner_auth_secret; do
+            printf 'test-only-%s\n' "$secret" > "$secrets_dir/$secret"
+          done
+          SECRETS_DIR="$secrets_dir" \
+          DASHBOARD_PUBLIC_URL=https://ade.example.test \
+          GITHUB_APP_ID=1 \
+          GITHUB_APP_INSTALLATION_ID=1 \
+          RUNNER_SOCKET_GID="$(id -g)" \
+          docker compose config --quiet
+          ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
 
       - name: Typecheck
         run: pnpm typecheck
