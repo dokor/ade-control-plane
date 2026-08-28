@@ -11,6 +11,11 @@ Use GitHub for:
 - status/attention notifications tied to a repository object;
 - explicit project-level control commands.
 
+For post-V0 work discovery and scheduling, use the versioned
+[`GITHUB_WORK_CONTRACT.md`](GITHUB_WORK_CONTRACT.md). The scheduler consumes
+only its normalized work-item snapshot; issue prose, labels and comments do not
+silently become dependency or ordering rules.
+
 Use the Dashboard for global supervision, scheduling priorities, quota views, runner health and broad operational control.
 
 ## Preferred integration model
@@ -185,6 +190,7 @@ Final GitHub App permissions depend on implementation, but the MVP should aim fo
 
 - repository metadata: read;
 - issues: read/write if comments/commands are issue-based;
+- contents: read for the explicit `.ade/control-plane.json` compatibility profile;
 - pull requests: read/write only if PR comments/status interaction requires it;
 - contents: avoid write permission unless a concrete control-plane operation requires it;
 - administration/actions/secrets: no access by default.

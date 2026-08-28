@@ -21,6 +21,13 @@ No ADE delivery graph, prompt pack or secret is copied into Control Plane config
 
 ## Compatibility check
 
+For post-V0 GitHub-first orchestration, the primary read-only compatibility
+check is the repository profile in
+[`GITHUB_WORK_CONTRACT.md`](GITHUB_WORK_CONTRACT.md). It is fetched through the
+GitHub App API; no ADE CLI invocation is required to discover eligible GitHub
+work. The older ADE process adapter remains a V0 foundation, not the post-V0
+work-discovery protocol.
+
 Before scheduling is enabled, perform a read-only check through the configured ADE adapter.
 
 Expected checks:

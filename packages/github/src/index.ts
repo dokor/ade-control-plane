@@ -56,6 +56,21 @@ export {
   type GithubAppTokenProviderOptions,
 } from "./appAuth.js";
 export {
+  GITHUB_WORK_ITEM_VERSION,
+  GITHUB_WORK_PROFILE_PATH,
+  GITHUB_WORK_PROFILE_VERSION,
+  GithubWorkAdapterError,
+  HttpGithubWorkAdapter,
+  isGithubWorkItemFresh,
+  normalizeGithubWorkItem,
+  type GithubWorkItem,
+  type GithubWorkReader,
+  type GithubWorkRepositoryProfile,
+  type GithubWorkRetryPolicy,
+  type GithubWorkState,
+  type HttpGithubWorkAdapterOptions,
+} from "./workAdapter.js";
+export {
   commentMarker,
   isControlPlaneComment,
   renderAcknowledgement,

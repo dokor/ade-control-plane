@@ -105,17 +105,14 @@ The `runner-protocol` package already provides substantial UDS/HMAC/replay/conta
 
 ## Remaining post-V0 order
 
-Three tracks can begin independently after V0:
+The post-V0 delivery sequence is:
 
-1. #4 — connect the **real Codex quota source** to the already implemented quota domain;
-2. #8 — implement the GitHub App/webhook command and notification surface;
-3. #11 — complete the real Raspberry host runner service/executor and worker↔UDS integration.
-
-Then:
-
-4. #10 — close the full security/release-hardening gates once GitHub, runner and deployment-facing surfaces exist;
-5. #9 — complete the advanced H24 Raspberry topology/deployment after #10;
-6. remote runners/multi-machine only after a demonstrated need.
+1. #4 — connect the **real Codex quota source** to the existing quota domain;
+2. #40 — define the strict GitHub-first work contract and adapter;
+3. #37 — persist/reconcile that normalized work and orchestrate multiple projects;
+4. #8 — complete proactive GitHub attention notifications;
+5. #11 — complete the real Raspberry host runner service/executor integration;
+6. #10 then #9 — close advanced security/release gates and qualify the H24 topology.
 
 #9 remains distinct from #26: #26 ships the first simple V0; #9 validates the stronger long-running control-plane topology and operational hardening.
 
