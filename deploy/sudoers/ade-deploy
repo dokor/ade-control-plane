@@ -1,0 +1,4 @@
+# Install with mode 0440 under /etc/sudoers.d and validate with visudo.
+# The wrapper validates its sole argument as a commit SHA and owns all Docker
+# operations. Do not grant this account sudo/docker access beyond this command.
+ade-deploy ALL=(root) NOPASSWD: /opt/ade-control-plane/bin/deploy

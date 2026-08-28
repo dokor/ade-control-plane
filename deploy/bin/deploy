@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly APP_DIR="/opt/ade-control-plane"
+readonly COMPOSE_FILE="${APP_DIR}/compose.yaml"
+readonly DEPLOYED_SHA_FILE="/var/lib/ade-control-plane/deployed-sha"
+readonly HEALTH_TIMEOUT_SECONDS=120
+
+die() {
+  printf 'ade-control-plane deploy: %s\n' "$1" >&2
+  exit 1
+}
+
+[[ "$(id -u)" -eq 0 ]] || die "must run as root"
+[[ "$#" -eq 1 ]] || die "usage: deploy <40-character commit SHA>"
+
+readonly requested_sha="$1"
+[[ "$requested_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die "commit SHA is invalid"
+[[ -d "$APP_DIR/.git" && -f "$COMPOSE_FILE" ]] || die "deployment checkout is incomplete"
+
+cd "$APP_DIR"
+
+[[ -z "$(git status --porcelain)" ]] || die "deployment checkout is dirty"
+readonly remote_url="$(git remote get-url origin 2>/dev/null || true)"
+case "$remote_url" in
+  git@github.com:dokor/ade-control-plane.git|https://github.com/dokor/ade-control-plane.git|ssh://git@github.com/dokor/ade-control-plane.git) ;;
+  *) die "origin is not the allow-listed GitHub repository" ;;
+esac
+
+git fetch --quiet --no-tags origin "$requested_sha" || die "could not fetch requested commit"
+git cat-file -e "${requested_sha}^{commit}" || die "requested object is not a commit"
+git checkout --detach --force "$requested_sha" >/dev/null || die "could not select requested commit"
+
+compose=(docker compose --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
+"${compose[@]}" config --quiet || die "Compose configuration is invalid"
+"${compose[@]}" build --pull || die "container build failed"
+"${compose[@]}" up -d postgres || die "PostgreSQL could not start"
+wait_healthy postgres
+
+# The V0 worker also migrates on startup. Running the migration command first
+# makes the CD order explicit and fails before application containers switch.
+"${compose[@]}" run --rm --no-deps worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts \
+  >/dev/null || die "database migration failed"
+"${compose[@]}" up -d dashboard worker || die "application containers could not start"
+wait_healthy dashboard
+wait_healthy worker
+
+install -d -o root -g root -m 0755 "$(dirname "$DEPLOYED_SHA_FILE")"
+install -o root -g root -m 0644 <(printf '%s\n' "$requested_sha") "$DEPLOYED_SHA_FILE"
+printf 'deployed %s\n' "$requested_sha"
+
+wait_healthy() {
+  local service="$1"
+  local container_id status
+  for _ in $(seq 1 "$HEALTH_TIMEOUT_SECONDS"); do
+    container_id="$("${compose[@]}" ps -q "$service")"
+    if [[ -n "$container_id" ]]; then
+      status="$(docker inspect --format '{{.State.Health.Status}}' "$container_id" 2>/dev/null || true)"
+      if [[ "$status" == "healthy" ]]; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  "${compose[@]}" ps >&2 || true
+  die "$service did not become healthy"
+}

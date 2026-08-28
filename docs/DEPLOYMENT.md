@@ -75,6 +75,54 @@ The named `postgres_data` and `codex_home` volumes survive container
 recreation. A worker restart reconciles the durable task state according to the
 V0 worker policy; it does not blindly rerun an interrupted task.
 
+## GitHub Actions deployment
+
+Issue #36 adds `.github/workflows/deploy.yml`. It listens to the existing CI
+workflow and runs only after a successful `push` workflow for the repository's
+`main` branch. It targets a dedicated self-hosted runner with labels
+`self-hosted`, `linux`, `arm64` and `ade-deploy`, and serializes deployments
+with a GitHub Actions concurrency group. Configure the workflow's `production`
+environment according to the repository's approval policy.
+
+Install the runner under a dedicated non-root `ade-deploy` account. Keep the
+application checkout at `/opt/ade-control-plane`, configure its GitHub remote
+and deployment-only Git credentials, then install the reviewed wrapper and
+sudoers entry:
+
+```bash
+sudo install -d -o root -g root -m 0755 /opt/ade-control-plane/bin
+sudo install -o root -g root -m 0755 deploy/bin/deploy /opt/ade-control-plane/bin/deploy
+sudo install -o root -g root -m 0440 deploy/sudoers/ade-deploy /etc/sudoers.d/ade-deploy
+sudo visudo -cf /etc/sudoers.d/ade-deploy
+```
+
+The runner account is not added to the Docker group. The workflow can invoke
+only `/opt/ade-control-plane/bin/deploy`; it cannot invoke generic `sudo`
+commands or `sudo docker`. The wrapper accepts one validated commit SHA,
+requires the allow-listed repository and clean checkout, builds the selected
+version, starts PostgreSQL, runs the migration command, starts the application,
+waits for all Compose healthchecks and records the deployed SHA in
+`/var/lib/ade-control-plane/deployed-sha`. It never prints secrets.
+
+The wrapper itself must be reviewed and reinstalled from an approved `main`
+commit when it changes. Production runtime secrets remain in the protected
+`secrets/` directory on the Raspberry; GitHub Actions receives no database,
+GitHub or Codex secret.
+
+## Manual redeploy and rollback
+
+The same wrapper is the break-glass path for a known-good commit:
+
+```bash
+sudo -n /opt/ade-control-plane/bin/deploy <known-good-40-character-sha>
+cat /var/lib/ade-control-plane/deployed-sha
+docker compose ps
+```
+
+Only rollback to a commit whose migrations are compatible with the current
+database. Database migrations are not automatically reversed. Keep the manual
+procedure available even when GitHub Actions is enabled.
+
 ## Reboot validation
 
 Enable Docker at boot, reboot the host, then verify:
