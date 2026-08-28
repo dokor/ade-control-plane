@@ -36,10 +36,17 @@ export interface GithubWorkDispatcher {
   execute(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult>;
 }
 
+/** Proactive GitHub attention is best-effort and never changes scheduling. */
+export interface GithubWorkAttentionNotifier {
+  waitingHuman(project: ProjectRecord, work: GithubWorkItemRecord): Promise<void>;
+  failure(project: ProjectRecord, work: GithubWorkItemRecord, errorCode: string): Promise<void>;
+}
+
 export interface GithubWorkOrchestratorOptions {
   persistence: ControlPlanePersistence;
   reader: GithubWorkReader;
   dispatcher: GithubWorkDispatcher;
+  notifier?: GithubWorkAttentionNotifier;
   ownerId: string;
   /** Matches V0 behaviour when no App Server quota source is configured. */
   allowStartWithoutQuotaSnapshot?: boolean;
@@ -170,6 +177,9 @@ export class GithubWorkOrchestrator {
           metadata: { issueNumber: selection.item.issueNumber },
         },
       });
+      if (result.status === "failed") {
+        await this.options.notifier?.failure(project, work, result.errorCode ?? "EXECUTION_FAILED");
+      }
     } catch {
       await store.executions.complete({
         executionId: scheduled.execution.id, status: "failed", finishedAt: this.now().toISOString(),
@@ -181,6 +191,7 @@ export class GithubWorkOrchestrator {
           action: "github-work.dispatch-failed", result: "failed", metadata: { issueNumber: selection.item.issueNumber },
         },
       });
+      await this.options.notifier?.failure(project, work, "AGENT_DISPATCH_FAILED");
     }
     return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
   }
@@ -189,20 +200,40 @@ export class GithubWorkOrchestrator {
     const repository = { id: project.repositoryId ?? `unresolved:${project.id}`, owner: project.repositoryOwner, name: project.repositoryName };
     const observedAt = this.now().toISOString();
     try {
+      const previous = await this.options.persistence.githubWork.listForProject(project.id);
       const profile = project.repositoryId
         ? await this.options.reader.detectRepository(repository)
         : incompatibleProfile(repository, observedAt);
       const items = profile.compatible ? await this.options.reader.listWorkItems(repository) : [];
-      await this.options.persistence.githubWork.reconcile({
+      const reconciled = await this.options.persistence.githubWork.reconcile({
         profile: toProfileInput(project.id, profile),
         items: items.map((item) => toItemInput(project.id, item)),
       });
+      await this.notifyAttentionChanges(project, previous, reconciled);
     } catch {
       await this.options.persistence.auditEvents.append({
         occurredAt: observedAt, category: "github-work", severity: "warning", actorType: "system",
         projectId: project.id, action: "github-work.reconciliation-failed", result: "deferred",
         metadata: {},
       });
+    }
+  }
+
+  private async notifyAttentionChanges(
+    project: ProjectRecord,
+    previous: readonly GithubWorkItemRecord[],
+    reconciled: readonly GithubWorkItemRecord[],
+  ): Promise<void> {
+    const notifier = this.options.notifier;
+    if (!notifier) return;
+    const previousByIssue = new Map(previous.map((item) => [item.issueNumber, item]));
+    for (const work of reconciled) {
+      if (!work.present || (work.state !== "waiting-human" && work.state !== "failed")) continue;
+      const before = previousByIssue.get(work.issueNumber);
+      const changed = before?.state !== work.state || before.sourceUpdatedAt !== work.sourceUpdatedAt;
+      if (!changed) continue;
+      if (work.state === "waiting-human") await notifier.waitingHuman(project, work);
+      else await notifier.failure(project, work, "GITHUB_WORK_FAILED");
     }
   }
 }

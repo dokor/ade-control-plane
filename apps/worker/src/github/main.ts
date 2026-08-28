@@ -7,6 +7,7 @@ import { NodeCommandRunner } from "../v0/CommandRunner.js";
 import { loadV0WorkerRuntime } from "../v0/runtime.js";
 import { GithubWorkCodexExecutor } from "../GithubWorkCodexExecutor.js";
 import { GithubWorkOrchestrator } from "../GithubWorkOrchestrator.js";
+import { GithubWorkNotifier } from "../GithubWorkNotifier.js";
 
 async function main(): Promise<void> {
   const config = await loadV0WorkerRuntime();
@@ -34,6 +35,11 @@ async function main(): Promise<void> {
       }),
       ownerId: `github-work:${hostname()}:${process.pid}`,
       allowStartWithoutQuotaSnapshot: config.codexAppServerUrl === null,
+      notifier: new GithubWorkNotifier({
+        persistence: store,
+        client: github,
+        dashboardUrl: config.dashboardUrl,
+      }),
     });
     await ensureLocalRunner(store);
     while (!stop.signal.aborted) {

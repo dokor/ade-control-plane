@@ -95,6 +95,12 @@ It uses a deterministic `github-work:<project-id>:<issue-number>` lease before
 starting Codex. A restart leaves an active lease visible for reconciliation;
 it never starts a second execution for the same issue implicitly.
 
+When an item changes to `waiting-human`, the worker may update one
+project-scoped bot comment on that issue. The notification is a pointer to the
+Dashboard rather than a synthetic decision command: decision options remain
+valid only when a trusted source has exposed them. A failed execution similarly
+updates one failure comment using a safe error code only.
+
 ## GitHub App permissions
 
 The read path needs repository metadata, Contents read and Issues read. The

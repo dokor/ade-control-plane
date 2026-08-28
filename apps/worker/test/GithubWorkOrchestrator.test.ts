@@ -25,6 +25,7 @@ function harness(items: readonly GithubWorkItemRecord[]) {
   const activeKeys = new Set<string>();
   const leaseByExecution = new Map<string, string>();
   const dispatches: GithubWorkDispatchRequest[] = [];
+  const notifications: { kind: "waiting" | "failure"; issueNumber: number }[] = [];
   const persistence = {
     settings: { get: async () => ({ schedulerMode: "running", quotaThrottledPercent: 70, quotaDrainingPercent: 85, quotaBlockedPercent: 95, quotaStaleAfterMs: 300_000, updatedAt: NOW, updatedBy: "test" }) },
     projects: { list: async () => projects },
@@ -32,6 +33,7 @@ function harness(items: readonly GithubWorkItemRecord[]) {
     providerQuotaSnapshots: { getLatest: async () => null },
     githubWork: {
       getProfile: async (projectId: string) => profiles.find((entry) => entry.projectId === projectId) ?? null,
+      listForProject: async (projectId: string) => persisted.filter((entry) => entry.projectId === projectId),
       listForProjects: async (projectIds: readonly string[]) => persisted.filter((entry) => projectIds.includes(entry.projectId)),
       reconcile: async (input: { profile: GithubWorkProfileRecord; items: readonly GithubWorkItemRecord[] }) => {
         const profileIndex = profiles.findIndex((entry) => entry.projectId === input.profile.projectId);
@@ -92,8 +94,11 @@ function harness(items: readonly GithubWorkItemRecord[]) {
       })),
     getWorkItem: async () => null,
   };
-  const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, now: () => new Date(NOW), dispatcher: { execute: async (request) => { dispatches.push(request); return { status: "succeeded" }; } } });
-  return { orchestrator, dispatches, executions };
+  const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, now: () => new Date(NOW), dispatcher: { execute: async (request) => { dispatches.push(request); return { status: "succeeded" }; } }, notifier: {
+    waitingHuman: async (_project, item) => { notifications.push({ kind: "waiting", issueNumber: item.issueNumber }); },
+    failure: async (_project, item) => { notifications.push({ kind: "failure", issueNumber: item.issueNumber }); },
+  } });
+  return { orchestrator, dispatches, executions, notifications };
 }
 
 function updateExecution(executions: ExecutionRecord[], id: string, status: ExecutionRecord["status"]): ExecutionRecord {
@@ -137,4 +142,12 @@ test("a stale GitHub work projection is never dispatched", async () => {
   const result = await orchestrator.runCycle();
   assert.equal(result.outcome, "idle");
   assert.equal(dispatches.length, 0);
+});
+
+test("notifies only once for an unchanged waiting-human GitHub revision", async () => {
+  const waiting = { ...work("alpha", 12, "waiting-human", 80), humanDecisionRef: "D12" };
+  const { orchestrator, notifications } = harness([waiting]);
+  await orchestrator.runCycle();
+  await orchestrator.runCycle();
+  assert.deepEqual(notifications, [{ kind: "waiting", issueNumber: 12 }]);
 });

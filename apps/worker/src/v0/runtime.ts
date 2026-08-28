@@ -10,6 +10,7 @@ export interface V0WorkerRuntimeConfig {
   quotaAccountRef: string;
   taskTimeoutMs: number;
   idleDelayMs: number;
+  dashboardUrl: string;
   github: {
     appId: string;
     installationId: string;
@@ -32,6 +33,7 @@ export async function loadV0WorkerRuntime(
   const codexHome = requiredAbsolute(env.CODEX_HOME, "CODEX_HOME");
   const gitHome = requiredAbsolute(env.V0_GIT_HOME, "V0_GIT_HOME");
   const codexAppServerUrl = optionalWebSocketUrl(env.CODEX_APP_SERVER_URL);
+  const dashboardUrl = requiredHttpUrl(env.DASHBOARD_PUBLIC_URL, "DASHBOARD_PUBLIC_URL");
 
   const childBase = safeChildEnvironment(env);
   const codexEnvironment = {
@@ -54,6 +56,7 @@ export async function loadV0WorkerRuntime(
     quotaAccountRef: env.CODEX_CREDENTIAL_REF?.trim() || "codex-account-main",
     taskTimeoutMs: positiveInteger(env.V0_TASK_TIMEOUT_SECONDS, 3_600) * 1_000,
     idleDelayMs: positiveInteger(env.V0_WORKER_IDLE_SECONDS, 2) * 1_000,
+    dashboardUrl,
     github: { appId, installationId, privateKey },
   };
 }
@@ -115,6 +118,20 @@ function requiredAbsolute(value: string | undefined, name: string): string {
   const path = required(value, name);
   if (!isAbsolute(path)) throw new Error(`${name} must be an absolute path.`);
   return path;
+}
+
+function requiredHttpUrl(value: string | undefined, name: string): string {
+  const raw = required(value, name);
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`${name} must be a valid HTTP(S) URL.`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`${name} must use http:// or https://.`);
+  }
+  return parsed.origin;
 }
 
 function positiveInteger(value: string | undefined, fallback: number): number {
