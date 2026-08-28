@@ -7,6 +7,11 @@ import type {
   GithubBotCommentRecord,
   GithubDeliveryRecord,
   GithubDeliveryStatus,
+  GithubWorkItemRecord,
+  GithubWorkItemState,
+  GithubWorkProfileReason,
+  GithubWorkProfileRecord,
+  GithubWorkRetryPolicy,
   GithubSubjectType,
   CompletionResult,
   ControlCommandRecord,
@@ -219,6 +224,52 @@ export interface GithubDeliveryRepository {
   listRecent(limit: number): Promise<readonly GithubDeliveryRecord[]>;
 }
 
+export interface GithubWorkProfileInput {
+  projectId: string;
+  repositoryGithubId: string;
+  compatible: boolean;
+  contractVersion?: string | null;
+  capabilities?: readonly string[];
+  skillPaths?: readonly string[];
+  reason: GithubWorkProfileReason;
+  observedAt: string;
+}
+
+export interface GithubWorkItemInput {
+  projectId: string;
+  repositoryGithubId: string;
+  contractVersion: string;
+  issueNumber: number;
+  issueUrl: string;
+  state: GithubWorkItemState;
+  priority: number;
+  dependsOn: readonly number[];
+  retryPolicy: GithubWorkRetryPolicy;
+  humanDecisionRef?: string | null;
+  executionRef?: string | null;
+  branchName?: string | null;
+  pullRequestNumber?: number | null;
+  sourceUpdatedAt: string;
+  observedAt: string;
+  expiresAt: string;
+}
+
+export interface GithubWorkReconciliationInput {
+  profile: GithubWorkProfileInput;
+  items: readonly GithubWorkItemInput[];
+}
+
+/**
+ * Durable control-plane cache of the validated GitHub-first work contract.
+ * Reconciliation replaces presence atomically; it does not copy issue prose.
+ */
+export interface GithubWorkRepository {
+  getProfile(projectId: string): Promise<GithubWorkProfileRecord | null>;
+  listForProject(projectId: string): Promise<readonly GithubWorkItemRecord[]>;
+  listForProjects(projectIds: readonly string[]): Promise<readonly GithubWorkItemRecord[]>;
+  reconcile(input: GithubWorkReconciliationInput): Promise<readonly GithubWorkItemRecord[]>;
+}
+
 export interface GithubBotCommentRepository {
   find(
     projectId: string,
@@ -380,6 +431,7 @@ export interface ControlPlanePersistence {
   readonly adeDecisions: AdeDecisionRepository;
   readonly githubBotComments: GithubBotCommentRepository;
   readonly githubDeliveries: GithubDeliveryRepository;
+  readonly githubWork: GithubWorkRepository;
   readonly settings: ControlPlaneSettingsRepository;
   readonly projects: ProjectRepository;
   readonly projectSnapshots: ProjectSnapshotRepository;

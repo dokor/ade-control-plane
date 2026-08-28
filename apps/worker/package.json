@@ -7,6 +7,8 @@
     "dev": "tsx src/index.ts",
     "dev:v0": "tsx src/v0/main.ts",
     "start:v0": "tsx src/v0/main.ts",
+    "dev:github-work": "tsx src/github/main.ts",
+    "start:github-work": "tsx src/github/main.ts",
     "test": "tsx --test test/**/*.test.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

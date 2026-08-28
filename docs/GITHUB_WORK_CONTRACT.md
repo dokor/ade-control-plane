@@ -81,7 +81,7 @@ process directly.
 
 ## Agent handoff
 
-After the scheduler has created a durable lease, the future worker launch gets
+After the scheduler has created a durable lease, the GitHub-work worker launch gets
 the exact repository, issue number/URL, validated metadata, configured skill
 paths, workspace and expected validations. The agent may use its native Git,
 file and terminal tools, but no issue field becomes a shell command.
@@ -89,6 +89,11 @@ file and terminal tools, but no issue field becomes a shell command.
 Branch, PR, checks and a human decision remain correlated through the durable
 execution reference and the validated metadata. No auto-merge is implied by
 this contract.
+
+The worker treats every code-agent run as long work for quota-draining safety.
+It uses a deterministic `github-work:<project-id>:<issue-number>` lease before
+starting Codex. A restart leaves an active lease visible for reconciliation;
+it never starts a second execution for the same issue implicitly.
 
 ## GitHub App permissions
 

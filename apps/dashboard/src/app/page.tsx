@@ -143,9 +143,9 @@ export default async function OverviewPage() {
                   </span>
                 </div>
                 <p className="detail">
-                  {project.stage ? `Stage ${project.stage}` : "Stage unknown"}
+                  {project.stage ? `Contract ${project.stage}` : "GitHub contract unknown"}
                   {project.milestone ? ` · ${project.milestone}` : ""}
-                  {" · snapshot "}
+                  {" · GitHub sync "}
                   {formatAge(project.snapshotAgeMs)}
                   {project.snapshotFresh ? "" : " (stale)"}
                 </p>

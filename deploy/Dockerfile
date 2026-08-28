@@ -46,4 +46,4 @@ USER ade-worker
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh \
   && command -v codex
 WORKDIR /workspace
-CMD ["node_modules/.bin/tsx", "apps/worker/src/v0/main.ts"]
+CMD ["node_modules/.bin/tsx", "apps/worker/src/github/main.ts"]

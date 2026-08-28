@@ -48,6 +48,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         quotaProvider: github.quotaProvider,
         quotaAccountRef: github.quotaAccountRef,
         client: github.client,
+        workReader: github.workReader,
         correlationId,
       },
       rawBody,

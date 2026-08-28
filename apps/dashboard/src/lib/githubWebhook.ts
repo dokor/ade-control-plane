@@ -11,6 +11,7 @@ import {
   type BotCommentStore,
   type GithubAuthorizationPolicy,
   type GithubClient,
+  type GithubWorkReader,
   type NormalizedGithubEvent,
   type ParsedGithubCommand,
   parseCommand,
@@ -35,6 +36,7 @@ export interface GithubWebhookDependencies {
   quotaAccountRef: string;
   /** Absent when no GitHub App credential is configured; the bot stays silent. */
   client?: GithubClient | undefined;
+  workReader?: GithubWorkReader | undefined;
   now?: string;
   correlationId: string;
 }
@@ -95,6 +97,15 @@ export async function handleGithubDelivery(
       return await ignore(dependencies, deliveryId, "UNKNOWN_REPOSITORY");
     }
 
+    if (event.event === "issues" && event.subject?.type === "issue" && dependencies.workReader) {
+      authorizeInstallation(event.installationId, dependencies.policy);
+      await reconcileGithubWork(dependencies, project, event.repository);
+      await dependencies.persistence.githubDeliveries.updateOutcome(deliveryId, {
+        status: "processed", processedAt: now,
+      });
+      return { status: "processed", commandId: null, summary: "GitHub work refreshed." };
+    }
+
     const command = readCommand(event);
     if (command === null) {
       return await ignore(dependencies, deliveryId, "NO_COMMAND");
@@ -126,6 +137,32 @@ export async function handleGithubDelivery(
     // confirm to a stranger that this repository is managed.
     return { status: "rejected", code, httpStatus: 202 };
   }
+}
+
+/** A webhook is only a prompt to refresh trusted API state; it never dispatches Codex. */
+async function reconcileGithubWork(
+  dependencies: GithubWebhookDependencies,
+  project: ProjectRecord,
+  repository: NormalizedGithubEvent["repository"],
+): Promise<void> {
+  const reader = dependencies.workReader;
+  if (!reader) return;
+  const profile = await reader.detectRepository(repository);
+  const items = profile.compatible ? await reader.listWorkItems(repository) : [];
+  await dependencies.persistence.githubWork.reconcile({
+    profile: {
+      projectId: project.id, repositoryGithubId: repository.id, compatible: profile.compatible,
+      contractVersion: profile.contractVersion, capabilities: profile.capabilities,
+      skillPaths: profile.skillPaths, reason: profile.reason, observedAt: profile.observedAt,
+    },
+    items: items.map((item) => ({
+      projectId: project.id, repositoryGithubId: item.repository.id, contractVersion: item.contractVersion,
+      issueNumber: item.issueNumber, issueUrl: item.issueUrl, state: item.state, priority: item.priority,
+      dependsOn: item.dependsOn, retryPolicy: item.retryPolicy, humanDecisionRef: item.humanDecisionRef,
+      executionRef: item.executionRef, branchName: item.branchName, pullRequestNumber: item.pullRequestNumber,
+      sourceUpdatedAt: item.sourceUpdatedAt, observedAt: item.observedAt, expiresAt: item.expiresAt,
+    })),
+  });
 }
 
 async function resolveProject(

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 
-import { DeterministicFakeGithubClient } from "@ade-control-plane/github";
+import { DeterministicFakeGithubClient, type GithubWorkReader } from "@ade-control-plane/github";
 
 import { handleGithubDelivery } from "../src/lib/githubWebhook.js";
 import {
@@ -98,6 +98,40 @@ test("a duplicate delivery id produces no second effect", async () => {
   assert.equal(replay.status, "duplicate");
   assert.equal(state.commands.length, 1);
   assert.equal(state.deliveries.length, 1);
+});
+
+test("a verified issues delivery refreshes normalized work once and never dispatches", async () => {
+  const state = baseState();
+  const raw = Buffer.from(JSON.stringify(payload("", { action: "edited" })));
+  const headers = new Headers({
+    "x-github-delivery": "issues-refresh-1",
+    "x-github-event": "issues",
+    "x-hub-signature-256": `sha256=${createHmac("sha256", SECRET).update(raw).digest("hex")}`,
+  });
+  const reader: GithubWorkReader = {
+    detectRepository: async (repository) => ({ repository, compatible: true, contractVersion: "ade.github-work-profile/v1", capabilities: ["github-work-items"], skillPaths: [".agents/skills"], observedAt: NOW, reason: "compatible" }),
+    listWorkItems: async (repository) => [{
+      repository, contractVersion: "ade.github-work/v1", issueNumber: 42,
+      issueUrl: "https://github.com/dokor/argos/issues/42", state: "ready", priority: 80,
+      dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null,
+      executionRef: null, branchName: null, pullRequestNumber: null,
+      sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T10:05:00.000Z",
+    }],
+    getWorkItem: async () => null,
+  };
+  const dependencies = {
+    persistence: createMemoryPersistence(state), webhookSecret: SECRET,
+    policy: { allowedActorIds: [ACTOR_ID] }, dashboardUrl: "https://ade.example.com",
+    quotaProvider: "openai", quotaAccountRef: "codex-account-main", workReader: reader,
+    now: NOW, correlationId: "corr-issues",
+  };
+
+  const first = await handleGithubDelivery(dependencies, raw, headers);
+  const second = await handleGithubDelivery(dependencies, raw, headers);
+  assert.deepEqual(first, { status: "processed", commandId: null, summary: "GitHub work refreshed." });
+  assert.equal(second.status, "duplicate");
+  assert.equal(state.githubWorkItems.length, 1);
+  assert.equal(state.commands.length, 0);
 });
 
 test("an unregistered repository is ignored without mutation", async () => {

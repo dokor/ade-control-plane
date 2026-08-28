@@ -1,7 +1,7 @@
 # V0 Raspberry deployment
 
 This is the short deployment procedure for issue #26 and the V0 path from
-issue #1. It runs only the Dashboard, the single V0 Codex worker and
+issue #1. It runs the Dashboard, the GitHub-first Codex worker and
 PostgreSQL. The worker is the only container with access to the registered
 project checkout and Git push configuration.
 
@@ -24,7 +24,7 @@ repositories. Do not mount a Docker socket.
 
 Create the runtime files described in [`secrets/README.md`](../secrets/README.md).
 The database URL must use the Compose service name `postgres`, not a public
-host address. Register projects with a relative `configuration.v0.checkout`
+host address. Register projects with a numeric GitHub repository ID and a relative `configuration.v0.checkout`
 under `V0_PROJECTS_HOST`; the worker rejects absolute paths, traversal and
 GitHub remotes that do not match the registered repository.
 
@@ -65,8 +65,8 @@ CODEX_CREDENTIAL_REF=codex-account-main
 
 The worker reads `account/rateLimits/read` before claiming work, persists only
 the normalized observation and refuses new work for blocked or unknown quota.
-Leave the URL empty until App Server is available; this keeps the original V0
-worker path operational. Never put a Codex credential in the URL.
+Leave the URL empty until App Server is available; the worker keeps the V0
+normal-quota fallback. Never put a Codex credential in the URL.
 
 ## Update, restart and backup
 
@@ -92,8 +92,8 @@ docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES
 ```
 
 The named `postgres_data` and `codex_home` volumes survive container
-recreation. A worker restart reconciles the durable task state according to the
-V0 worker policy; it does not blindly rerun an interrupted task.
+recreation. A worker restart retains active GitHub-work leases for
+reconciliation; it does not blindly rerun an interrupted issue.
 
 ## GitHub Actions deployment
 
