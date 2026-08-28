@@ -69,6 +69,9 @@ jobs:
           docker compose config --quiet
           ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
 
+      - name: Validate operational scripts
+        run: bash -n deploy/bin/deploy deploy/bin/qualify-h24
+
       - name: Typecheck
         run: pnpm typecheck
 

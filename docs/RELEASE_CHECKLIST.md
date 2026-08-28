@@ -99,6 +99,7 @@ application stack or the privileged host runner.
 - [ ] Volume mounts match documented allow-list.
 - [ ] Restart policies return services after host reboot.
 - [ ] Reverse proxy/TLS exposes only intended surface.
+- [ ] `deploy/bin/qualify-h24 --require-backup` passes on the target and its sanitized output is attached to the sign-off.
 
 ## E2E acceptance
 
