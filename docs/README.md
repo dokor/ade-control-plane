@@ -30,6 +30,7 @@ Use this page as the entry point for design and implementation work.
 - [`RUNNER_PROTOCOL.md`](RUNNER_PROTOCOL.md) — secure typed worker-to-host-runner protocol.
 - [`DASHBOARD.md`](DASHBOARD.md) — Dashboard information architecture and control API semantics.
 - [`V0_TASK_API.md`](V0_TASK_API.md) — minimal single-active task lifecycle and HTTP API.
+- [`DEPLOYMENT.md`](DEPLOYMENT.md) — Raspberry/Docker Compose install, operations and backup procedure for V0.
 - [`V0_CODEX_WORKER.md`](V0_CODEX_WORKER.md) — allow-listed Codex/Git/PR execution flow.
 - [`GITHUB_INTEGRATION.md`](GITHUB_INTEGRATION.md) — GitHub App/webhook/command interaction model.
 - [`GITHUB_APP_SETUP.md`](GITHUB_APP_SETUP.md) — minimal GitHub App permissions, webhook and actor-authorization setup.
