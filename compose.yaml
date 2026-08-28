@@ -38,7 +38,7 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL_FILE: /run/secrets/database_url
-      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?Set DASHBOARD_PUBLIC_URL in .env}
+      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?Set DASHBOARD_PUBLIC_URL in the production environment file}
       DASHBOARD_SESSION_SECRET_FILE: /run/secrets/dashboard_session_secret
       DASHBOARD_PASSWORD_HASH_FILE: /run/secrets/dashboard_password_hash
       DASHBOARD_OPERATOR_REF: ${DASHBOARD_OPERATOR_REF:-operator}
@@ -62,13 +62,13 @@ services:
     labels:
       - traefik.enable=true
       - traefik.docker.network=proxy
-      - traefik.http.routers.ade-control-plane.rule=Host(`${DASHBOARD_PUBLIC_HOST:?Set DASHBOARD_PUBLIC_HOST in .env}`)
+      - traefik.http.routers.ade-control-plane.rule=Host(`${DASHBOARD_PUBLIC_HOST:?Set DASHBOARD_PUBLIC_HOST in the production environment file}`)
       - traefik.http.routers.ade-control-plane.entrypoints=websecure
       - traefik.http.routers.ade-control-plane.tls=true
       - traefik.http.routers.ade-control-plane.tls.certresolver=le
       - traefik.http.routers.ade-control-plane.tls.options=modern@file
       - traefik.http.services.ade-control-plane.loadbalancer.server.port=3000
-      - traefik.http.routers.ade-control-plane-http.rule=Host(`${DASHBOARD_PUBLIC_HOST:?Set DASHBOARD_PUBLIC_HOST in .env}`)
+      - traefik.http.routers.ade-control-plane-http.rule=Host(`${DASHBOARD_PUBLIC_HOST:?Set DASHBOARD_PUBLIC_HOST in the production environment file}`)
       - traefik.http.routers.ade-control-plane-http.entrypoints=web
       - traefik.http.routers.ade-control-plane-http.middlewares=ade-control-plane-redirect
       - traefik.http.middlewares.ade-control-plane-redirect.redirectscheme.scheme=https
@@ -108,9 +108,9 @@ services:
       V0_GIT_HOME: /home/ade-git
       V0_TASK_TIMEOUT_SECONDS: ${V0_TASK_TIMEOUT_SECONDS:-3600}
       V0_WORKER_IDLE_SECONDS: ${V0_WORKER_IDLE_SECONDS:-2}
-      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?Set DASHBOARD_PUBLIC_URL in .env}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID in .env}
-      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID in .env}
+      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?Set DASHBOARD_PUBLIC_URL in the production environment file}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID in the production environment file}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID in the production environment file}
       GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
       # The host runner owns the socket and host workspaces. The worker gets
       # only this narrow runtime directory and the dedicated HMAC secret.

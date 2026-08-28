@@ -28,7 +28,8 @@ Recommended layout:
 ├── projects/
 └── logs/
 
-/etc/ade-control-plane/
+/srv/configs/ade-control-plane/
+├── .env.prod
 └── secrets/
 ```
 
