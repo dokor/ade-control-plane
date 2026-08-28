@@ -95,14 +95,22 @@ services:
       GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID in .env}
       GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID in .env}
       GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+      # The host runner owns the socket and host workspaces. The worker gets
+      # only this narrow runtime directory and the dedicated HMAC secret.
+      RUNNER_SOCKET_PATH: /run/ade-control-plane-runner/runner.sock
+      RUNNER_AUTH_SECRET_FILE: /run/secrets/runner_auth_secret
     secrets:
       - database_url
       - codex_api_key
       - github_app_private_key
+      - runner_auth_secret
     volumes:
       - ${V0_PROJECTS_HOST:-./data/projects}:/srv/ade-projects:rw
       - ${V0_GIT_HOME_HOST:-./data/git-home}:/home/ade-git:ro
       - codex_home:/home/ade-worker/.codex
+      - ${RUNNER_RUNTIME_DIR_HOST:-/run/ade-control-plane-runner}:/run/ade-control-plane-runner:rw
+    group_add:
+      - "${RUNNER_SOCKET_GID:?Set RUNNER_SOCKET_GID to the host ade-runner group GID}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -137,6 +145,8 @@ secrets:
     file: ${SECRETS_DIR:-./secrets}/github_app_private_key
   codex_api_key:
     file: ${SECRETS_DIR:-./secrets}/codex_api_key
+  runner_auth_secret:
+    file: ${SECRETS_DIR:-./secrets}/runner_auth_secret
 
 networks:
   control:

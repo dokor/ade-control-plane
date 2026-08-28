@@ -52,7 +52,7 @@ control-plane worker
 
 The host runner owns the socket. Filesystem owner/group/mode restrict who can connect. The worker container receives access only to the narrow runtime directory/socket, never to the host filesystem broadly.
 
-The MVP systemd unit template is [`../deploy/systemd/ade-control-plane-runner.service`](../deploy/systemd/ade-control-plane-runner.service). It runs as the dedicated `ade-runner` account, creates `/run/ade-control-plane-runner` with mode `0750`, and only grants write access to the configured workspace root and runtime directory. The production service entrypoint must bind the UDS through `@ade-control-plane/runner-protocol`; it must not add a TCP listener.
+The systemd unit template is [`../deploy/systemd/ade-control-plane-runner.service`](../deploy/systemd/ade-control-plane-runner.service). It runs as the dedicated `ade-runner` account, creates `/run/ade-control-plane-runner` with mode `0750`, and only grants write access to the configured workspace root and runtime directory. The production entrypoint is [`../runner/server.ts`](../runner/server.ts): it binds the UDS through `@ade-control-plane/runner-protocol`; it does not add a TCP listener.
 
 Use a simple typed request protocol over the socket; HTTP over UDS is acceptable because Node supports Unix socket clients/servers and it avoids inventing custom network framing.
 
@@ -232,6 +232,9 @@ For every operation:
 
 Workspace identifiers should preferably be opaque references mapped by the runner.
 
+The implemented host configuration requires that mapping. Start from
+[`../deploy/runner/runner.config.example.json`](../deploy/runner/runner.config.example.json), replace the logical Control Plane project ID and copy it outside the repository to `/etc/ade-control-plane-runner/runner.config.json`. Each configured root and each mapped relative workspace is canonicalized at service start; a request can only select a mapping key such as `primary`, never a raw host path.
+
 ## Local process execution
 
 The runner may internally start ADE/Git/build processes, but it constructs invocations itself from typed inputs.
@@ -336,6 +339,15 @@ Requirements:
 - socket removed/recreated safely on runner restart;
 - worker container mounts only this directory or socket, not `/run` generally;
 - no secret file needs to be placed beside the socket unless permissions and ownership are explicitly designed for it.
+
+### Raspberry service installation
+
+1. Create the non-login `ade-runner` account and copy the unit, the non-secret JSON configuration and the environment file examples from `deploy/runner/` to `/etc/ade-control-plane-runner/`.
+2. Put the dedicated worker-runner HMAC secret in `/etc/ade-control-plane-runner/runner_auth_secret`, owned by `ade-runner`, mode `0600`. Put the same value in the Compose secret `runner_auth_secret`; never commit either file.
+3. Install production workspace dependencies on the host (`pnpm install --frozen-lockfile --prod`) so the unit can run the packaged `tsx` entrypoint, then run `systemctl daemon-reload` and `systemctl enable --now ade-control-plane-runner`.
+4. Set `RUNNER_SOCKET_GID` to the numeric `ade-runner` group GID before `docker compose up`. The worker receives that supplementary group and only the `/run/ade-control-plane-runner` bind mount. It does not receive `/srv/ade-workspaces`, a Docker socket or runner process credentials.
+
+Verify with `systemctl status ade-control-plane-runner`, then `docker compose exec worker test -S /run/ade-control-plane-runner/runner.sock`. The service logs only fixed startup/failure messages; ADE stdout/stderr is bounded and never copied to the socket.
 
 ## Remote runners later
 

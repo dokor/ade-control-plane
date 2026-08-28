@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@ade-control-plane/host-runner':
+        specifier: workspace:*
+        version: link:packages/host-runner
     devDependencies:
       '@types/node':
         specifier: ^24.4.0
@@ -66,6 +70,9 @@ importers:
       '@ade-control-plane/quota':
         specifier: workspace:*
         version: link:../../packages/quota
+      '@ade-control-plane/runner-protocol':
+        specifier: workspace:*
+        version: link:../../packages/runner-protocol
 
   packages/ade-client: {}
 
@@ -82,6 +89,18 @@ importers:
         version: 8.23.1
 
   packages/github: {}
+
+  packages/host-runner:
+    dependencies:
+      '@ade-control-plane/ade-client':
+        specifier: workspace:*
+        version: link:../ade-client
+      '@ade-control-plane/runner-protocol':
+        specifier: workspace:*
+        version: link:../runner-protocol
+      tsx:
+        specifier: ^4.20.5
+        version: 4.23.12
 
   packages/quota: {}
 

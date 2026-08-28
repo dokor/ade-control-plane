@@ -35,6 +35,11 @@ export interface RunnerResponse {
 export interface RunnerProjectPolicy {
   root: string;
   capabilities: readonly RunnerCapability[];
+  /**
+   * Optional runner-owned mapping from opaque workspace references to relative
+   * paths. When configured, callers cannot select arbitrary paths below root.
+   */
+  workspaces?: Readonly<Record<string, string>>;
 }
 
 export interface RunnerExecutor {
@@ -89,7 +94,13 @@ export class SecureRunner {
     if (!project.capabilities.includes(request.capability)) return reject("CAPABILITY_NOT_ALLOWED", "Capability is not allowed for this project.");
     if (!validCapabilityInput(request.capability, request.input, request.executionId)) return reject("INPUT_INVALID", "Runner capability input is invalid.");
     let workspacePath: string;
-    try { workspacePath = await resolveWorkspace(project.root, request.workspaceRef); }
+    try {
+      const workspace = project.workspaces?.[request.workspaceRef] ?? request.workspaceRef;
+      if (project.workspaces && !(request.workspaceRef in project.workspaces)) {
+        return reject("WORKSPACE_NOT_ALLOWED", "Workspace reference is not allowed for this project.");
+      }
+      workspacePath = await resolveWorkspace(project.root, workspace);
+    }
     catch { return reject("WORKSPACE_CONTAINMENT_FAILED", "Workspace reference is outside the configured project root."); }
     this.consumed.set(request.requestId, Date.parse(request.expiresAt));
     this.consumed.set(request.nonce, Date.parse(request.expiresAt));
@@ -128,7 +139,12 @@ export function createUnixRunnerServer(socketPath: string, runner: SecureRunner)
   return createServer(async (req, res) => {
     if (req.method !== "POST" || req.url !== "/v1/requests") { res.writeHead(404).end(); return; }
     const chunks: Buffer[] = [];
-    for await (const chunk of req) { if (chunks.reduce((size, value) => size + value.length, 0) > 128 * 1024) { res.writeHead(413).end(); return; } chunks.push(Buffer.from(chunk)); }
+    let bodyBytes = 0;
+    for await (const chunk of req) {
+      bodyBytes += chunk.length;
+      if (bodyBytes > 128 * 1024) { res.writeHead(413).end(); return; }
+      chunks.push(Buffer.from(chunk));
+    }
     let payload: unknown;
     try { payload = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { payload = {}; }
     const response = await runner.handle(payload, readHeader(req.headers["x-runner-signature"]));
@@ -137,15 +153,39 @@ export function createUnixRunnerServer(socketPath: string, runner: SecureRunner)
   }).listen(socketPath);
 }
 
-export function sendUnixRunnerRequest(socketPath: string, request: RunnerRequest, sharedSecret: string): Promise<RunnerResponse> {
+export function sendUnixRunnerRequest(
+  socketPath: string,
+  request: RunnerRequest,
+  sharedSecret: string,
+  timeoutMs = 10_000,
+): Promise<RunnerResponse> {
   return new Promise((resolvePromise, rejectPromise) => {
     const body = JSON.stringify(request);
+    let settled = false;
+    const settle = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      callback();
+    };
     const client = httpRequest({ socketPath, path: "/v1/requests", method: "POST", headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), "x-runner-signature": signRunnerRequest(request, sharedSecret) } }, (response) => {
       const chunks: Buffer[] = [];
-      response.on("data", (chunk: Buffer) => chunks.push(chunk));
-      response.on("end", () => { try { resolvePromise(JSON.parse(Buffer.concat(chunks).toString("utf8")) as RunnerResponse); } catch { rejectPromise(new Error("Runner returned invalid JSON.")); } });
+      let responseBytes = 0;
+      response.on("data", (chunk: Buffer) => {
+        responseBytes += chunk.length;
+        if (responseBytes > 128 * 1024) {
+          client.destroy(new Error("Runner response exceeded the size limit."));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on("end", () => {
+        try { settle(() => resolvePromise(JSON.parse(Buffer.concat(chunks).toString("utf8")) as RunnerResponse)); }
+        catch { settle(() => rejectPromise(new Error("Runner returned invalid JSON."))); }
+      });
     });
-    client.once("error", rejectPromise); client.end(body);
+    client.setTimeout(timeoutMs, () => client.destroy(new Error("Runner request timed out.")));
+    client.once("error", (error) => settle(() => rejectPromise(error)));
+    client.end(body);
   });
 }
 

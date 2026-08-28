@@ -1,0 +1,16 @@
+{
+  "name": "@ade-control-plane/host-runner",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ade-control-plane/ade-client": "workspace:*",
+    "@ade-control-plane/runner-protocol": "workspace:*",
+    "tsx": "^4.20.5"
+  }
+}
