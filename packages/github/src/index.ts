@@ -75,12 +75,16 @@ export {
   isControlPlaneComment,
   renderAcknowledgement,
   renderDecisionRequest,
+  renderFailureNotification,
   renderStatusComment,
+  renderWaitingHumanNotification,
   upsertBotComment,
   type AcknowledgementInput,
   type BotCommentPurpose,
   type BotCommentStore,
   type DecisionRequestInput,
+  type FailureNotificationInput,
   type StatusCommentInput,
+  type WaitingHumanNotificationInput,
 } from "./notifications.js";
 export { escapeForComment, redactSensitive } from "./redact.js";

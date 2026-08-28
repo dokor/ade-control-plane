@@ -242,6 +242,15 @@ ADE reports waiting-human decision D42
 ```
 
 At no point does the GitHub webhook handler execute a shell command or bypass ADE decision semantics.
+
+For GitHub-backed work, proactive attention is emitted by the worker only after
+it has reconciled the versioned contract or recorded an execution result. A
+signed webhook only refreshes durable state; it never launches a runner or
+posts by executing privileged work. A `waiting-human` transition creates or
+updates one dedicated bot comment on the registered issue. The notification
+does not invent `@ade decide` options, because the GitHub-work contract carries
+no trusted decision payload. Execution failures use only a bounded safe error
+code and point back to the project Dashboard.
 ## MVP implementation
 
 `packages/github` holds the adapter and contains no scheduling rules. The public

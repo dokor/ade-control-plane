@@ -145,3 +145,4 @@ export {
   buildGithubWorkPrompt,
   type GithubWorkCodexExecutorOptions,
 } from "./GithubWorkCodexExecutor.js";
+export { GithubWorkNotifier, type GithubWorkNotifierOptions } from "./GithubWorkNotifier.js";

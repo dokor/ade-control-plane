@@ -20,6 +20,7 @@ test("passes only dedicated credentials to Codex", async () => {
       HOME: "/home/worker",
       DATABASE_URL: "postgres://secret",
       V0_PROJECT_ROOT: directory,
+      DASHBOARD_PUBLIC_URL: "https://ade.example.com/path",
       GITHUB_APP_ID: "1",
       GITHUB_APP_INSTALLATION_ID: "2",
       GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
@@ -46,6 +47,7 @@ test("accepts only WebSocket App Server URLs", async () => {
     await writeFile(githubKey, "github-private-key", "utf8");
     const config = await loadV0WorkerRuntime({
       V0_PROJECT_ROOT: directory,
+      DASHBOARD_PUBLIC_URL: "https://ade.example.com",
       GITHUB_APP_ID: "1",
       GITHUB_APP_INSTALLATION_ID: "2",
       GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
@@ -58,6 +60,7 @@ test("accepts only WebSocket App Server URLs", async () => {
     await assert.rejects(
       () => loadV0WorkerRuntime({
         V0_PROJECT_ROOT: directory,
+        DASHBOARD_PUBLIC_URL: "https://ade.example.com",
         GITHUB_APP_ID: "1",
         GITHUB_APP_INSTALLATION_ID: "2",
         GITHUB_APP_PRIVATE_KEY_FILE: githubKey,

@@ -97,6 +97,52 @@ export function renderDecisionRequest(
   ].join("\n");
 }
 
+export interface FailureNotificationInput {
+  projectName: string;
+  issueNumber: number;
+  errorCode: string;
+  dashboardUrl: string;
+}
+
+export interface WaitingHumanNotificationInput {
+  projectName: string;
+  issueNumber: number;
+  dashboardUrl: string;
+}
+
+/** The GitHub-work contract has no decision options, so this never invents a command. */
+export function renderWaitingHumanNotification(
+  projectId: string,
+  input: WaitingHumanNotificationInput,
+): string {
+  return [
+    commentMarker("waiting-human", projectId),
+    `**${escapeForComment(input.projectName)}** is waiting for a human decision on issue #${input.issueNumber}.`,
+    "",
+    "Review the registered decision and submit only an authorized option from the Dashboard or issue workflow.",
+    "",
+    `[Open the Dashboard](${input.dashboardUrl})`,
+  ].join("\n");
+}
+
+/** A fixed, redacted intervention notice: provider errors never reach GitHub. */
+export function renderFailureNotification(
+  projectId: string,
+  input: FailureNotificationInput,
+): string {
+  const safeCode = /^[A-Z0-9_]{1,80}$/.test(input.errorCode)
+    ? input.errorCode
+    : "EXECUTION_FAILED";
+  return [
+    commentMarker("failure", projectId),
+    `**${escapeForComment(input.projectName)}** needs intervention for issue #${input.issueNumber}.`,
+    "",
+    `The control-plane execution stopped with \`${safeCode}\`. Review the issue and Dashboard before requesting another run.`,
+    "",
+    `[Open the Dashboard](${input.dashboardUrl})`,
+  ].join("\n");
+}
+
 export interface BotCommentStore {
   /** Comment ID previously written by the control plane, when one exists. */
   find(
