@@ -17,6 +17,7 @@
     "@ade-control-plane/core": "workspace:*",
     "@ade-control-plane/database": "workspace:*",
     "@ade-control-plane/github": "workspace:*",
-    "@ade-control-plane/quota": "workspace:*"
+    "@ade-control-plane/quota": "workspace:*",
+    "@ade-control-plane/runner-protocol": "workspace:*"
   }
 }

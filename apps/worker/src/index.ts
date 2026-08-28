@@ -146,3 +146,8 @@ export {
   type GithubWorkCodexExecutorOptions,
 } from "./GithubWorkCodexExecutor.js";
 export { GithubWorkNotifier, type GithubWorkNotifierOptions } from "./GithubWorkNotifier.js";
+export {
+  UnixRunnerControlPlaneClient,
+  type UnixRunnerControlPlaneClientOptions,
+  type UnixRunnerProjectBinding,
+} from "./UnixRunnerControlPlaneClient.js";

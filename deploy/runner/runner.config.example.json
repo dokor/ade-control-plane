@@ -1,0 +1,26 @@
+{
+  "runnerId": "raspberry-local",
+  "socketPath": "/run/ade-control-plane-runner/runner.sock",
+  "maxOutputBytes": 65536,
+  "maxTimeoutMs": 60000,
+  "ade": {
+    "command": "/usr/local/bin/ade",
+    "baseArgs": []
+  },
+  "projects": {
+    "replace-with-control-plane-project-id": {
+      "root": "/srv/ade-workspaces/argos",
+      "projectRef": "argos",
+      "capabilities": [
+        "ade.status",
+        "ade.runnable-work",
+        "ade.advance",
+        "ade.apply-decision",
+        "execution.reconcile"
+      ],
+      "workspaces": {
+        "primary": "."
+      }
+    }
+  }
+}

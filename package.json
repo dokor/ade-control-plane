@@ -8,10 +8,13 @@
     "node": ">=22"
   },
   "scripts": {
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "pnpm -r --if-present typecheck && tsc --noEmit -p runner/tsconfig.json",
     "test": "pnpm -r --if-present test",
     "dev:worker": "pnpm --filter @ade-control-plane/worker dev",
     "dev:dashboard": "pnpm --filter @ade-control-plane/dashboard dev"
+  },
+  "dependencies": {
+    "@ade-control-plane/host-runner": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.4.0",
