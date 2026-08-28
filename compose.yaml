@@ -75,6 +75,9 @@ services:
       dockerfile: deploy/Dockerfile
       target: worker-runtime
     restart: unless-stopped
+    # The initial Raspberry deployment follows the V0 Dashboard task loop.
+    # The GitHub-first multi-project worker remains a separate post-V0 entrypoint.
+    command: ["node_modules/.bin/tsx", "apps/worker/src/v0/main.ts"]
     init: true
     read_only: true
     tmpfs:
