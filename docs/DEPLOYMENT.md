@@ -1,9 +1,13 @@
 # V0 Raspberry deployment
 
 This is the short deployment procedure for issue #26 and the V0 path from
-issue #1. It runs the Dashboard, the GitHub-first Codex worker and
-PostgreSQL. The worker is the only container with access to the registered
-project checkout and Git push configuration.
+issue #1. It runs the Dashboard, the V0 Codex task worker and PostgreSQL. The
+worker is the only container with access to the registered project checkout and
+Git push configuration.
+
+Compose explicitly starts `apps/worker/src/v0/main.ts`, so Dashboard-created
+tasks are claimed by the V0 task worker. The GitHub-first multi-project
+entrypoint is post-V0 and is not substituted implicitly.
 
 ## Host preparation
 
