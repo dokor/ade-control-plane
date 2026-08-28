@@ -121,6 +121,7 @@ export interface ProviderQuotaSnapshotRecord {
   accountRef: string;
   policyState: ProviderQuotaPolicyState;
   usedPercent: number | null;
+  windowDurationMins: number | null;
   windowStartedAt: string | null;
   resetsAt: string | null;
   observedAt: string;

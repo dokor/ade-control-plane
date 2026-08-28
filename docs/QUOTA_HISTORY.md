@@ -13,7 +13,7 @@ Every successful real quota read produces one normalized snapshot.
 Conceptually:
 
 ```text
-Codex/App Server quota read
+Codex/App Server `account/rateLimits/read`
 → provider adapter validates response
 → normalize supported fields
 → persist one provider_quota_snapshot
@@ -99,6 +99,10 @@ WHERE observed_at < NOW() - INTERVAL '30 days'
 ```
 
 The implementation may use a safer/provider-scoped variant; the important contract is 30-day rolling retention plus preservation of the latest observation.
+
+The worker coordinator performs this provider/account-scoped cleanup after a
+successful observation. It preserves the latest row even when the clock or
+retention configuration would otherwise classify that row as old.
 
 ## Failure behavior
 

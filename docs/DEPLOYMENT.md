@@ -48,6 +48,26 @@ architecture. The worker receives the Codex API key only through a Compose
 secret and passes it only to the Codex child process; the Git process receives
 a separate environment.
 
+## Optional live Codex quota gate
+
+Issue #4 adds an optional live quota gate through Codex App Server. Run App
+Server with the same persisted `CODEX_HOME` used by the worker and configure
+`CODEX_APP_SERVER_URL` in `.env`, for example:
+
+```bash
+codex app-server --listen ws://127.0.0.1:4500
+```
+
+```dotenv
+CODEX_APP_SERVER_URL=ws://127.0.0.1:4500
+CODEX_CREDENTIAL_REF=codex-account-main
+```
+
+The worker reads `account/rateLimits/read` before claiming work, persists only
+the normalized observation and refuses new work for blocked or unknown quota.
+Leave the URL empty until App Server is available; this keeps the original V0
+worker path operational. Never put a Codex credential in the URL.
+
 ## Update, restart and backup
 
 ```bash

@@ -6,6 +6,8 @@ export interface V0WorkerRuntimeConfig {
   codexExecutable: string;
   codexEnvironment: Readonly<Record<string, string>>;
   gitEnvironment: Readonly<Record<string, string>>;
+  codexAppServerUrl: string | null;
+  quotaAccountRef: string;
   taskTimeoutMs: number;
   idleDelayMs: number;
   github: {
@@ -29,6 +31,7 @@ export async function loadV0WorkerRuntime(
   const codexApiKey = await readSecret(env, "CODEX_API_KEY");
   const codexHome = requiredAbsolute(env.CODEX_HOME, "CODEX_HOME");
   const gitHome = requiredAbsolute(env.V0_GIT_HOME, "V0_GIT_HOME");
+  const codexAppServerUrl = optionalWebSocketUrl(env.CODEX_APP_SERVER_URL);
 
   const childBase = safeChildEnvironment(env);
   const codexEnvironment = {
@@ -47,10 +50,27 @@ export async function loadV0WorkerRuntime(
       ...(env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: env.SSH_AUTH_SOCK } : {}),
       GIT_CONFIG_NOSYSTEM: "1",
     },
+    codexAppServerUrl,
+    quotaAccountRef: env.CODEX_CREDENTIAL_REF?.trim() || "codex-account-main",
     taskTimeoutMs: positiveInteger(env.V0_TASK_TIMEOUT_SECONDS, 3_600) * 1_000,
     idleDelayMs: positiveInteger(env.V0_WORKER_IDLE_SECONDS, 2) * 1_000,
     github: { appId, installationId, privateKey },
   };
+}
+
+function optionalWebSocketUrl(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    throw new Error("CODEX_APP_SERVER_URL must be a valid ws:// or wss:// URL.");
+  }
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    throw new Error("CODEX_APP_SERVER_URL must use ws:// or wss://.");
+  }
+  return url.toString();
 }
 
 function safeChildEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {

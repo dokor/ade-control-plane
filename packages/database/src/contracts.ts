@@ -141,6 +141,7 @@ export interface ProviderQuotaSnapshotInput {
   accountRef: string;
   policyState: ProviderQuotaPolicyState;
   usedPercent?: number | null;
+  windowDurationMins?: number | null;
   windowStartedAt?: string | null;
   resetsAt?: string | null;
   observedAt: string;
@@ -349,6 +350,11 @@ export interface ProviderQuotaSnapshotRepository {
     provider: string,
     accountRef: string,
   ): Promise<ProviderQuotaSnapshotRecord | null>;
+  deleteOlderThan?(
+    provider: string,
+    accountRef: string,
+    before: string,
+  ): Promise<void>;
 }
 
 export interface ControlCommandRepository {

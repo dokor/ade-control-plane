@@ -1,4 +1,5 @@
 import type { V0TaskRepository } from "@ade-control-plane/database";
+import type { QuotaRefreshResult } from "@ade-control-plane/quota";
 
 import type { V0TaskExecutor } from "./V0TaskExecutor.js";
 
@@ -13,14 +14,20 @@ export interface V0TaskWorkerOptions {
   persistence: V0Persistence;
   executor: Pick<V0TaskExecutor, "execute">;
   idleDelayMs?: number;
+  quota?: Pick<QuotaRefreshCoordinator, "refresh">;
   now?(): Date;
   sleep?(milliseconds: number, signal: AbortSignal): Promise<void>;
+}
+
+interface QuotaRefreshCoordinator {
+  refresh(): Promise<QuotaRefreshResult>;
 }
 
 export class V0TaskWorker {
   private readonly idleDelayMs: number;
   private readonly now: () => Date;
   private readonly sleep: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  private nextQuotaWakeUpAt: string | null = null;
 
   public constructor(private readonly options: V0TaskWorkerOptions) {
     this.idleDelayMs = options.idleDelayMs ?? 2_000;
@@ -52,6 +59,14 @@ export class V0TaskWorker {
   }
 
   public async runOnce(signal?: AbortSignal): Promise<boolean> {
+    if (this.options.quota) {
+      const quota = await this.options.quota.refresh();
+      if (!quota.decision.canStartWork) {
+        this.nextQuotaWakeUpAt = quota.decision.resetsAt ?? null;
+        return false;
+      }
+      this.nextQuotaWakeUpAt = null;
+    }
     const task = await this.options.persistence.v0Tasks.claimPending(
       this.now().toISOString(),
     );
@@ -64,7 +79,13 @@ export class V0TaskWorker {
     await this.recoverInterruptedTask();
     while (!signal.aborted) {
       if (!(await this.runOnce(signal))) {
-        await this.sleep(this.idleDelayMs, signal);
+        const wakeUpAt = this.nextQuotaWakeUpAt === null
+          ? null
+          : Date.parse(this.nextQuotaWakeUpAt);
+        const waitForReset = wakeUpAt === null || Number.isNaN(wakeUpAt)
+          ? this.idleDelayMs
+          : Math.max(this.idleDelayMs, wakeUpAt - this.now().getTime());
+        await this.sleep(waitForReset, signal);
       }
     }
   }

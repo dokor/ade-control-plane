@@ -250,6 +250,10 @@ function mapProviderQuotaSnapshot(row: TimestampRow): ProviderQuotaSnapshotRecor
     policyState: row.policy_state as ProviderQuotaSnapshotRecord["policyState"],
     usedPercent:
       row.used_percent === null ? null : Number(String(row.used_percent)),
+    windowDurationMins:
+      row.window_duration_mins === null || row.window_duration_mins === undefined
+        ? null
+        : Number(String(row.window_duration_mins)),
     windowStartedAt: toIsoString(row.window_started_at),
     resetsAt: toIsoString(row.resets_at),
     observedAt: toIsoString(row.observed_at) ?? "",
@@ -1333,13 +1337,14 @@ class PostgresProviderQuotaSnapshotRepository
           account_ref,
           policy_state,
           used_percent,
+          window_duration_mins,
           window_started_at,
           resets_at,
           observed_at,
           expires_at,
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
         RETURNING *
       `,
       [
@@ -1348,6 +1353,7 @@ class PostgresProviderQuotaSnapshotRepository
         input.accountRef,
         input.policyState,
         input.usedPercent ?? null,
+        input.windowDurationMins ?? null,
         input.windowStartedAt ?? null,
         input.resetsAt ?? null,
         input.observedAt,
@@ -1375,6 +1381,29 @@ class PostgresProviderQuotaSnapshotRepository
       [provider, accountRef],
     );
     return row ? mapProviderQuotaSnapshot(row) : null;
+  }
+
+  public async deleteOlderThan(
+    provider: string,
+    accountRef: string,
+    before: string,
+  ): Promise<void> {
+    await this.pool.query(
+      `
+        DELETE FROM provider_quota_snapshots AS snapshot
+        WHERE snapshot.provider = $1
+          AND snapshot.account_ref = $2
+          AND snapshot.observed_at < $3
+          AND snapshot.id <> (
+            SELECT latest.id
+            FROM provider_quota_snapshots AS latest
+            WHERE latest.provider = $1 AND latest.account_ref = $2
+            ORDER BY latest.observed_at DESC
+            LIMIT 1
+          )
+      `,
+      [provider, accountRef, before],
+    );
   }
 }
 

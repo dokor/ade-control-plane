@@ -46,6 +46,7 @@ export interface QuotaView {
   accountRef: string;
   state: QuotaDecision["state"];
   usedPercent: number | null;
+  windowDurationMins: number | null;
   resetsAt: string | null;
   observedAt: string | null;
   snapshotAgeMs: number | null;
@@ -325,6 +326,7 @@ function buildQuotaView(
       accountRef,
       state: "unknown",
       usedPercent: null,
+      windowDurationMins: null,
       resetsAt: null,
       observedAt: null,
       snapshotAgeMs: null,
@@ -338,6 +340,9 @@ function buildQuotaView(
       provider: snapshot.provider,
       accountRef: snapshot.accountRef,
       usedPercent: snapshot.usedPercent,
+      ...(snapshot.windowDurationMins !== null
+        ? { windowDurationMins: snapshot.windowDurationMins }
+        : {}),
       observedAt: snapshot.observedAt,
       ...(snapshot.expiresAt ? { expiresAt: snapshot.expiresAt } : {}),
       ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
@@ -358,6 +363,7 @@ function buildQuotaView(
     state: decision.state,
     // Never fabricate a percentage the provider did not expose.
     usedPercent: snapshot.usedPercent,
+    windowDurationMins: snapshot.windowDurationMins,
     resetsAt: decision.resetsAt ?? null,
     observedAt: snapshot.observedAt,
     snapshotAgeMs: ageMs(snapshot.observedAt, now),

@@ -86,6 +86,8 @@ services:
       CODEX_EXECUTABLE: ${CODEX_EXECUTABLE:-codex}
       CODEX_API_KEY_FILE: /run/secrets/codex_api_key
       CODEX_HOME: /home/ade-worker/.codex
+      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-}
+      CODEX_CREDENTIAL_REF: ${CODEX_CREDENTIAL_REF:-codex-account-main}
       V0_GIT_HOME: /home/ade-git
       V0_TASK_TIMEOUT_SECONDS: ${V0_TASK_TIMEOUT_SECONDS:-3600}
       V0_WORKER_IDLE_SECONDS: ${V0_WORKER_IDLE_SECONDS:-2}

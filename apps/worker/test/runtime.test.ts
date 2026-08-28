@@ -38,3 +38,36 @@ test("passes only dedicated credentials to Codex", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("accepts only WebSocket App Server URLs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ade-v0-runtime-url-"));
+  try {
+    const githubKey = join(directory, "github-key");
+    await writeFile(githubKey, "github-private-key", "utf8");
+    const config = await loadV0WorkerRuntime({
+      V0_PROJECT_ROOT: directory,
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_INSTALLATION_ID: "2",
+      GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
+      CODEX_HOME: join(directory, "codex"),
+      V0_GIT_HOME: join(directory, "git"),
+      CODEX_APP_SERVER_URL: "ws://127.0.0.1:4500",
+    });
+
+    assert.equal(config.codexAppServerUrl, "ws://127.0.0.1:4500/");
+    await assert.rejects(
+      () => loadV0WorkerRuntime({
+        V0_PROJECT_ROOT: directory,
+        GITHUB_APP_ID: "1",
+        GITHUB_APP_INSTALLATION_ID: "2",
+        GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
+        CODEX_HOME: join(directory, "codex"),
+        V0_GIT_HOME: join(directory, "git"),
+        CODEX_APP_SERVER_URL: "http://127.0.0.1:4500",
+      }),
+      /CODEX_APP_SERVER_URL must use ws:\/\/ or wss:\/\//,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
