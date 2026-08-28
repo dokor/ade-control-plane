@@ -19,10 +19,10 @@ Do not execute privileged Raspberry deployment from an arbitrary PR workflow.
 
 ## Runner identity
 
-Recommended dedicated system user:
+Existing GitHub Actions system user:
 
 ```text
-ade-deploy
+github-runner
 ```
 
 The GitHub Actions runner should:
@@ -37,7 +37,7 @@ The GitHub Actions runner should:
 The workflow calls one allow-listed host wrapper, for example:
 
 ```text
-sudo /opt/ade-control-plane/bin/deploy <expected-main-sha>
+sudo /srv/apps/ade-control-plane/bin/deploy <expected-main-sha>
 ```
 
 The sudo policy must not permit:
@@ -147,7 +147,8 @@ Never automatically roll back a destructive database migration just because an H
 - PR workflow cannot target the production self-hosted runner with privileged deployment step;
 - invalid SHA/ref is refused by deploy wrapper;
 - concurrent deploy attempt is refused/serialized;
-- `ade-deploy` cannot execute generic Docker or root shell commands;
+- `github-runner` has no ADE-specific authority beyond the allow-listed deploy
+  wrapper and cannot execute a root shell through its ADE sudo policy;
 - deployment logs contain no app/provider credentials;
 - a failed healthcheck returns non-zero and leaves clear recovery instructions;
 - manual deployment path still works when GitHub Actions is unavailable.

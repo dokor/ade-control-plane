@@ -43,7 +43,7 @@ Work on issue #36 only after the #26 deployment path has been proven manually.
 
 Read docs/CD_DEPLOYMENT.md, docs/SECRET_MATRIX.md, docs/RELEASE_CHECKLIST.md and issue #36.
 
-Implement GitHub Actions CD from a trusted successful main SHA to the Raspberry using the documented dedicated ade-deploy identity and a narrow allow-listed host deploy wrapper. Do not grant generic sudo/root/Docker authority to the Actions runner. Serialize deployments, run controlled migrations/update, verify healthchecks, record the deployed SHA and keep a documented manual fallback/rollback path.
+Implement GitHub Actions CD from a trusted successful main SHA to the Raspberry using the documented github-runner identity and a narrow allow-listed host deploy wrapper. Do not grant generic sudo/root/Docker authority to the Actions runner. Serialize deployments, run controlled migrations/update, verify healthchecks, record the deployed SHA and keep a documented manual fallback/rollback path.
 ```
 
 ## 3. Then connect real Codex quota — #4

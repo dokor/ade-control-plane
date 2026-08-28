@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # does not start services, alter scheduler state, inspect secret contents, or
 # perform a restore. Run it after Compose and the host runner are already up.
 
-readonly APP_DIR="${ADE_CONTROL_PLANE_DIR:-/opt/ade-control-plane}"
+readonly APP_DIR="${ADE_CONTROL_PLANE_DIR:-/srv/apps/ade-control-plane}"
 readonly COMPOSE_FILE="${APP_DIR}/compose.yaml"
 readonly RUNNER_UNIT="ade-control-plane-runner.service"
 readonly RUNNER_SOCKET="${RUNNER_SOCKET_PATH:-/run/ade-control-plane-runner/runner.sock}"

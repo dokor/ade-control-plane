@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-readonly APP_DIR="/opt/ade-control-plane"
+readonly APP_DIR="/srv/apps/ade-control-plane"
 readonly COMPOSE_FILE="${APP_DIR}/compose.yaml"
 readonly DEPLOYED_SHA_FILE="/var/lib/ade-control-plane/deployed-sha"
 readonly HEALTH_TIMEOUT_SECONDS=120
