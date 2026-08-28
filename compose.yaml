@@ -1,0 +1,141 @@
+name: ade-control-plane
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ade_control_plane}
+      POSTGRES_USER: ${POSTGRES_USER:-ade_control_plane}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - control
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: dashboard-runtime
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+      DASHBOARD_PUBLIC_URL: ${DASHBOARD_PUBLIC_URL:?Set DASHBOARD_PUBLIC_URL in .env}
+      DASHBOARD_SESSION_SECRET_FILE: /run/secrets/dashboard_session_secret
+      DASHBOARD_PASSWORD_HASH_FILE: /run/secrets/dashboard_password_hash
+      DASHBOARD_OPERATOR_REF: ${DASHBOARD_OPERATOR_REF:-operator}
+      DASHBOARD_SESSION_TTL_MINUTES: ${DASHBOARD_SESSION_TTL_MINUTES:-720}
+      DASHBOARD_REFRESH_SECONDS: ${DASHBOARD_REFRESH_SECONDS:-15}
+      QUOTA_PROVIDER: ${QUOTA_PROVIDER:-openai}
+      CODEX_CREDENTIAL_REF: ${CODEX_CREDENTIAL_REF:-codex-account-main}
+    secrets:
+      - database_url
+      - dashboard_session_secret
+      - dashboard_password_hash
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DASHBOARD_BIND_PORT:-3000}:3000"
+    networks:
+      - control
+      - edge
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  worker:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: worker-runtime
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,noexec,nosuid,nodev
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/database_url
+      V0_PROJECT_ROOT: /srv/ade-projects
+      CODEX_EXECUTABLE: ${CODEX_EXECUTABLE:-codex}
+      CODEX_API_KEY_FILE: /run/secrets/codex_api_key
+      CODEX_HOME: /home/ade-worker/.codex
+      V0_GIT_HOME: /home/ade-git
+      V0_TASK_TIMEOUT_SECONDS: ${V0_TASK_TIMEOUT_SECONDS:-3600}
+      V0_WORKER_IDLE_SECONDS: ${V0_WORKER_IDLE_SECONDS:-2}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID in .env}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID in .env}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
+    secrets:
+      - database_url
+      - codex_api_key
+      - github_app_private_key
+    volumes:
+      - ${V0_PROJECTS_HOST:-./data/projects}:/srv/ade-projects:rw
+      - ${V0_GIT_HOME_HOST:-./data/git-home}:/home/ade-git:ro
+      - codex_home:/home/ade-worker/.codex
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - control
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(require('node:fs').existsSync('/proc/1/cmdline') ? 0 : 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  postgres_data:
+  codex_home:
+
+secrets:
+  postgres_password:
+    file: ${SECRETS_DIR:-./secrets}/postgres_password
+  database_url:
+    file: ${SECRETS_DIR:-./secrets}/database_url
+  dashboard_session_secret:
+    file: ${SECRETS_DIR:-./secrets}/dashboard_session_secret
+  dashboard_password_hash:
+    file: ${SECRETS_DIR:-./secrets}/dashboard_password_hash
+  github_app_private_key:
+    file: ${SECRETS_DIR:-./secrets}/github_app_private_key
+  codex_api_key:
+    file: ${SECRETS_DIR:-./secrets}/codex_api_key
+
+networks:
+  control:
+    internal: true
+  edge:

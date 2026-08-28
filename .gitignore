@@ -8,6 +8,10 @@ coverage/
 .env
 .env.*
 !.env.example
+/data/
+/backups/
+/secrets/*
+!/secrets/README.md
 *.log
 .DS_Store
 .idea/
