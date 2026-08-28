@@ -42,10 +42,13 @@ docker compose logs --tail=100 dashboard worker
 curl -fsS http://127.0.0.1:${DASHBOARD_BIND_PORT:-3000}/api/health
 ```
 
-The Dashboard is bound to loopback only. Configure the existing reverse proxy
-to forward HTTPS traffic to `http://127.0.0.1:3000` (or the configured
-`DASHBOARD_BIND_PORT`). Do not publish PostgreSQL or the worker. The Dashboard
-login is still required even when the reverse proxy is on a private network.
+The Dashboard stays bound to loopback for local diagnostics and is also joined
+to the existing external Docker network named `proxy`. Set
+`DASHBOARD_PUBLIC_HOST` to the DNS name used by Traefik; Compose supplies the
+HTTPS router, certificate resolver and HTTP-to-HTTPS redirect labels in the
+same style as the existing Argos applications. Do not publish PostgreSQL or
+the worker. The Dashboard login is still required even when the reverse proxy
+is on a private network.
 
 The official Codex installer in the worker image selects the native image
 architecture. The worker receives the Codex API key only through a Compose
