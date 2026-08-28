@@ -7,6 +7,7 @@ set -Eeuo pipefail
 
 readonly APP_DIR="${ADE_CONTROL_PLANE_DIR:-/srv/apps/ade-control-plane}"
 readonly COMPOSE_FILE="${APP_DIR}/compose.yaml"
+readonly ENV_FILE="${ADE_CONTROL_PLANE_ENV_FILE:-/srv/configs/ade-control-plane/.env.prod}"
 readonly RUNNER_UNIT="ade-control-plane-runner.service"
 readonly RUNNER_SOCKET="${RUNNER_SOCKET_PATH:-/run/ade-control-plane-runner/runner.sock}"
 readonly BACKUP_DIR="${ADE_BACKUP_DIR:-/srv/ade-control-plane/backups}"
@@ -23,12 +24,13 @@ elif [[ "$#" -ne 0 ]]; then
 fi
 
 [[ -f "$COMPOSE_FILE" ]] || die "Compose file is missing at the fixed application path"
+[[ -f "$ENV_FILE" ]] || die "production environment file is missing"
 command -v docker >/dev/null || die "docker is unavailable"
 command -v systemctl >/dev/null || die "systemctl is unavailable"
 command -v curl >/dev/null || die "curl is unavailable"
 command -v find >/dev/null || die "find is unavailable"
 
-compose=(docker compose --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
+compose=(docker compose --env-file "$ENV_FILE" --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
 "${compose[@]}" config --quiet || die "Compose configuration is invalid"
 
 container_id() {

@@ -31,7 +31,7 @@ This matrix is the default. Any broader sharing requires an explicit security de
 
 For host secret files, default toward owner-readable only, for example `0600`, with directory permissions restricting traversal to the owning service account.
 
-Do not solve access by making `/etc/ade-control-plane/secrets` globally readable.
+Do not solve access by making `/srv/configs/ade-control-plane/secrets` globally readable.
 
 ## Rotation procedure template
 

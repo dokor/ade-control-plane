@@ -13,20 +13,24 @@ entrypoint is post-V0 and is not substituted implicitly.
 
 Use a 64-bit Raspberry Pi OS installation with Docker Engine and the Compose
 plugin. Keep the checkout, PostgreSQL volume and project repositories on the
-SSD. From the repository root:
+SSD. Keep the production configuration and secret files outside the Git
+checkout, matching the other Raspberry applications:
 
 ```bash
-cp .env.example .env
-mkdir -p data/projects data/git-home secrets
+sudo install -d -o root -g root -m 0750 /srv/configs/ade-control-plane
+sudo install -d -o root -g root -m 0700 /srv/configs/ade-control-plane/secrets
+sudo install -o root -g root -m 0600 .env.example /srv/configs/ade-control-plane/.env.prod
 ```
 
-Populate `.env` with `DASHBOARD_PUBLIC_URL`, `GITHUB_APP_ID`,
+Populate `/srv/configs/ade-control-plane/.env.prod` with `DASHBOARD_PUBLIC_URL`, `GITHUB_APP_ID`,
 `GITHUB_APP_INSTALLATION_ID`, and the host paths for `V0_PROJECTS_HOST` and
 `V0_GIT_HOME_HOST` if the defaults are not suitable. The Git home must contain
 only the credentials/configuration needed to push the allow-listed GitHub
 repositories. Do not mount a Docker socket.
 
-Create the runtime files described in [`secrets/README.md`](../secrets/README.md).
+Create the runtime files described in [`secrets/README.md`](../secrets/README.md)
+under `/srv/configs/ade-control-plane/secrets` and set `SECRETS_DIR` to that
+directory in `.env.prod`.
 The database URL must use the Compose service name `postgres`, not a public
 host address. Register projects with a numeric GitHub repository ID and a relative `configuration.v0.checkout`
 under `V0_PROJECTS_HOST`; the worker rejects absolute paths, traversal and
@@ -35,10 +39,10 @@ GitHub remotes that do not match the registered repository.
 ## Start and verify
 
 ```bash
-docker compose build
-docker compose up -d
-docker compose ps
-docker compose logs --tail=100 dashboard worker
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod build
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod up -d
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod ps
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod logs --tail=100 dashboard worker
 curl -fsS http://127.0.0.1:${DASHBOARD_BIND_PORT:-3000}/api/health
 ```
 
@@ -59,7 +63,7 @@ a separate environment.
 
 Issue #4 adds an optional live quota gate through Codex App Server. Run App
 Server with the same persisted `CODEX_HOME` used by the worker and configure
-`CODEX_APP_SERVER_URL` in `.env`, for example:
+`CODEX_APP_SERVER_URL` in `.env.prod`, for example:
 
 ```bash
 codex app-server --listen ws://127.0.0.1:4500
@@ -79,22 +83,22 @@ normal-quota fallback. Never put a Codex credential in the URL.
 
 ```bash
 git pull --ff-only
-docker compose build --pull
-docker compose up -d
-docker compose ps
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod build --pull
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod up -d
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod ps
 ```
 
 For a restart without rebuilding:
 
 ```bash
-docker compose restart dashboard worker
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod restart dashboard worker
 ```
 
 Back up PostgreSQL before upgrades and copy the dump off the Raspberry:
 
 ```bash
 mkdir -p backups
-docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
   | gzip > "backups/ade-control-plane-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
 ```
 
@@ -135,7 +139,7 @@ waits for all Compose healthchecks and records the deployed SHA in
 
 The wrapper itself must be reviewed and reinstalled from an approved `main`
 commit when it changes. Production runtime secrets remain in the protected
-`secrets/` directory on the Raspberry; GitHub Actions receives no database,
+`/srv/configs/ade-control-plane/secrets` directory on the Raspberry; GitHub Actions receives no database,
 GitHub or Codex secret.
 
 ## Manual redeploy and rollback
@@ -145,7 +149,7 @@ The same wrapper is the break-glass path for a known-good commit:
 ```bash
 sudo -n /usr/local/sbin/ade-control-plane-deploy <known-good-40-character-sha>
 cat /var/lib/ade-control-plane/deployed-sha
-docker compose ps
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod ps
 ```
 
 Only rollback to a commit whose migrations are compatible with the current
@@ -158,8 +162,8 @@ Enable Docker at boot, reboot the host, then verify:
 
 ```bash
 sudo systemctl enable --now docker
-docker compose ps
-curl -fsS http://127.0.0.1:${DASHBOARD_BIND_PORT:-3000}/api/health
+docker compose --env-file /srv/configs/ade-control-plane/.env.prod ps
+curl -fsS http://127.0.0.1:3000/api/health
 ```
 
 After logging in, the task history must still be present. The release test is

@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 readonly APP_DIR="/srv/apps/ade-control-plane"
 readonly COMPOSE_FILE="${APP_DIR}/compose.yaml"
+readonly ENV_FILE="${ADE_CONTROL_PLANE_ENV_FILE:-/srv/configs/ade-control-plane/.env.prod}"
 readonly DEPLOYED_SHA_FILE="/var/lib/ade-control-plane/deployed-sha"
 readonly HEALTH_TIMEOUT_SECONDS=120
 
@@ -17,6 +18,7 @@ die() {
 readonly requested_sha="$1"
 [[ "$requested_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die "commit SHA is invalid"
 [[ -d "$APP_DIR/.git" && -f "$COMPOSE_FILE" ]] || die "deployment checkout is incomplete"
+[[ -f "$ENV_FILE" ]] || die "production environment file is missing"
 
 cd "$APP_DIR"
 
@@ -31,7 +33,7 @@ git fetch --quiet --no-tags origin "$requested_sha" || die "could not fetch requ
 git cat-file -e "${requested_sha}^{commit}" || die "requested object is not a commit"
 git checkout --detach --force "$requested_sha" >/dev/null || die "could not select requested commit"
 
-compose=(docker compose --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
+compose=(docker compose --env-file "$ENV_FILE" --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
 "${compose[@]}" config --quiet || die "Compose configuration is invalid"
 "${compose[@]}" build --pull || die "container build failed"
 "${compose[@]}" up -d postgres || die "PostgreSQL could not start"
