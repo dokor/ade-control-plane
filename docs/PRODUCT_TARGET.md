@@ -30,22 +30,24 @@ The control plane may carry GitHub issue references, ordering metadata and safe 
 ## GitHub-first work interaction
 
 GitHub is the canonical external work/validation surface for project delivery.
-
-For a project whose ADE adapter exposes GitHub-backed runnable work, the normal lifecycle is:
+The Control Plane reads the versioned repository and issue contract in
+[`GITHUB_WORK_CONTRACT.md`](GITHUB_WORK_CONTRACT.md) through its GitHub App;
+it does not ask an ADE CLI to discover GitHub work.
 
 ```text
 GitHub issue/backlog
-→ ADE reports the next runnable issue/action
-→ Control Plane places it in the global runnable queue
+→ strict GitHubWorkItem normalization
+→ Control Plane places explicit ready work in the global runnable queue
 → Scheduler selects one eligible project/work item
-→ runner invokes ADE for that work reference
-→ ADE performs the delivery loop
+→ runner launches Codex with the exact issue + repository skills
 → branch / commit / PR / checks
 → human validation when required
-→ ADE exposes the next runnable work
+→ validated GitHub event/reconciliation refreshes the work snapshot
 ```
 
-The Control Plane does not arbitrarily reorder issue dependencies owned by ADE. It does preserve and expose the order/runnable state reported by ADE, then applies global scheduling policy across projects.
+The Control Plane does not infer dependencies from prose or labels. It consumes
+only explicit dependency references in the versioned work contract, then
+applies global scheduling policy across projects.
 
 ## Multi-project continuity
 

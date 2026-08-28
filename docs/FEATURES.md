@@ -220,7 +220,10 @@ Critical status, queue state and controls remain usable from a phone.
 
 GitHub issues and PRs are the canonical external work/validation surface.
 
-The Control Plane may carry GitHub references returned by ADE and trigger ADE with the exact runnable work reference, but it does not infer project dependencies from issue text or labels on its own.
+The Control Plane detects the explicit GitHub work profile and normalizes only
+the versioned work metadata described in
+[`GITHUB_WORK_CONTRACT.md`](GITHUB_WORK_CONTRACT.md). It does not infer project
+dependencies from issue text or labels.
 
 ### Signed webhook integration
 
@@ -253,13 +256,13 @@ For GitHub-backed ADE projects, the normal lifecycle is:
 
 ```text
 GitHub issue/backlog
-→ ADE reports next runnable work
-→ Control Plane places reference in global queue
+→ GitHubWorkItem normalization
+→ Control Plane places explicit ready work in global queue
 → scheduler selects eligible project/work
-→ ADE executes
+→ Codex executes with issue reference and ADE skills
 → branch/PR/checks
 → human validation if needed
-→ ADE exposes next runnable work
+→ validated GitHub event/reconciliation refreshes the queue
 ```
 
 ## MVP — Audit and observability

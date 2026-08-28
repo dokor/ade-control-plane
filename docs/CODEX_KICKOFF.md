@@ -56,7 +56,21 @@ Read docs/QUOTA_HISTORY.md and issue #4.
 Connect the real supported Codex/App Server quota source behind the existing provider adapter. Persist one normalized successful snapshot per useful observation, keep a rolling 30-day history, never invent missing percentages, preserve freshness/stale semantics and expose only normalized safe data to scheduling/Dashboard.
 ```
 
-## 4. Then multi-project orchestration — #37
+## 4. Then define the GitHub-first work adapter — #40
+
+```text
+Work on issue #40 before #37.
+
+Read docs/GITHUB_WORK_CONTRACT.md, docs/GITHUB_INTEGRATION.md and issue #40.
+
+Define and implement a versioned, strict GitHub App adapter that detects a
+compatible repository without an ADE CLI, normalizes explicit issue metadata
+into GitHubWorkItem snapshots and shares the same normalizer for webhook and
+periodic reconciliation. Do not infer dependencies from prose/labels and do
+not add an MCP endpoint.
+```
+
+## 5. Then multi-project orchestration — #37
 
 ```text
 Work on issue #37 after #26 is proven and preferably after real quota observation is available.
@@ -68,13 +82,13 @@ Goal: move from the single-task production V0 to the intended always-on ADE orch
 Do not reconstruct ADE's delivery graph from GitHub issue text or labels.
 ```
 
-## 5. Finish GitHub proactive attention flow — #8
+## 6. Finish GitHub proactive attention flow — #8
 
 The inbound GitHub command path is already largely implemented. The remaining important behavior is proactive project-scoped notification when ADE/worker reports meaningful human attention, such as waiting-human or intervention-required failure.
 
 Use `docs/GITHUB_APP_SETUP.md` and `docs/GITHUB_INTEGRATION.md` as the contract.
 
-## 6. Advanced H24 qualification
+## 7. Advanced H24 qualification
 
 After the useful multi-project product loop works:
 

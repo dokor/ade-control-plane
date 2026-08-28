@@ -33,6 +33,7 @@ Use this page as the entry point for design and implementation work.
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — Raspberry/Docker Compose install, operations and backup procedure for V0.
 - [`V0_CODEX_WORKER.md`](V0_CODEX_WORKER.md) — allow-listed Codex/Git/PR execution flow.
 - [`GITHUB_INTEGRATION.md`](GITHUB_INTEGRATION.md) — GitHub App/webhook/command interaction model.
+- [`GITHUB_WORK_CONTRACT.md`](GITHUB_WORK_CONTRACT.md) — versioned GitHub-first repository and work-item contract.
 - [`GITHUB_APP_SETUP.md`](GITHUB_APP_SETUP.md) — minimal GitHub App permissions, webhook and actor-authorization setup.
 
 ## Security, observability and operations
