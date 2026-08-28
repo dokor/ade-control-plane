@@ -17,6 +17,8 @@ import type {
   GithubBotCommentRecord,
   GithubDeliveryReceiptInput,
   GithubDeliveryRecord,
+  GithubWorkItemRecord,
+  GithubWorkProfileRecord,
   GithubSubjectType,
   ProjectControlState,
   ProjectRecord,
@@ -43,6 +45,8 @@ export interface MemoryState {
   commands: ControlCommandRecord[];
   auditEvents: AuditEventRecord[];
   deliveries: GithubDeliveryRecord[];
+  githubWorkProfiles: GithubWorkProfileRecord[];
+  githubWorkItems: GithubWorkItemRecord[];
   botComments: GithubBotCommentRecord[];
   decisions: AdeDecisionRecord[];
   v0Tasks: V0TaskRecord[];
@@ -70,6 +74,8 @@ export function createMemoryState(overrides: Partial<MemoryState> = {}): MemoryS
     commands: [],
     auditEvents: [],
     deliveries: [],
+    githubWorkProfiles: [],
+    githubWorkItems: [],
     botComments: [],
     decisions: [],
     v0Tasks: [],
@@ -226,6 +232,54 @@ export function createMemoryPersistence(
       },
       async listRecent(limit) {
         return state.deliveries.slice(0, limit);
+      },
+    },
+    githubWork: {
+      async getProfile(projectId) {
+        return state.githubWorkProfiles.find((profile) => profile.projectId === projectId) ?? null;
+      },
+      async listForProject(projectId) {
+        return state.githubWorkItems.filter((item) => item.projectId === projectId);
+      },
+      async listForProjects(projectIds) {
+        return state.githubWorkItems.filter((item) => projectIds.includes(item.projectId));
+      },
+      async reconcile(input) {
+        const profile: GithubWorkProfileRecord = {
+          projectId: input.profile.projectId,
+          repositoryGithubId: input.profile.repositoryGithubId,
+          compatible: input.profile.compatible,
+          contractVersion: input.profile.contractVersion ?? null,
+          capabilities: input.profile.capabilities ?? [],
+          skillPaths: input.profile.skillPaths ?? [],
+          reason: input.profile.reason,
+          observedAt: input.profile.observedAt,
+        };
+        const profileIndex = state.githubWorkProfiles.findIndex((entry) => entry.projectId === profile.projectId);
+        if (profileIndex >= 0) state.githubWorkProfiles[profileIndex] = profile;
+        else state.githubWorkProfiles.push(profile);
+        state.githubWorkItems = state.githubWorkItems.map((item) =>
+          item.projectId === profile.projectId ? { ...item, present: false } : item,
+        );
+        for (const inputItem of input.items) {
+          const item: GithubWorkItemRecord = {
+            id: state.githubWorkItems.find((entry) =>
+              entry.projectId === inputItem.projectId && entry.issueNumber === inputItem.issueNumber,
+            )?.id ?? randomUUID(),
+            ...inputItem,
+            humanDecisionRef: inputItem.humanDecisionRef ?? null,
+            executionRef: inputItem.executionRef ?? null,
+            branchName: inputItem.branchName ?? null,
+            pullRequestNumber: inputItem.pullRequestNumber ?? null,
+            present: true,
+          };
+          const index = state.githubWorkItems.findIndex((entry) =>
+            entry.projectId === item.projectId && entry.issueNumber === item.issueNumber,
+          );
+          if (index >= 0) state.githubWorkItems[index] = item;
+          else state.githubWorkItems.push(item);
+        }
+        return state.githubWorkItems.filter((item) => item.projectId === profile.projectId);
       },
     },
     githubBotComments: {

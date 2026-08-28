@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateSchedule,
+  selectGithubWork,
   type ScheduleInput,
   type SchedulerCandidate,
   type SchedulerRunner,
@@ -129,4 +130,24 @@ test("applies conservative quota policy and exposes a quota wake-up", () => {
     })).nextWakeUpAt,
     "2026-08-27T11:00:00.000Z",
   );
+});
+
+test("selects only fresh GitHub work with explicit completed dependencies", () => {
+  const ready = selectGithubWork([
+    { issueNumber: 2, state: "completed", priority: 0, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+    { issueNumber: 3, state: "ready", priority: 90, dependsOn: [2], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+    { issueNumber: 4, state: "ready", priority: 100, dependsOn: [9], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(ready.availability, "ready");
+  assert.equal(ready.item?.issueNumber, 3);
+
+  const waiting = selectGithubWork([
+    { issueNumber: 1, state: "waiting-human", priority: 90, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(waiting.availability, "waiting_human");
+
+  const stale = selectGithubWork([
+    { issueNumber: 1, state: "ready", priority: 90, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T09:59:59.000Z" },
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(stale.availability, "stale");
 });

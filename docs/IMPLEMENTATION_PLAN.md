@@ -109,7 +109,7 @@ The post-V0 delivery sequence is:
 
 1. #4 — connect the **real Codex quota source** to the existing quota domain;
 2. #40 — define the strict GitHub-first work contract and adapter;
-3. #37 — persist/reconcile that normalized work and orchestrate multiple projects;
+3. #37 — persist/reconcile that normalized work and orchestrate multiple projects (implemented: durable projection, deterministic lease/dispatch and GitHub-derived Dashboard state);
 4. #8 — complete proactive GitHub attention notifications;
 5. #11 — complete the real Raspberry host runner service/executor integration;
 6. #10 then #9 — close advanced security/release gates and qualify the H24 topology.

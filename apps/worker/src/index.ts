@@ -132,3 +132,16 @@ export {
 } from "./v0/ProjectCheckout.js";
 export { V0TaskExecutor, type V0TaskExecutorOptions } from "./v0/V0TaskExecutor.js";
 export { V0TaskWorker, type V0TaskWorkerOptions } from "./v0/V0TaskWorker.js";
+export {
+  GithubWorkOrchestrator,
+  type GithubWorkCycleResult,
+  type GithubWorkDispatcher,
+  type GithubWorkDispatchRequest,
+  type GithubWorkDispatchResult,
+  type GithubWorkOrchestratorOptions,
+} from "./GithubWorkOrchestrator.js";
+export {
+  GithubWorkCodexExecutor,
+  buildGithubWorkPrompt,
+  type GithubWorkCodexExecutorOptions,
+} from "./GithubWorkCodexExecutor.js";

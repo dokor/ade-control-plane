@@ -21,6 +21,8 @@ import type {
   GithubDeliveryReceipt,
   GithubDeliveryReceiptInput,
   GithubDeliveryRepository,
+  GithubWorkReconciliationInput,
+  GithubWorkRepository,
   LeaseAcquisitionInput,
   ProjectRegistrationInput,
   ProjectRepository,
@@ -49,6 +51,11 @@ import type {
   GithubBotCommentRecord,
   GithubDeliveryRecord,
   GithubDeliveryStatus,
+  GithubWorkItemRecord,
+  GithubWorkItemState,
+  GithubWorkProfileReason,
+  GithubWorkProfileRecord,
+  GithubWorkRetryPolicy,
   GithubSubjectType,
   JsonObject,
   JsonValue,
@@ -368,6 +375,42 @@ function mapGithubBotComment(row: TimestampRow): GithubBotCommentRecord {
   };
 }
 
+function mapGithubWorkProfile(row: TimestampRow): GithubWorkProfileRecord {
+  return {
+    projectId: String(row.project_id),
+    repositoryGithubId: String(row.repository_github_id),
+    compatible: Boolean(row.compatible),
+    contractVersion: row.contract_version === null ? null : String(row.contract_version),
+    capabilities: toStringArray(row.capabilities),
+    skillPaths: toStringArray(row.skill_paths),
+    reason: row.reason as GithubWorkProfileReason,
+    observedAt: toIsoString(row.observed_at) ?? "",
+  };
+}
+
+function mapGithubWorkItem(row: TimestampRow): GithubWorkItemRecord {
+  return {
+    id: String(row.id),
+    projectId: String(row.project_id),
+    repositoryGithubId: String(row.repository_github_id),
+    contractVersion: String(row.contract_version),
+    issueNumber: Number(row.issue_number),
+    issueUrl: String(row.issue_url),
+    state: row.state as GithubWorkItemState,
+    priority: Number(row.priority),
+    dependsOn: toStringArray(row.depends_on).map(Number).filter(Number.isSafeInteger),
+    retryPolicy: row.retry_policy as GithubWorkRetryPolicy,
+    humanDecisionRef: row.human_decision_ref === null ? null : String(row.human_decision_ref),
+    executionRef: row.execution_ref === null ? null : String(row.execution_ref),
+    branchName: row.branch_name === null ? null : String(row.branch_name),
+    pullRequestNumber: row.pull_request_number === null ? null : Number(row.pull_request_number),
+    sourceUpdatedAt: toIsoString(row.source_updated_at) ?? "",
+    observedAt: toIsoString(row.observed_at) ?? "",
+    expiresAt: toIsoString(row.expires_at) ?? "",
+    present: Boolean(row.present),
+  };
+}
+
 function mapAdeDecision(row: TimestampRow): AdeDecisionRecord {
   return {
     id: String(row.id),
@@ -520,6 +563,68 @@ class PostgresGithubBotCommentRepository implements GithubBotCommentRepository {
       "Bot comment mapping could not be stored.",
     );
     return mapGithubBotComment(row);
+  }
+}
+
+class PostgresGithubWorkRepository implements GithubWorkRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async getProfile(projectId: string): Promise<GithubWorkProfileRecord | null> {
+    const row = await queryOptional(this.pool, "SELECT * FROM github_work_profiles WHERE project_id = $1", [projectId]);
+    return row ? mapGithubWorkProfile(row) : null;
+  }
+
+  public async listForProject(projectId: string): Promise<readonly GithubWorkItemRecord[]> {
+    return this.listForProjects([projectId]);
+  }
+
+  public async listForProjects(projectIds: readonly string[]): Promise<readonly GithubWorkItemRecord[]> {
+    if (projectIds.length === 0) return [];
+    const result = await this.pool.query(
+      "SELECT * FROM github_work_items WHERE project_id = ANY($1::uuid[]) ORDER BY project_id ASC, priority DESC, issue_number ASC",
+      [[...projectIds]],
+    );
+    return result.rows.map(mapGithubWorkItem);
+  }
+
+  public async reconcile(input: GithubWorkReconciliationInput): Promise<readonly GithubWorkItemRecord[]> {
+    return withTransaction(this.pool, async (client) => {
+      const profile = input.profile;
+      await client.query(
+        `INSERT INTO github_work_profiles (project_id, repository_github_id, compatible, contract_version, capabilities, skill_paths, reason, observed_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
+         ON CONFLICT (project_id) DO UPDATE SET
+           repository_github_id = EXCLUDED.repository_github_id, compatible = EXCLUDED.compatible,
+           contract_version = EXCLUDED.contract_version, capabilities = EXCLUDED.capabilities,
+           skill_paths = EXCLUDED.skill_paths, reason = EXCLUDED.reason, observed_at = EXCLUDED.observed_at`,
+        [profile.projectId, profile.repositoryGithubId, profile.compatible, profile.contractVersion ?? null,
+          JSON.stringify(profile.capabilities ?? []), JSON.stringify(profile.skillPaths ?? []), profile.reason, profile.observedAt],
+      );
+      await client.query("UPDATE github_work_items SET present = false WHERE project_id = $1", [profile.projectId]);
+      for (const item of input.items) {
+        await client.query(
+          `INSERT INTO github_work_items (id, project_id, repository_github_id, contract_version, issue_number, issue_url, state, priority, depends_on, retry_policy, human_decision_ref, execution_ref, branch_name, pull_request_number, source_updated_at, observed_at, expires_at, present)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, true)
+           ON CONFLICT (project_id, issue_number) DO UPDATE SET
+             repository_github_id = EXCLUDED.repository_github_id, contract_version = EXCLUDED.contract_version,
+             issue_url = EXCLUDED.issue_url, state = EXCLUDED.state, priority = EXCLUDED.priority,
+             depends_on = EXCLUDED.depends_on, retry_policy = EXCLUDED.retry_policy,
+             human_decision_ref = EXCLUDED.human_decision_ref, execution_ref = EXCLUDED.execution_ref,
+             branch_name = EXCLUDED.branch_name, pull_request_number = EXCLUDED.pull_request_number,
+             source_updated_at = EXCLUDED.source_updated_at, observed_at = EXCLUDED.observed_at,
+             expires_at = EXCLUDED.expires_at, present = true`,
+          [randomUUID(), item.projectId, item.repositoryGithubId, item.contractVersion, item.issueNumber,
+            item.issueUrl, item.state, item.priority, JSON.stringify(item.dependsOn), item.retryPolicy,
+            item.humanDecisionRef ?? null, item.executionRef ?? null, item.branchName ?? null,
+            item.pullRequestNumber ?? null, item.sourceUpdatedAt, item.observedAt, item.expiresAt],
+        );
+      }
+      const result = await client.query(
+        "SELECT * FROM github_work_items WHERE project_id = $1 ORDER BY priority DESC, issue_number ASC",
+        [profile.projectId],
+      );
+      return result.rows.map(mapGithubWorkItem);
+    });
   }
 }
 
@@ -1889,6 +1994,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
   public readonly auditEvents: AuditEventRepository;
   public readonly githubBotComments: GithubBotCommentRepository;
   public readonly githubDeliveries: GithubDeliveryRepository;
+  public readonly githubWork: GithubWorkRepository;
   public readonly controlCommands: ControlCommandRepository;
   public readonly executionLeases: ExecutionLeaseRepository;
   public readonly executions: ExecutionRepository;
@@ -1914,6 +2020,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
     this.controlCommands = new PostgresControlCommandRepository(this.pool);
     this.auditEvents = new PostgresAuditEventRepository(this.pool);
     this.githubDeliveries = new PostgresGithubDeliveryRepository(this.pool);
+    this.githubWork = new PostgresGithubWorkRepository(this.pool);
     this.githubBotComments = new PostgresGithubBotCommentRepository(this.pool);
     this.adeDecisions = new PostgresAdeDecisionRepository(this.pool);
     this.v0Tasks = new PostgresV0TaskRepository(this.pool);

@@ -1,5 +1,6 @@
 import {
   evaluateSchedule,
+  selectGithubWork,
   type AdeAvailability,
   type CandidateExplanation,
   type DetailedSchedulerDecision,
@@ -7,6 +8,7 @@ import {
   type SchedulerCandidate,
   type SchedulerMode,
   type SchedulerRunner,
+  type GithubWorkSelection,
 } from "@ade-control-plane/core";
 import type {
   AdeDecisionRecord,
@@ -15,7 +17,8 @@ import type {
   ControlPlanePersistence,
   ExecutionRecord,
   ProjectRecord,
-  ProjectSnapshotRecord,
+  GithubWorkItemRecord,
+  GithubWorkProfileRecord,
   ProviderQuotaSnapshotRecord,
   RunnerRecord,
 } from "@ade-control-plane/database";
@@ -184,13 +187,12 @@ export async function buildOverview(
     persistence.runners.list(),
     persistence.executions.listActive(),
   ]);
-  const snapshots = await persistence.projectSnapshots.listLatestForProjects(
-    projects.map(({ id }) => id),
-  );
-  const quotaSnapshot = await persistence.providerQuotaSnapshots.getLatest(
-    input.quotaProvider,
-    input.quotaAccountRef,
-  );
+  const [workItems, profiles, histories, quotaSnapshot] = await Promise.all([
+    persistence.githubWork.listForProjects(projects.map(({ id }) => id)),
+    Promise.all(projects.map((project) => persistence.githubWork.getProfile(project.id))),
+    Promise.all(projects.map((project) => persistence.executions.listByProjectId(project.id, 100))),
+    persistence.providerQuotaSnapshots.getLatest(input.quotaProvider, input.quotaAccountRef),
+  ]);
 
   const quota = buildQuotaView(
     input.quotaProvider,
@@ -199,9 +201,20 @@ export async function buildOverview(
     settings,
     now,
   );
-  const snapshotByProject = new Map(
-    snapshots.map((snapshot) => [snapshot.projectId, snapshot]),
+  const profileByProject = new Map(
+    profiles.filter((profile): profile is GithubWorkProfileRecord => profile !== null)
+      .map((profile) => [profile.projectId, profile]),
   );
+  const workByProject = new Map<string, GithubWorkItemRecord[]>();
+  for (const item of workItems) {
+    const items = workByProject.get(item.projectId) ?? [];
+    items.push(item);
+    workByProject.set(item.projectId, items);
+  }
+  const selectionByProject = new Map(projects.map((project) => [
+    project.id,
+    selectProjectGithubWork(profileByProject.get(project.id) ?? null, workByProject.get(project.id) ?? [], now),
+  ]));
   const activeByProject = new Map(
     activeExecutions.map((execution) => [execution.projectId, execution]),
   );
@@ -209,9 +222,9 @@ export async function buildOverview(
   const candidates = projects.map((project) =>
     toSchedulerCandidate(
       project,
-      snapshotByProject.get(project.id) ?? null,
+      selectionByProject.get(project.id)!,
       activeByProject.has(project.id),
-      now,
+      histories[projects.indexOf(project)] ?? [],
     ),
   );
   const decision = evaluateSchedule({
@@ -229,7 +242,8 @@ export async function buildOverview(
   const projectViews = projects.map((project) =>
     toProjectView(
       project,
-      snapshotByProject.get(project.id) ?? null,
+      profileByProject.get(project.id) ?? null,
+      selectionByProject.get(project.id)!,
       explanationByProject.get(project.id) ?? null,
       activeByProject.get(project.id) ?? null,
       now,
@@ -267,7 +281,7 @@ export async function buildProjectDetail(
   const overview = await buildOverview(input);
   const view =
     overview.projects.find(({ id }) => id === project.id) ??
-    toProjectView(project, null, null, null, now);
+    toProjectView(project, null, selectProjectGithubWork(null, [], now), null, null, now);
   const [executions, auditEvents, commands, decisions] = await Promise.all([
     persistence.executions.listByProjectId(project.id, 20),
     persistence.auditEvents.listForProject(project.id, 30),
@@ -392,12 +406,10 @@ function readMemoryClass(value: unknown): "small" | "medium" | "large" {
 
 function toSchedulerCandidate(
   project: ProjectRecord,
-  snapshot: ProjectSnapshotRecord | null,
+  selection: GithubWorkSelection,
   hasActiveLease: boolean,
-  now: string,
+  history: readonly ExecutionRecord[],
 ): SchedulerCandidate {
-  const availability = adeAvailability(snapshot, now);
-  const workRef = snapshot?.currentWorkRef ?? snapshot?.nextWorkRef ?? null;
   const labels = Array.isArray(project.runnerPolicy.labels)
     ? project.runnerPolicy.labels.map(String)
     : [];
@@ -406,29 +418,36 @@ function toSchedulerCandidate(
     project: {
       id: project.id,
       repository: `${project.repositoryOwner}/${project.repositoryName}`,
-      priority: project.priority,
+      priority: selection.item?.priority ?? project.priority,
       controlState: project.state,
       requiredRunnerLabels: labels,
     },
-    adeAvailability: availability,
-    work: workRef ? { ref: workRef, cost: "short" } : null,
+    adeAvailability: selection.availability,
+    // GitHub work has no user-supplied cost field. Treat every Codex run as
+    // long so quota draining cannot be bypassed by an inferred estimate.
+    work: selection.availability === "ready" && selection.item
+      ? { ref: githubWorkRef(selection.item.issueNumber), cost: "long" }
+      : null,
     hasActiveLease,
+    requiresReconciliation: selection.item !== null && history.some((execution) =>
+      execution.workRef === githubWorkRef(selection.item!.issueNumber) &&
+      ["succeeded", "failed", "cancelled", "unknown"].includes(execution.status) &&
+      execution.resultSummary?.sourceUpdatedAt === selection.item!.sourceUpdatedAt,
+    ),
   };
 }
 
-function adeAvailability(
-  snapshot: ProjectSnapshotRecord | null,
+function selectProjectGithubWork(
+  profile: GithubWorkProfileRecord | null,
+  items: readonly GithubWorkItemRecord[],
   now: string,
-): AdeAvailability {
-  if (!snapshot) return "unknown";
-  if (snapshot.requiresHuman) return "waiting_human";
-  if (snapshot.status === "reconciling") return "reconciling";
-
-  const age = ageMs(snapshot.observedAt, now);
-  const expired =
-    snapshot.expiresAt !== null && Date.parse(snapshot.expiresAt) <= Date.parse(now);
-  if (expired || age === null || age >= STALE_SNAPSHOT_MS) return "stale";
-  return "ready";
+): GithubWorkSelection {
+  if (!profile || !profile.compatible) {
+    return { availability: "unknown", item: null, reason: profile
+      ? `GitHub work profile is ${profile.reason}.`
+      : "GitHub work profile has not been reconciled yet." };
+  }
+  return selectGithubWork(items, now);
 }
 
 const EXCLUSION_STATUS: Readonly<Record<ExclusionCode, ProjectStatus>> = {
@@ -440,6 +459,10 @@ const EXCLUSION_STATUS: Readonly<Record<ExclusionCode, ProjectStatus>> = {
   "no-runnable-work": "completed",
   "waiting-human": "waiting-human",
   reconciling: "reconciling",
+  "reconcile-first": "reconciling",
+  "work-blocked": "reconciling",
+  "work-completed": "completed",
+  "work-failed": "failed",
   "security-blocked": "failed",
   "quota-blocked": "waiting-quota",
   "quota-unknown": "waiting-quota",
@@ -454,10 +477,14 @@ const EXCLUSION_REASON: Readonly<Record<ExclusionCode, string>> = {
   "global-safe-mode": "Safe mode blocks new privileged dispatch.",
   "project-paused": "Project is paused by an operator.",
   "project-disabled": "Project is disabled.",
-  "ade-not-ready": "The ADE snapshot is stale or missing, so eligibility is unknown.",
-  "no-runnable-work": "ADE reports no runnable work.",
-  "waiting-human": "ADE is waiting for a human decision.",
+  "ade-not-ready": "The GitHub work projection is stale or missing, so eligibility is unknown.",
+  "no-runnable-work": "GitHub reports no runnable work.",
+  "waiting-human": "GitHub work is waiting for a human decision.",
   reconciling: "The previous outcome is ambiguous and is being reconciled.",
+  "reconcile-first": "This GitHub issue revision has already been attempted and must be reconciled before another run.",
+  "work-blocked": "GitHub work is explicitly blocked.",
+  "work-completed": "All GitHub work is completed.",
+  "work-failed": "GitHub work is explicitly marked failed.",
   "security-blocked": "The project is blocked for security reasons.",
   "quota-blocked": "Provider quota is exhausted.",
   "quota-unknown": "Provider quota state is unknown, so scheduling stays conservative.",
@@ -469,13 +496,15 @@ const EXCLUSION_REASON: Readonly<Record<ExclusionCode, string>> = {
 
 function toProjectView(
   project: ProjectRecord,
-  snapshot: ProjectSnapshotRecord | null,
+  profile: GithubWorkProfileRecord | null,
+  selection: GithubWorkSelection,
   explanation: CandidateExplanation | null,
   activeExecution: ExecutionRecord | null,
   now: string,
 ): ProjectView {
   const exclusion = explanation?.exclusion ?? null;
-  const snapshotAgeMs = snapshot ? ageMs(snapshot.observedAt, now) : null;
+  const item = selection.item;
+  const snapshotAgeMs = item ? ageMs(item.observedAt, now) : null;
 
   return {
     id: project.id,
@@ -489,25 +518,24 @@ function toProjectView(
       : exclusion
         ? EXCLUSION_STATUS[exclusion]
         : "ready",
-    waitingReason:
-      snapshot?.waitingReason !== undefined && snapshot?.waitingReason !== null
-        ? sanitizeText(snapshot.waitingReason)
-        : exclusion
-          ? EXCLUSION_REASON[exclusion]
-          : null,
+    waitingReason: exclusion ? EXCLUSION_REASON[exclusion] : selection.reason,
     exclusion,
-    stage: snapshot?.stage ?? null,
-    milestone: snapshot?.milestone ?? null,
-    currentWorkSummary: nullableText(snapshot?.currentWorkSummary),
-    nextWorkSummary: nullableText(snapshot?.nextWorkSummary),
-    snapshotObservedAt: snapshot?.observedAt ?? null,
+    stage: profile?.contractVersion ?? null,
+    milestone: item ? `GitHub issue #${item.issueNumber}` : null,
+    currentWorkSummary: item ? `GitHub issue #${item.issueNumber}` : null,
+    nextWorkSummary: null,
+    snapshotObservedAt: item?.observedAt ?? profile?.observedAt ?? null,
     snapshotAgeMs,
-    snapshotFresh: snapshotAgeMs !== null && snapshotAgeMs < STALE_SNAPSHOT_MS,
-    requiresHuman: snapshot?.requiresHuman ?? false,
+    snapshotFresh: item !== null && item !== undefined && Date.parse(item.expiresAt) > Date.parse(now),
+    requiresHuman: selection.availability === "waiting_human",
     activeRunnerId: activeExecution?.runnerId ?? null,
     lastSuccessfulExecutionAt: null,
     compatibleRunnerIds: explanation?.compatibleRunnerIds ?? [],
   };
+}
+
+function githubWorkRef(issueNumber: number): string {
+  return `github:issue:${issueNumber}`;
 }
 
 function toRunnerView(

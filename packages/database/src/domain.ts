@@ -192,6 +192,59 @@ export interface ControlPlaneSettingsRecord {
 
 export type GithubDeliveryStatus = "received" | "rejected" | "ignored" | "processed";
 
+/**
+ * A validated, GitHub-derived scheduling projection. The original issue body
+ * never enters this model: only the strict `ade.github-work/v1` fields do.
+ */
+export type GithubWorkItemState =
+  | "ready"
+  | "running"
+  | "waiting-human"
+  | "blocked"
+  | "completed"
+  | "failed";
+
+export type GithubWorkRetryPolicy = "safe" | "reconcile-first" | "never";
+
+export type GithubWorkProfileReason =
+  | "compatible"
+  | "missing-profile"
+  | "invalid-profile"
+  | "unsupported-profile";
+
+export interface GithubWorkProfileRecord {
+  projectId: string;
+  repositoryGithubId: string;
+  compatible: boolean;
+  contractVersion: string | null;
+  capabilities: readonly string[];
+  skillPaths: readonly string[];
+  reason: GithubWorkProfileReason;
+  observedAt: string;
+}
+
+export interface GithubWorkItemRecord {
+  id: string;
+  projectId: string;
+  repositoryGithubId: string;
+  contractVersion: string;
+  issueNumber: number;
+  issueUrl: string;
+  state: GithubWorkItemState;
+  priority: number;
+  dependsOn: readonly number[];
+  retryPolicy: GithubWorkRetryPolicy;
+  humanDecisionRef: string | null;
+  executionRef: string | null;
+  branchName: string | null;
+  pullRequestNumber: number | null;
+  sourceUpdatedAt: string;
+  observedAt: string;
+  expiresAt: string;
+  /** False only after a full successful reconciliation no longer saw it. */
+  present: boolean;
+}
+
 export type GithubSubjectType = "issue" | "pull_request";
 
 export type BotCommentPurpose = "status" | "waiting-human" | "failure";

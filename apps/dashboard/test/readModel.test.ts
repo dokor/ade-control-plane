@@ -39,14 +39,13 @@ function twoProjectState(): MemoryState {
         priority: 40,
       }),
     ],
-    snapshots: [
-      snapshot(),
-      snapshot({
-        id: "88888888-8888-4888-8888-888888888888",
-        projectId: SECOND_PROJECT_ID,
-        requiresHuman: true,
-        waitingReason: "A human must approve the migration plan.",
-      }),
+    githubWorkProfiles: [
+      { projectId: project().id, repositoryGithubId: "123", compatible: true, contractVersion: "ade.github-work-profile/v1", capabilities: ["github-work-items"], skillPaths: [".agents/skills"], reason: "compatible", observedAt: NOW },
+      { projectId: SECOND_PROJECT_ID, repositoryGithubId: "456", compatible: true, contractVersion: "ade.github-work-profile/v1", capabilities: ["github-work-items", "human-decisions"], skillPaths: [".agents/skills"], reason: "compatible", observedAt: NOW },
+    ],
+    githubWorkItems: [
+      { id: "77777777-7777-4777-8777-777777777777", projectId: project().id, repositoryGithubId: "123", contractVersion: "ade.github-work/v1", issueNumber: 21, issueUrl: "https://github.com/dokor/argos/issues/21", state: "ready", priority: 70, dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T10:05:00.000Z", present: true },
+      { id: "88888888-8888-4888-8888-888888888888", projectId: SECOND_PROJECT_ID, repositoryGithubId: "456", contractVersion: "ade.github-work/v1", issueNumber: 22, issueUrl: "https://github.com/dokor/dvv/issues/22", state: "waiting-human", priority: 90, dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: "decision:22", executionRef: null, branchName: null, pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T10:05:00.000Z", present: true },
     ],
     runners: [runner()],
     quotaSnapshots: [quotaSnapshot()],
@@ -107,8 +106,9 @@ test("explains per-project exclusion when the scheduler is running", async () =>
   assert.match(overview.schedulerExplanation, /runner|human|paused/i);
 });
 
-test("marks a stale ADE snapshot as unknown rather than idle", async () => {
+test("marks a stale GitHub projection as unknown rather than idle", async () => {
   const state = twoProjectState();
+  state.githubWorkItems[0] = { ...state.githubWorkItems[0]!, expiresAt: "2026-08-27T10:01:00.000Z" };
   const overview = await buildOverview(
     input(state, { now: "2026-08-27T11:00:00.000Z" }),
   );
