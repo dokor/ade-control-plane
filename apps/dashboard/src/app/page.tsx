@@ -71,6 +71,8 @@ export default async function OverviewPage() {
             <br />
             Resets {formatInstant(overview.quota.resetsAt)}
             <br />
+            Window {overview.quota.windowDurationMins === null ? "unknown" : `${overview.quota.windowDurationMins}m`}
+            <br />
             Snapshot {formatAge(overview.quota.snapshotAgeMs)}
           </p>
           <p className="detail">{overview.quota.reason}</p>
