@@ -1,4 +1,4 @@
 # Install with mode 0440 under /etc/sudoers.d and validate with visudo.
 # The wrapper validates its sole argument as a commit SHA and owns all Docker
 # operations. Do not grant this account sudo/docker access beyond this command.
-github-runner ALL=(root) NOPASSWD: /srv/apps/ade-control-plane/bin/deploy
+github-runner ALL=(root) NOPASSWD: /usr/local/sbin/ade-control-plane-deploy

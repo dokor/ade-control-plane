@@ -37,7 +37,7 @@ The GitHub Actions runner should:
 The workflow calls one allow-listed host wrapper, for example:
 
 ```text
-sudo /srv/apps/ade-control-plane/bin/deploy <expected-main-sha>
+sudo /usr/local/sbin/ade-control-plane-deploy <expected-main-sha>
 ```
 
 The sudo policy must not permit:
