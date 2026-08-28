@@ -114,14 +114,13 @@ and deployment-only Git credentials, then install the reviewed wrapper and
 sudoers entry:
 
 ```bash
-sudo install -d -o root -g root -m 0755 /srv/apps/ade-control-plane/bin
-sudo install -o root -g root -m 0755 deploy/bin/deploy /srv/apps/ade-control-plane/bin/deploy
+sudo install -o root -g root -m 0755 deploy/bin/deploy /usr/local/sbin/ade-control-plane-deploy
 sudo install -o root -g root -m 0440 deploy/sudoers/ade-deploy /etc/sudoers.d/ade-deploy
 sudo visudo -cf /etc/sudoers.d/ade-deploy
 ```
 
 The ADE workflow does not require Docker-group membership. The workflow can
-invoke only `/srv/apps/ade-control-plane/bin/deploy`; it cannot invoke generic
+invoke only `/usr/local/sbin/ade-control-plane-deploy`; it cannot invoke generic
 `sudo` commands or `sudo docker` through its ADE sudo policy. If the shared
 `github-runner` account already belongs to the Docker group for another
 application, that is pre-existing host-wide authority and should be reviewed
@@ -141,7 +140,7 @@ GitHub or Codex secret.
 The same wrapper is the break-glass path for a known-good commit:
 
 ```bash
-sudo -n /srv/apps/ade-control-plane/bin/deploy <known-good-40-character-sha>
+sudo -n /usr/local/sbin/ade-control-plane-deploy <known-good-40-character-sha>
 cat /var/lib/ade-control-plane/deployed-sha
 docker compose ps
 ```
