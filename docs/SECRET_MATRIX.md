@@ -16,7 +16,7 @@ This matrix is the default. Any broader sharing requires an explicit security de
 | Git push credential | privileged execution zone | V0 worker or host runner Git environment | Dashboard/browser, Codex environment when separable | project Git push only |
 | Codex API/auth credential | Codex execution zone | Codex subprocess/runtime | Git commands, Dashboard, GitHub webhook | AI execution only |
 | worker→runner HMAC secret | worker + host runner | those two components only | Dashboard/browser, Codex, GitHub | local runner channel only |
-| deployment sudo authority | host OS policy | `ade-deploy` only for allow-listed deploy wrapper | app containers, Codex, PR workflows | CD path only |
+| deployment sudo authority | host OS policy | `github-runner` only for allow-listed deploy wrapper | app containers, Codex, PR workflows | CD path only |
 
 ## Rules
 

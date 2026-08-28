@@ -19,8 +19,10 @@ This is the operational checklist for issue #26. It defines what must be ready b
 Recommended layout:
 
 ```text
+/srv/apps/
+└── ade-control-plane/    application checkout
+
 /srv/ade-control-plane/
-├── app/
 ├── data/postgres/
 ├── backups/
 ├── projects/

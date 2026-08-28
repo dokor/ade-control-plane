@@ -31,8 +31,10 @@ Exact paths can be adapted to the host, but keep concerns separated.
 Example:
 
 ```text
+/srv/apps/
+└── ade-control-plane/    application checkout/config
+
 /srv/ade-control-plane/
-├── compose/              application checkout/config
 ├── data/
 │   └── postgres/         database volume
 ├── backups/              protected DB backups
@@ -187,7 +189,7 @@ After a deployment has started normally, run the repository-provided,
 read-only qualification command on the Raspberry:
 
 ```bash
-/opt/ade-control-plane/deploy/bin/qualify-h24 --require-backup
+/srv/apps/ade-control-plane/deploy/bin/qualify-h24 --require-backup
 ```
 
 It verifies the resolved Compose configuration, healthchecks, non-root and
