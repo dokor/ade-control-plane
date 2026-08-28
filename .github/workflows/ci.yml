@@ -63,6 +63,7 @@ jobs:
           done
           SECRETS_DIR="$secrets_dir" \
           DASHBOARD_PUBLIC_URL=https://ade.example.test \
+          DASHBOARD_PUBLIC_HOST=ade.example.test \
           GITHUB_APP_ID=1 \
           GITHUB_APP_INSTALLATION_ID=1 \
           RUNNER_SOCKET_GID="$(id -g)" \
