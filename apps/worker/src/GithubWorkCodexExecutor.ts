@@ -3,6 +3,7 @@ import type { GithubPullRequestClient } from "@ade-control-plane/github";
 
 import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDispatcher } from "./GithubWorkOrchestrator.js";
 import type { CommandRunner } from "./v0/CommandRunner.js";
+import { CodexAgentExecutor, type AgentExecutor } from "./AgentExecutor.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
 
 export interface GithubWorkCodexExecutorOptions {
@@ -10,6 +11,7 @@ export interface GithubWorkCodexExecutorOptions {
   commands: CommandRunner;
   projectRoot: string;
   codexExecutable?: string;
+  agentExecutor?: AgentExecutor;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
 }
@@ -21,9 +23,15 @@ export interface GithubWorkCodexExecutorOptions {
  */
 export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
   private readonly codexExecutable: string;
+  private readonly agentExecutor: AgentExecutor;
 
   public constructor(private readonly options: GithubWorkCodexExecutorOptions) {
     this.codexExecutable = options.codexExecutable ?? "codex";
+    this.agentExecutor = options.agentExecutor ?? new CodexAgentExecutor({
+      commands: options.commands,
+      executable: this.codexExecutable,
+      environment: options.codexEnvironment ?? {},
+    });
   }
 
   public async execute(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult> {
@@ -45,13 +53,13 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       await this.mustRun("git branch preparation", {
         executable: "git", args: ["switch", "--force-create", branchName, `origin/${checkout.baseBranch}`], cwd: checkout.root, env: this.gitEnvironment,
       });
-      await this.mustRun("Codex", {
-        executable: this.codexExecutable,
-        args: ["exec", "--sandbox", "workspace-write", "--ephemeral", "--json", "-"],
+      const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
-        stdin: buildGithubWorkPrompt(request),
-        env: this.codexEnvironment,
+        prompt: buildGithubWorkPrompt(request),
       });
+      if (agentResult.exitCode !== 0) {
+        throw new GithubWorkExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
+      }
       const finalStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
       if (!finalStatus.stdout.trim()) {
         throw new GithubWorkExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");

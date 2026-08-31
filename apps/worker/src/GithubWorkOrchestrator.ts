@@ -16,6 +16,7 @@ import type {
   RunnerRecord,
 } from "@ade-control-plane/database";
 import type { GithubWorkItem, GithubWorkReader, GithubWorkRepositoryProfile } from "@ade-control-plane/github";
+import type { AgentProvider } from "./AgentExecutor.js";
 
 export interface GithubWorkDispatchRequest {
   executionId: string;
@@ -50,6 +51,7 @@ export interface GithubWorkOrchestratorOptions {
   ownerId: string;
   /** Matches V0 behaviour when no App Server quota source is configured. */
   allowStartWithoutQuotaSnapshot?: boolean;
+  provider?: AgentProvider;
   leaseDurationMs?: number;
   now?(): Date;
 }
@@ -133,7 +135,7 @@ export class GithubWorkOrchestrator {
         projectId: project.id,
         runnerId: decision.selected.runnerId,
         workRef: githubWorkRef(selection.item.issueNumber),
-        capability: "github-work.codex",
+        capability: `github-work.${this.options.provider ?? "codex"}`,
         requestedAt: now,
       },
       lease: {
@@ -239,7 +241,7 @@ export class GithubWorkOrchestrator {
 }
 
 function selectProjectWork(profile: GithubWorkProfileRecord | null, items: readonly GithubWorkItemRecord[], now: string): GithubWorkSelection {
-  if (!profile || !profile.compatible) return { availability: "unknown", item: null, reason: "GitHub work profile is unavailable." };
+  if (!profile || !profile.compatible || (profile.adeStatus !== undefined && profile.adeStatus !== "compatible")) return { availability: "unknown", item: null, reason: "ADE project is not compatible." };
   return selectGithubWork(items, now);
 }
 

@@ -8,6 +8,7 @@ import { loadV0WorkerRuntime } from "../v0/runtime.js";
 import { GithubWorkCodexExecutor } from "../GithubWorkCodexExecutor.js";
 import { GithubWorkOrchestrator } from "../GithubWorkOrchestrator.js";
 import { GithubWorkNotifier } from "../GithubWorkNotifier.js";
+import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
 
 async function main(): Promise<void> {
   const config = await loadV0WorkerRuntime();
@@ -25,14 +26,19 @@ async function main(): Promise<void> {
     await store.migrate();
     const tokens = new GithubAppTokenProvider({ credentials: config.github });
     const github = new HttpGithubClient({ tokens, installationId: config.github.installationId });
+    const commands = new NodeCommandRunner();
     const orchestrator = new GithubWorkOrchestrator({
       persistence: store,
       reader: new HttpGithubWorkAdapter({ tokens, installationId: config.github.installationId }),
       dispatcher: new GithubWorkCodexExecutor({
-        github, commands: new NodeCommandRunner(), projectRoot: config.projectRoot,
+        github, commands, projectRoot: config.projectRoot,
         codexExecutable: config.codexExecutable, codexEnvironment: config.codexEnvironment,
         gitEnvironment: config.gitEnvironment,
+        agentExecutor: config.agentProvider === "claude-code"
+          ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
+          : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment }),
       }),
+      provider: config.agentProvider,
       ownerId: `github-work:${hostname()}:${process.pid}`,
       allowStartWithoutQuotaSnapshot: config.codexAppServerUrl === null,
       notifier: new GithubWorkNotifier({
@@ -41,7 +47,7 @@ async function main(): Promise<void> {
         dashboardUrl: config.dashboardUrl,
       }),
     });
-    await ensureLocalRunner(store);
+    await ensureLocalRunner(store, config.agentProvider);
     while (!stop.signal.aborted) {
       const mode = (await store.settings.get()).schedulerMode;
       if (mode === "running") await orchestrator.runCycle();
@@ -54,7 +60,7 @@ async function main(): Promise<void> {
   }
 }
 
-async function ensureLocalRunner(store: PostgresControlPlaneStore): Promise<void> {
+async function ensureLocalRunner(store: PostgresControlPlaneStore, provider: "codex" | "claude-code"): Promise<void> {
   const existing = (await store.runners.list()).find(({ name }) => name === "github-work-local");
   const now = new Date().toISOString();
   if (existing) {
@@ -65,7 +71,7 @@ async function ensureLocalRunner(store: PostgresControlPlaneStore): Promise<void
   await store.runners.register({
     name: "github-work-local", kind: "local-codex", state: "online",
     architecture: process.arch === "arm64" ? "arm64" : "x64",
-    capabilities: { codex: true }, labels: ["local"], lastHeartbeatAt: now,
+    capabilities: { [provider]: true }, labels: ["local"], lastHeartbeatAt: now,
   });
 }
 
