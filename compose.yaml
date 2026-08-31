@@ -51,6 +51,10 @@ services:
       - database_url
       - dashboard_session_secret
       - dashboard_password_hash
+    # Docker Compose bind-mounts file-backed secrets with host ownership. Give
+    # this non-root process only the dedicated read group, not root access.
+    group_add:
+      - "${SECRETS_GID:?Set SECRETS_GID to the host ade-secrets group GID}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,6 +132,7 @@ services:
       - codex_home:/home/ade-worker/.codex
       - ${RUNNER_RUNTIME_DIR_HOST:-/run/ade-control-plane-runner}:/run/ade-control-plane-runner:rw
     group_add:
+      - "${SECRETS_GID:?Set SECRETS_GID to the host ade-secrets group GID}"
       - "${RUNNER_SOCKET_GID:?Set RUNNER_SOCKET_GID to the host ade-runner group GID}"
     depends_on:
       postgres:

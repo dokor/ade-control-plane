@@ -14,6 +14,9 @@ Required files:
 - `github_app_private_key` — the GitHub App PEM private key;
 - `codex_api_key` — the API key used by the non-interactive Codex worker.
 
-Restrict the directory and files to the deployment administrator (`chmod 700
-secrets && chmod 600 secrets/*` on Linux). Compose mounts them read-only under
+Keep the directory owned and searchable only by the deployment administrator
+(`chmod 700 secrets`). With local Docker Compose, file-backed secrets are bind
+mounted with their host ownership, so create a dedicated `ade-secrets` group,
+make each file `root:ade-secrets` with mode `0640`, and add its numeric GID as
+`SECRETS_GID`. Compose mounts only the explicitly listed files read-only under
 `/run/secrets`; values are not copied into either image.

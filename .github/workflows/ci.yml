@@ -66,6 +66,7 @@ jobs:
           DASHBOARD_PUBLIC_HOST=ade.example.test \
           GITHUB_APP_ID=1 \
           GITHUB_APP_INSTALLATION_ID=1 \
+          SECRETS_GID="$(id -g)" \
           RUNNER_SOCKET_GID="$(id -g)" \
           docker compose config --quiet
           ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
