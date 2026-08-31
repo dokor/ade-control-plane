@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Pool } from "pg";
+import type { Notification, Pool } from "pg";
 
 import type {
   AdeDecisionInput,
@@ -36,6 +36,8 @@ import type {
   V0TaskCreateInput,
   V0TaskLogInput,
   V0TaskRepository,
+  WorkerWakeup,
+  WorkerWakeupRepository,
   V0TaskTransitionInput,
   AgentUsageInput,
   AgentUsageRepository,
@@ -2144,6 +2146,46 @@ function isTerminalStatus(status: ExecutionRecord["status"]): boolean {
   );
 }
 
+class PostgresWorkerWakeupRepository implements WorkerWakeupRepository {
+  private static readonly channel = "ade_control_plane_wakeup";
+
+  public constructor(private readonly pool: Pool) {}
+
+  public async signal(input: WorkerWakeup): Promise<void> {
+    const payload = JSON.stringify({
+      reason: input.reason.slice(0, 100),
+      projectId: input.projectId,
+      signaledAt: input.signaledAt,
+    });
+    await this.pool.query("SELECT pg_notify($1, $2)", [PostgresWorkerWakeupRepository.channel, payload]);
+  }
+
+  public async listen(handler: (wakeup: WorkerWakeup) => void): Promise<() => Promise<void>> {
+    const client = await this.pool.connect();
+    await client.query(`LISTEN ${PostgresWorkerWakeupRepository.channel}`);
+    const listener = (message: Notification): void => {
+      if (!message.payload) return;
+      try {
+        const parsed = JSON.parse(message.payload) as Record<string, unknown>;
+        if (typeof parsed.reason !== "string" || typeof parsed.signaledAt !== "string") return;
+        handler({
+          reason: parsed.reason.slice(0, 100),
+          projectId: typeof parsed.projectId === "string" ? parsed.projectId : null,
+          signaledAt: parsed.signaledAt,
+        });
+      } catch {
+        // Wakeups are hints; the periodic reconciliation remains authoritative.
+      }
+    };
+    client.on("notification", listener);
+    return async () => {
+      client.removeListener("notification", listener);
+      await client.query(`UNLISTEN ${PostgresWorkerWakeupRepository.channel}`).catch(() => undefined);
+      client.release();
+    };
+  }
+}
+
 export class PostgresControlPlaneStore implements ControlPlanePersistence {
   public readonly agentUsage: AgentUsageRepository;
   public readonly v0Tasks: V0TaskRepository;
@@ -2160,6 +2202,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
   public readonly providerQuotaSnapshots: ProviderQuotaSnapshotRepository;
   public readonly runners: RunnerRepository;
   public readonly settings: ControlPlaneSettingsRepository;
+  public readonly wakeups: WorkerWakeupRepository;
 
   private readonly pool: Pool;
 
@@ -2182,6 +2225,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
     this.githubBotComments = new PostgresGithubBotCommentRepository(this.pool);
     this.adeDecisions = new PostgresAdeDecisionRepository(this.pool);
     this.v0Tasks = new PostgresV0TaskRepository(this.pool);
+    this.wakeups = new PostgresWorkerWakeupRepository(this.pool);
   }
 
   public async close(): Promise<void> {

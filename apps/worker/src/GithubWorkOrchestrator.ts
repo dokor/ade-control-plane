@@ -84,8 +84,13 @@ export class GithubWorkOrchestrator {
     for (const project of projects) await this.reconcileProject(project);
   }
 
-  public async runCycle(): Promise<GithubWorkCycleResult> {
-    await this.reconcileAll();
+  public async runCycle(input: { reconcile?: "full" | "targeted" | "none"; projectId?: string } = {}): Promise<GithubWorkCycleResult> {
+    if (input.reconcile === "targeted" && input.projectId) {
+      const project = await this.options.persistence.projects.getById(input.projectId);
+      if (project) await this.reconcileProject(project);
+    } else if (input.reconcile !== "none") {
+      await this.reconcileAll();
+    }
     const now = this.now().toISOString();
     const store = this.options.persistence;
     const [settings, projects, runners, active] = await Promise.all([
@@ -239,7 +244,7 @@ export class GithubWorkOrchestrator {
     await this.options.agentUsage?.record(usageInput).catch(() => undefined);
   }
 
-  private async reconcileProject(project: ProjectRecord): Promise<void> {
+  public async reconcileProject(project: ProjectRecord): Promise<void> {
     const repository = { id: project.repositoryId ?? `unresolved:${project.id}`, owner: project.repositoryOwner, name: project.repositoryName };
     const observedAt = this.now().toISOString();
     try {

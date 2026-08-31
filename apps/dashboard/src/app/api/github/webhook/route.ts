@@ -55,6 +55,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       request.headers,
     );
 
+    if (outcome.status === "processed") {
+      await (await getPersistence()).wakeups?.signal({ reason: "github-webhook", projectId: outcome.projectId, signaledAt: new Date().toISOString() });
+    }
     return NextResponse.json(
       { ...outcome, correlationId },
       { status: outcome.status === "rejected" ? outcome.httpStatus : 202 },

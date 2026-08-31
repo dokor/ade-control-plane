@@ -128,7 +128,7 @@ test("a verified issues delivery refreshes normalized work once and never dispat
 
   const first = await handleGithubDelivery(dependencies, raw, headers);
   const second = await handleGithubDelivery(dependencies, raw, headers);
-  assert.deepEqual(first, { status: "processed", commandId: null, summary: "GitHub work refreshed." });
+  assert.deepEqual(first, { status: "processed", commandId: null, summary: "GitHub work refreshed.", projectId: "11111111-1111-4111-8111-111111111111" });
   assert.equal(second.status, "duplicate");
   assert.equal(state.githubWorkItems.length, 1);
   assert.equal(state.commands.length, 0);
