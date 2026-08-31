@@ -35,7 +35,9 @@ export default async function TaskDetailPage({
       <section className="task-detail-hero">
         <div>
           <p className="task-kicker">Execution {task.id.slice(0, 8)}</p>
-          <h2>{task.prompt}</h2>
+          <h2>{task.source.type === "github-issue"
+            ? `GitHub issue #${task.source.issueNumber}`
+            : task.prompt}</h2>
           <p>{project.repositoryOwner}/{project.repositoryName}</p>
         </div>
         <div className="task-detail-state">
@@ -55,6 +57,9 @@ export default async function TaskDetailPage({
       </section>
 
       <dl className="task-detail-meta">
+        <div><dt>Source</dt><dd>{task.source.type === "github-issue"
+          ? <a href={`https://github.com/${project.repositoryOwner}/${project.repositoryName}/issues/${task.source.issueNumber}`} target="_blank" rel="noreferrer noopener">GitHub issue #{task.source.issueNumber}</a>
+          : "Prompt libre"}</dd></div>
         <div><dt>Created</dt><dd>{formatInstant(task.createdAt)}</dd></div>
         <div><dt>Started</dt><dd>{formatInstant(task.startedAt)}</dd></div>
         <div><dt>Finished</dt><dd>{formatInstant(task.finishedAt)}</dd></div>

@@ -55,6 +55,14 @@ if (!process.env.TEST_DATABASE_URL) {
         finishedAt: new Date().toISOString(),
       });
       assert.equal(completed.status, "CANCELLED");
+
+      const issueTask = await context.store.v0Tasks.create({
+        projectId: project.id,
+        prompt: "Implement GitHub issue #23",
+        source: { type: "github-issue", issueNumber: 23 },
+        createdAt: new Date().toISOString(),
+      });
+      assert.deepEqual(issueTask.source, { type: "github-issue", issueNumber: 23 });
     } finally {
       await context.close();
     }

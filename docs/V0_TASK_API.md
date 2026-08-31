@@ -22,7 +22,8 @@ All endpoints require the signed Dashboard session. Mutations additionally requi
 | Method | Path | Behavior |
 | --- | --- | --- |
 | `GET` | `/api/tasks` | Return the 100 most recent tasks. |
-| `POST` | `/api/tasks` | Create a pending task from `projectId` and `prompt`; return `409` when another task is active. |
+| `POST` | `/api/tasks` | Create a pending task from `projectId` and either a prompt or a GitHub issue source; return `409` when another task is active. |
+| `GET` | `/api/github/issues?projectId={id}` | Return the registered project's open ADE-managed issues whose work contract state is `ready`. |
 | `GET` | `/api/tasks/{id}` | Return task detail and up to 2,000 log records. |
 | `POST` | `/api/tasks/{id}/cancel` | Persist cancellation intent or cancel a pending task. |
 
@@ -30,7 +31,21 @@ Task prompts are limited to 20,000 characters. Each log message is redacted and 
 
 ## Dashboard workflow
 
-The authenticated `/tasks` page is the V0 task runway. It lists enabled projects, accepts one focused prompt and disables submission while a `PENDING` or `RUNNING` task owns the global slot. Status and history refresh through the Dashboard polling interval; no long-lived browser connection is required.
+The authenticated `/tasks` page is the V0 task runway. It lists enabled projects and lets the operator choose an open ADE-managed `ready` GitHub issue, with a focused free-form prompt as a secondary source. Status and history refresh through the Dashboard polling interval; no long-lived browser connection is required.
+
+The task source is persisted as one of:
+
+```json
+{ "type": "prompt", "prompt": "..." }
+```
+
+or:
+
+```json
+{ "type": "github-issue", "issueNumber": 23 }
+```
+
+Issue titles are read-only Dashboard metadata. Issue bodies and comments are not copied into task persistence or returned by the issue API.
 
 Each `/tasks/{id}` detail page shows the durable lifecycle state, branch, safe GitHub pull-request link, sanitized error summary and up to 2,000 sanitized log entries. `PENDING` tasks can be cancelled and `RUNNING` tasks can be stopped from either page. Pull-request links are rendered only when they use HTTPS on `github.com`; external task content is always rendered as text.
 

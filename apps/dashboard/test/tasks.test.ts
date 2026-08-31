@@ -44,3 +44,24 @@ test("sanitizes bounded logs returned by task detail", async () => {
   assert.doesNotMatch(detail.logs[0]?.message ?? "", /github_pat_/);
   assert.match(detail.logs[0]?.message ?? "", /redacted/);
 });
+
+test("persists a GitHub issue source without copying issue content into the task prompt", async () => {
+  const { persistence } = context();
+  const task = await createTask(
+    persistence,
+    { projectId, source: { type: "github-issue", issueNumber: 23 } },
+  );
+  assert.deepEqual(task.source, { type: "github-issue", issueNumber: 23 });
+  assert.equal(task.prompt, "Implement GitHub issue #23");
+});
+
+test("rejects malformed GitHub issue sources at the API boundary", async () => {
+  const { persistence } = context();
+  await assert.rejects(
+    () => createTask(persistence, {
+      projectId,
+      source: { type: "github-issue", issueNumber: 0 },
+    }),
+    /INVALID_COMMAND/,
+  );
+});

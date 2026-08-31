@@ -35,6 +35,7 @@ import type {
   V0TaskLogRecord,
   V0TaskLogStream,
   V0TaskRecord,
+  V0TaskSource,
   V0TaskStatus,
 } from "./domain.js";
 
@@ -308,6 +309,7 @@ export interface V0TaskCreateInput {
   id?: string;
   projectId: string;
   prompt: string;
+  source?: V0TaskSource;
   createdAt: string;
 }
 

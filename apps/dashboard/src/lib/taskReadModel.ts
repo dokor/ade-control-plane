@@ -101,10 +101,17 @@ function taskListItem(
   };
 }
 
-function sanitizeTask(task: V0TaskRecord): V0TaskRecord {
+export function sanitizeTaskRecord(task: V0TaskRecord): V0TaskRecord {
   return {
     ...task,
+    source: task.source.type === "prompt"
+      ? { type: "prompt", prompt: sanitizeText(task.source.prompt, 20_000) }
+      : task.source,
     prompt: sanitizeText(task.prompt, 20_000),
     errorSummary: task.errorSummary ? sanitizeText(task.errorSummary) : null,
   };
+}
+
+function sanitizeTask(task: V0TaskRecord): V0TaskRecord {
+  return sanitizeTaskRecord(task);
 }

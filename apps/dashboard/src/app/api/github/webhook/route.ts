@@ -22,7 +22,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     const github = await loadGithubRuntime();
-    if (!github) {
+    if (!github || !github.webhookSecret) {
       return NextResponse.json(
         { status: "disabled", correlationId },
         { status: 503 },

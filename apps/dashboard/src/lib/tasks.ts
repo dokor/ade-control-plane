@@ -4,6 +4,7 @@ import {
   type ControlPlanePersistence,
   type V0TaskLogStream,
   type V0TaskRecord,
+  type V0TaskSource,
 } from "@ade-control-plane/database";
 
 import { ControlError } from "./errors.js";
@@ -11,7 +12,8 @@ import { sanitizeText } from "./sanitize.js";
 
 export interface CreateTaskInput {
   projectId: string;
-  prompt: string;
+  source?: V0TaskSource;
+  prompt?: string;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -21,15 +23,18 @@ export async function createTask(
   input: CreateTaskInput,
   now = new Date().toISOString(),
 ): Promise<V0TaskRecord> {
+  const source = normalizeTaskSource(input.source, input.prompt);
   if (
     !UUID.test(input.projectId) ||
-    typeof input.prompt !== "string" ||
-    !input.prompt.trim() ||
-    input.prompt.length > 20_000
+    !source ||
+    (source.type === "prompt" &&
+      (!source.prompt.trim() || source.prompt.length > 20_000)) ||
+    (source.type === "github-issue" &&
+      (!Number.isInteger(source.issueNumber) || source.issueNumber < 1))
   ) {
     throw new ControlError(
       "INVALID_COMMAND",
-      "Project and prompt are required; prompt length is limited to 20000 characters.",
+      "Project and a valid prompt or GitHub issue are required.",
     );
   }
   const project = await persistence.projects.getById(input.projectId);
@@ -40,7 +45,10 @@ export async function createTask(
   try {
     return await persistence.v0Tasks.create({
       projectId: input.projectId,
-      prompt: input.prompt,
+      prompt: source.type === "prompt"
+        ? source.prompt
+        : `Implement GitHub issue #${source.issueNumber}`,
+      source,
       createdAt: now,
     });
   } catch (error) {
@@ -49,6 +57,37 @@ export async function createTask(
     }
     throw error;
   }
+}
+
+function normalizeTaskSource(
+  value: V0TaskSource | undefined,
+  legacyPrompt: string | undefined,
+): V0TaskSource | null {
+  const candidate: unknown = value ?? (
+    typeof legacyPrompt === "string"
+      ? { type: "prompt", prompt: legacyPrompt }
+      : null
+  );
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  if (
+    "type" in candidate &&
+    candidate.type === "prompt" &&
+    "prompt" in candidate &&
+    typeof candidate.prompt === "string"
+  ) {
+    return { type: "prompt", prompt: candidate.prompt };
+  }
+  if (
+    "type" in candidate &&
+    candidate.type === "github-issue" &&
+    "issueNumber" in candidate &&
+    typeof candidate.issueNumber === "number" &&
+    Number.isInteger(candidate.issueNumber) &&
+    candidate.issueNumber > 0
+  ) {
+    return { type: "github-issue", issueNumber: candidate.issueNumber };
+  }
+  return null;
 }
 
 export async function taskDetail(persistence: ControlPlanePersistence, taskId: string) {
