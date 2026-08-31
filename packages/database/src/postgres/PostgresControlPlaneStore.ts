@@ -55,6 +55,7 @@ import type {
   GithubWorkItemState,
   GithubWorkProfileReason,
   GithubWorkProfileRecord,
+  AdeProjectCompatibilityState,
   GithubWorkRetryPolicy,
   GithubSubjectType,
   JsonObject,
@@ -383,6 +384,7 @@ function mapGithubBotComment(row: TimestampRow): GithubBotCommentRecord {
 }
 
 function mapGithubWorkProfile(row: TimestampRow): GithubWorkProfileRecord {
+  const adeStatus = row.ade_status as AdeProjectCompatibilityState | null | undefined;
   return {
     projectId: String(row.project_id),
     repositoryGithubId: String(row.repository_github_id),
@@ -392,6 +394,12 @@ function mapGithubWorkProfile(row: TimestampRow): GithubWorkProfileRecord {
     skillPaths: toStringArray(row.skill_paths),
     reason: row.reason as GithubWorkProfileReason,
     observedAt: toIsoString(row.observed_at) ?? "",
+    adeStatus: adeStatus ?? (row.compatible ? "compatible" : row.reason === "missing-profile" ? "setup-required" : "incompatible"),
+    adeConfigVersion: row.ade_config_version === null || row.ade_config_version === undefined ? null : String(row.ade_config_version),
+    adeRuntimeVersion: row.ade_runtime_version === null || row.ade_runtime_version === undefined ? null : String(row.ade_runtime_version),
+    resolvedProfiles: row.resolved_profiles ? toStringArray(row.resolved_profiles) : [],
+    resolvedRules: row.resolved_rules ? toStringArray(row.resolved_rules) : [],
+    contextStatus: (row.context_status as GithubWorkProfileRecord["contextStatus"] | null | undefined) ?? "unknown",
   };
 }
 
@@ -598,14 +606,20 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
     return withTransaction(this.pool, async (client) => {
       const profile = input.profile;
       await client.query(
-        `INSERT INTO github_work_profiles (project_id, repository_github_id, compatible, contract_version, capabilities, skill_paths, reason, observed_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)
+        `INSERT INTO github_work_profiles (project_id, repository_github_id, compatible, contract_version, capabilities, skill_paths, reason, observed_at, ade_status, ade_config_version, ade_runtime_version, resolved_profiles, resolved_rules, context_status)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14)
          ON CONFLICT (project_id) DO UPDATE SET
            repository_github_id = EXCLUDED.repository_github_id, compatible = EXCLUDED.compatible,
            contract_version = EXCLUDED.contract_version, capabilities = EXCLUDED.capabilities,
-           skill_paths = EXCLUDED.skill_paths, reason = EXCLUDED.reason, observed_at = EXCLUDED.observed_at`,
+           skill_paths = EXCLUDED.skill_paths, reason = EXCLUDED.reason, observed_at = EXCLUDED.observed_at,
+           ade_status = EXCLUDED.ade_status, ade_config_version = EXCLUDED.ade_config_version,
+           ade_runtime_version = EXCLUDED.ade_runtime_version, resolved_profiles = EXCLUDED.resolved_profiles,
+           resolved_rules = EXCLUDED.resolved_rules, context_status = EXCLUDED.context_status`,
         [profile.projectId, profile.repositoryGithubId, profile.compatible, profile.contractVersion ?? null,
-          JSON.stringify(profile.capabilities ?? []), JSON.stringify(profile.skillPaths ?? []), profile.reason, profile.observedAt],
+          JSON.stringify(profile.capabilities ?? []), JSON.stringify(profile.skillPaths ?? []), profile.reason, profile.observedAt,
+          profile.adeStatus ?? (profile.compatible ? "compatible" : profile.reason === "missing-profile" ? "setup-required" : "incompatible"),
+          profile.adeConfigVersion ?? null, profile.adeRuntimeVersion ?? null,
+          JSON.stringify(profile.resolvedProfiles ?? []), JSON.stringify(profile.resolvedRules ?? []), profile.contextStatus ?? "unknown"],
       );
       await client.query("UPDATE github_work_items SET present = false WHERE project_id = $1", [profile.projectId]);
       for (const item of input.items) {

@@ -57,6 +57,7 @@ export type {
   GithubWorkItemState,
   GithubWorkProfileReason,
   GithubWorkProfileRecord,
+  AdeProjectCompatibilityState,
   GithubWorkRetryPolicy,
   GithubSubjectType,
   JsonObject,
