@@ -36,6 +36,7 @@ export type {
   V0TaskLogInput,
   V0TaskRepository,
   V0TaskTransitionInput,
+  V0TaskPushedInput,
   AgentUsageInput,
   AgentUsageQuery,
   AgentUsageRepository,

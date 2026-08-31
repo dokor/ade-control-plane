@@ -12,7 +12,7 @@ interface V0Persistence {
 
 export interface V0TaskWorkerOptions {
   persistence: V0Persistence;
-  executor: Pick<V0TaskExecutor, "execute">;
+  executor: Pick<V0TaskExecutor, "execute"> & { retryPullRequest?(task: import("@ade-control-plane/database").V0TaskRecord): Promise<void> };
   idleDelayMs?: number;
   quota?: Pick<QuotaRefreshCoordinator, "refresh">;
   now?(): Date;
@@ -59,6 +59,13 @@ export class V0TaskWorker {
   }
 
   public async runOnce(signal?: AbortSignal): Promise<boolean> {
+    const prRetry = (await this.options.persistence.v0Tasks.list(100)).find(
+      ({ status, prRetryRequested }) => status === "FAILED" && prRetryRequested === true,
+    );
+    if (prRetry && this.options.executor.retryPullRequest) {
+      await this.options.executor.retryPullRequest(prRetry);
+      return true;
+    }
     if (this.options.quota) {
       const quota = await this.options.quota.refresh();
       if (!quota.decision.canStartWork) {

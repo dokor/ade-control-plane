@@ -6,7 +6,7 @@ import type {
   V0TaskRepository,
   V0TaskRecord,
 } from "@ade-control-plane/database";
-import type { GithubIssueReader, GithubPullRequestClient, GithubRepositoryRef, GithubIssueSummary } from "@ade-control-plane/github";
+import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, type GithubRepositoryRef, type GithubIssueSummary, type GithubPullRequest } from "@ade-control-plane/github";
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
@@ -14,7 +14,9 @@ import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.j
 
 interface V0Persistence {
   projects: Pick<ProjectRepository, "getById">;
-  v0Tasks: Pick<V0TaskRepository, "getById" | "complete" | "appendLog">;
+  v0Tasks: Pick<V0TaskRepository, "getById" | "complete" | "appendLog"> & {
+    markPushed?: V0TaskRepository["markPushed"];
+  };
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
 }
 
@@ -81,6 +83,7 @@ export class V0TaskExecutor {
     const controller = new AbortController();
     let abortReason: AbortReason = null;
     let branchName: string | null = null;
+    let headSha: string | null = null;
     let usage: AgentUsageMetrics | undefined;
     const startedAt = task.startedAt ?? this.now().toISOString();
     let checkingCancellation = false;
@@ -214,27 +217,19 @@ export class V0TaskExecutor {
         signal: controller.signal,
       });
       await this.assertNotCancelled(task.id);
+      headSha = (await this.git(checkout.root, ["rev-parse", "HEAD"])).stdout.trim() || null;
+      if (headSha) await this.options.persistence.v0Tasks.markPushed?.({ taskId: task.id, branchName, headSha });
 
       await this.log(task.id, "Creating GitHub pull request.");
-      const pullRequest = await this.options.github.createPullRequest(
-        {
-          id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`,
-          owner: project.repositoryOwner,
-          name: project.repositoryName,
-        },
-        {
-          title: `ADE task ${task.id.slice(0, 8)}`,
-          body: buildPullRequestBody(task, this.adeProfile, issue),
-          head: branchName,
-          base: checkout.baseBranch,
-        },
-      );
+      const repository = { id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`, owner: project.repositoryOwner, name: project.repositoryName };
+      const pullRequest = await this.createOrReconcilePullRequest(repository, branchName, checkout.baseBranch, task, issue);
       await this.log(task.id, "Pull request created; recording terminal status.");
       await this.options.persistence.v0Tasks.complete({
         taskId: task.id,
         status: "SUCCESS",
         finishedAt: this.now().toISOString(),
         branchName,
+        headSha,
         pullRequestNumber: pullRequest.number,
         pullRequestUrl: pullRequest.url,
       });
@@ -247,6 +242,7 @@ export class V0TaskExecutor {
         status: cancelled ? "CANCELLED" : "FAILED",
         finishedAt: this.now().toISOString(),
         branchName,
+        headSha,
         errorCode: cancelled ? null : failure.code,
         errorSummary: cancelled ? null : failure.summary,
       });
@@ -282,6 +278,75 @@ export class V0TaskExecutor {
     const project = await this.options.persistence.projects.getById(projectId);
     if (!project) throw new V0ExecutionError("PROJECT_NOT_FOUND", "Registered project was not found.");
     return project;
+  }
+
+  /** Reconciles or creates only the PR for a pushed task; no agent or Git mutation is run. */
+  public async retryPullRequest(task: V0TaskRecord): Promise<void> {
+    if (task.status !== "FAILED" || task.errorCode !== "GITHUB_PR_CREATE_FAILED") return;
+    const project = await this.requireProject(task.projectId);
+    const checkout = await resolveProjectCheckout(this.options.projectRoot, project);
+    const branchName = task.branchName;
+    if (!branchName || !/^ade\/[a-zA-Z0-9._/-]+$/u.test(branchName)) {
+      throw new V0ExecutionError("PR_RETRY_UNAVAILABLE", "The pushed task branch is not available for PR reconciliation.");
+    }
+    const remote = await this.git(checkout.root, ["remote", "get-url", "origin"]);
+    if (!matchesGithubRemote(remote.stdout, project.repositoryOwner, project.repositoryName)) {
+      throw new V0ExecutionError("REMOTE_MISMATCH", "Checkout origin does not match the registered GitHub repository.");
+    }
+    const pushed = await this.git(checkout.root, ["ls-remote", "origin", `refs/heads/${branchName}`]);
+    const remoteSha = pushed.stdout.trim().split(/\s+/u)[0] ?? "";
+    if (!remoteSha || (task.headSha && remoteSha !== task.headSha)) {
+      throw new V0ExecutionError("PR_RETRY_HEAD_MISMATCH", "The pushed branch no longer matches the recorded task head.");
+    }
+    try {
+      const repository = { id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`, owner: project.repositoryOwner, name: project.repositoryName };
+      const pullRequest = await this.createOrReconcilePullRequest(repository, branchName, checkout.baseBranch, task, null);
+      await this.options.persistence.v0Tasks.complete({
+        taskId: task.id, status: "SUCCESS", finishedAt: this.now().toISOString(), branchName, headSha: task.headSha ?? remoteSha,
+        pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url,
+      });
+      await this.log(task.id, `PR-only retry reconciled pull request #${pullRequest.number}; agent was not rerun.`);
+    } catch (error) {
+      const failure = classifyFailure(error, null);
+      await this.options.persistence.v0Tasks.complete({
+        taskId: task.id, status: "FAILED", finishedAt: this.now().toISOString(), branchName, headSha: task.headSha ?? remoteSha,
+        errorCode: failure.code, errorSummary: failure.summary,
+      });
+      await this.log(task.id, `PR-only retry failed: ${failure.summary}`).catch(() => undefined);
+    }
+  }
+
+  private async createOrReconcilePullRequest(
+    repository: GithubRepositoryRef,
+    branchName: string,
+    baseBranch: string,
+    task: V0TaskRecord,
+    issue: GithubIssueSummary | null,
+  ): Promise<GithubPullRequest> {
+    try {
+      const existing = await this.options.github.findPullRequest?.(repository, branchName, baseBranch);
+      if (existing) {
+        await this.log(task.id, `Reconciled existing pull request #${existing.number}.`);
+        return existing;
+      }
+      return await this.options.github.createPullRequest(repository, {
+        title: `ADE task ${task.id.slice(0, 8)}`,
+        body: buildPullRequestBody(task, this.adeProfile, issue),
+        head: branchName,
+        base: baseBranch,
+      });
+    } catch (error) {
+      const reconciled = await this.options.github.findPullRequest?.(repository, branchName, baseBranch).catch(() => null);
+      if (reconciled) {
+        await this.log(task.id, `Reconciled pull request #${reconciled.number} after GitHub response.`);
+        return reconciled;
+      }
+      if (error instanceof GithubApiError) {
+        const detail = error.detail ? `: ${error.detail}` : ".";
+        throw new V0ExecutionError("GITHUB_PR_CREATE_FAILED", `GitHub rejected pull request creation (HTTP ${error.status})${detail}`);
+      }
+      throw new V0ExecutionError("GITHUB_PR_CREATE_FAILED", "GitHub pull request creation failed; reconciliation is required.");
+    }
   }
 
   private async resolveIssue(task: V0TaskRecord, project: ProjectRecord): Promise<GithubIssueSummary | null> {

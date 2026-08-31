@@ -52,3 +52,31 @@ test("does not expose a malformed GitHub response", async () => {
     /response is invalid/,
   );
 });
+
+test("retains only a bounded safe GitHub validation detail", async () => {
+  const client = new HttpGithubClient({
+    installationId: "installation-1",
+    tokens: { getToken: async () => "token" },
+    fetchImplementation: async () => new Response(JSON.stringify({ errors: [{ message: "head branch does not exist" }, { message: "token=secret" }] }), { status: 422 }),
+  });
+  await assert.rejects(
+    () => client.createPullRequest({ id: "1", owner: "dokor", name: "alpha" }, { title: "Task", body: "Body", head: "ade/task", base: "main" }),
+    (error: unknown) => error instanceof Error && error.message.includes("GitHub API create pull request failed") && (error as { status?: number; detail?: string }).status === 422 && (error as { detail?: string }).detail === "head branch does not exist",
+  );
+});
+
+test("finds an exact open pull request by head and base", async () => {
+  let requested = "";
+  const client = new HttpGithubClient({
+    installationId: "installation-1",
+    tokens: { getToken: async () => "token" },
+    fetchImplementation: async (url) => {
+      requested = String(url);
+      return Response.json([{ number: 7, html_url: "https://github.com/dokor/alpha/pull/7", head: { ref: "ade/task" }, base: { ref: "main" } }]);
+    },
+  });
+  const pullRequest = await client.findPullRequest({ id: "1", owner: "dokor", name: "alpha" }, "ade/task", "main");
+  assert.equal(pullRequest?.number, 7);
+  assert.match(requested, /head=dokor%3Aade%2Ftask/);
+  assert.match(requested, /base=main/);
+});

@@ -1,0 +1,1 @@
+ALTER TABLE v0_tasks ADD COLUMN IF NOT EXISTS head_sha text NULL;
