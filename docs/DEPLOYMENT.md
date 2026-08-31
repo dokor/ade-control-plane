@@ -29,6 +29,13 @@ Populate `/srv/configs/ade-control-plane/.env.prod` with `DASHBOARD_PUBLIC_URL`,
 only the credentials/configuration needed to push the allow-listed GitHub
 repositories. Do not mount a Docker socket.
 
+The worker installs Bubblewrap and deliberately uses `seccomp=unconfined` so
+Codex can create its *inner* user-namespace sandbox. Docker's default seccomp
+profile blocks that required syscall. This is limited to the private worker:
+it remains non-root, has no Linux capabilities, uses `no-new-privileges`, has
+a read-only root filesystem, and receives no Docker socket. Do not replace
+this with `privileged: true` or run Codex with a full-access sandbox.
+
 Create the runtime files described in [`secrets/README.md`](../secrets/README.md)
 under `/srv/configs/ade-control-plane/secrets` and set `SECRETS_DIR` to that
 directory in `.env.prod`.
