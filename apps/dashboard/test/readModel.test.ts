@@ -65,6 +65,18 @@ test("shows two projects with distinct, explained states", async () => {
   assert.equal(overview.attention[0]?.projectId, SECOND_PROJECT_ID);
 });
 
+test("marks a project without an ADE snapshot as setup-required", async () => {
+  const state = twoProjectState();
+  state.projects = [project()];
+  state.githubWorkProfiles = [];
+  state.githubWorkItems = [];
+
+  const overview = await buildOverview(input(state));
+
+  assert.equal(overview.projects[0]?.adeStatus, "setup-required");
+  assert.equal(overview.projects[0]?.adeRuntimeVersion, "unknown");
+});
+
 test("surfaces scheduler mode, quota and runner health", async () => {
   const overview = await buildOverview(input(twoProjectState()));
 

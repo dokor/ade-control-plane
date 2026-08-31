@@ -211,6 +211,13 @@ export type GithubWorkProfileReason =
   | "missing-profile"
   | "invalid-profile"
   | "unsupported-profile";
+export type AdeProjectCompatibilityState =
+  | "setup-required"
+  | "validating"
+  | "compatible"
+  | "invalid"
+  | "upgrade-required"
+  | "incompatible";
 
 export interface GithubWorkProfileRecord {
   projectId: string;
@@ -221,6 +228,12 @@ export interface GithubWorkProfileRecord {
   skillPaths: readonly string[];
   reason: GithubWorkProfileReason;
   observedAt: string;
+  adeStatus?: AdeProjectCompatibilityState;
+  adeConfigVersion?: string | null;
+  adeRuntimeVersion?: string | null;
+  resolvedProfiles?: readonly string[];
+  resolvedRules?: readonly string[];
+  contextStatus?: "fresh" | "stale" | "missing" | "unknown";
 }
 
 export interface GithubWorkItemRecord {

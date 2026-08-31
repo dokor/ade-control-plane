@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { ControlButton } from "../../../components/ControlButton.js";
 import { PriorityForm } from "../../../components/PriorityForm.js";
+import { ProjectInitializeButton } from "../../../components/ProjectInitializeButton.js";
 import { Shell } from "../../../components/Shell.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
 import { formatAge, formatInstant } from "../../../lib/format.js";
@@ -24,6 +25,7 @@ export default async function ProjectPage({
     quotaProvider: config.quotaProvider,
     quotaAccountRef: config.quotaAccountRef,
     projectId: id,
+    adeRuntimeVersion: config.adeRuntimeVersion,
   });
 
   if (!detail) notFound();
@@ -58,6 +60,18 @@ export default async function ProjectPage({
               {project.repositoryUrl.replace("https://github.com/", "")}
             </a>
           </p>
+        </article>
+
+        <article className="card">
+          <h2>ADE compatibility</h2>
+          <p className="value"><span className={`badge ${project.adeStatus}`}>{project.adeStatus}</span></p>
+          <p className="detail">Runtime {project.adeRuntimeVersion}</p>
+          <p className="detail">Config {project.adeConfigVersion ?? "missing or not validated"}</p>
+          <p className="detail">Profiles {project.resolvedProfiles.join(", ") || "—"}</p>
+          <p className="detail">Rules {project.resolvedRules.join(", ") || "—"}</p>
+          {project.adeStatus === "setup-required" ? (
+            <div className="actions"><ProjectInitializeButton projectId={project.id} /></div>
+          ) : null}
         </article>
 
         <article className="card">

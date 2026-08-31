@@ -11,6 +11,7 @@ import type {
   GithubWorkItemState,
   GithubWorkProfileReason,
   GithubWorkProfileRecord,
+  AdeProjectCompatibilityState,
   GithubWorkRetryPolicy,
   GithubSubjectType,
   CompletionResult,
@@ -233,6 +234,12 @@ export interface GithubWorkProfileInput {
   skillPaths?: readonly string[];
   reason: GithubWorkProfileReason;
   observedAt: string;
+  adeStatus?: AdeProjectCompatibilityState;
+  adeConfigVersion?: string | null;
+  adeRuntimeVersion?: string | null;
+  resolvedProfiles?: readonly string[];
+  resolvedRules?: readonly string[];
+  contextStatus?: "fresh" | "stale" | "missing" | "unknown";
 }
 
 export interface GithubWorkItemInput {

@@ -19,6 +19,7 @@ import type {
   ProjectRecord,
   GithubWorkItemRecord,
   GithubWorkProfileRecord,
+  AdeProjectCompatibilityState,
   ProviderQuotaSnapshotRecord,
   RunnerRecord,
 } from "@ade-control-plane/database";
@@ -93,6 +94,12 @@ export interface ProjectView {
   name: string;
   repositoryUrl: string;
   controlState: ProjectRecord["state"];
+  adeStatus: AdeProjectCompatibilityState;
+  adeRuntimeVersion: string;
+  adeConfigVersion: string | null;
+  resolvedProfiles: readonly string[];
+  resolvedRules: readonly string[];
+  contextStatus: "fresh" | "stale" | "missing" | "unknown";
   priority: number;
   status: ProjectStatus;
   waitingReason: string | null;
@@ -249,6 +256,7 @@ export async function buildOverview(
       explanationByProject.get(project.id) ?? null,
       activeByProject.get(project.id) ?? null,
       now,
+      input.adeRuntimeVersion,
     ),
   );
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
@@ -284,7 +292,7 @@ export async function buildProjectDetail(
   const overview = await buildOverview(input);
   const view =
     overview.projects.find(({ id }) => id === project.id) ??
-    toProjectView(project, null, selectProjectGithubWork(null, [], now), null, null, now);
+    toProjectView(project, null, selectProjectGithubWork(null, [], now), null, null, now, input.adeRuntimeVersion);
   const [executions, auditEvents, commands, decisions] = await Promise.all([
     persistence.executions.listByProjectId(project.id, 20),
     persistence.auditEvents.listForProject(project.id, 30),
@@ -504,6 +512,7 @@ function toProjectView(
   explanation: CandidateExplanation | null,
   activeExecution: ExecutionRecord | null,
   now: string,
+  adeRuntimeVersion = "unknown",
 ): ProjectView {
   const exclusion = explanation?.exclusion ?? null;
   const item = selection.item;
@@ -515,6 +524,12 @@ function toProjectView(
     name: project.name,
     repositoryUrl: `https://github.com/${project.repositoryOwner}/${project.repositoryName}`,
     controlState: project.state,
+    adeStatus: profile?.adeStatus ?? (!profile || profile.reason === "missing-profile" ? "setup-required" : "incompatible"),
+    adeRuntimeVersion: profile?.adeRuntimeVersion ?? adeRuntimeVersion,
+    adeConfigVersion: profile?.adeConfigVersion ?? null,
+    resolvedProfiles: profile?.resolvedProfiles ?? [],
+    resolvedRules: profile?.resolvedRules ?? [],
+    contextStatus: profile?.contextStatus ?? "unknown",
     priority: project.priority,
     status: activeExecution
       ? "running"
