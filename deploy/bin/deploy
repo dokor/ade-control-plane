@@ -53,9 +53,8 @@ git checkout --detach --force "$requested_sha" >/dev/null || die "could not sele
 compose=(docker compose --env-file "$ENV_FILE" --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
 "${compose[@]}" config --quiet || die "Compose configuration is invalid"
 "${compose[@]}" build --pull || die "container build failed"
-"${compose[@]}" up -d postgres codex-app-server || die "PostgreSQL or Codex App Server could not start"
+"${compose[@]}" up -d postgres || die "PostgreSQL could not start"
 wait_healthy postgres
-wait_healthy codex-app-server
 
 # The V0 worker also migrates on startup. Running the migration command first
 # makes the CD order explicit and fails before application containers switch.

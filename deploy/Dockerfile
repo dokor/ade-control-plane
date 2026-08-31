@@ -42,6 +42,8 @@ RUN groupadd --system --gid 10002 ade-worker \
   && useradd --system --uid 10002 --gid ade-worker --home-dir /home/ade-worker --create-home ade-worker \
   && mkdir -p /home/ade-worker/.codex /home/ade-git \
   && chown -R ade-worker:ade-worker /home/ade-worker
+COPY deploy/bin/worker-entrypoint /usr/local/bin/ade-control-plane-worker
+RUN chmod 0755 /usr/local/bin/ade-control-plane-worker
 # Keep the ADE CLI immutable and outside the writable Codex home volume.
 RUN npm install --global @alelouet/ai-delivery-engine@0.4.0 \
   && command -v ade
@@ -51,4 +53,5 @@ USER ade-worker
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh \
   && command -v codex
 WORKDIR /workspace
+ENTRYPOINT ["/usr/local/bin/ade-control-plane-worker"]
 CMD ["node_modules/.bin/tsx", "apps/worker/src/github/main.ts"]
