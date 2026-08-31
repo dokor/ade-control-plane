@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly app_server_url="ws://127.0.0.1:4500"
+readonly ready_url="http://127.0.0.1:4500/readyz"
+readonly ready_timeout_seconds=30
+
+codex app-server --listen "$app_server_url" &
+app_server_pid="$!"
+
+stop_app_server() {
+  if kill -0 "$app_server_pid" 2>/dev/null; then
+    kill -TERM "$app_server_pid" 2>/dev/null || true
+    wait "$app_server_pid" 2>/dev/null || true
+  fi
+}
+
+trap 'stop_app_server; exit 143' TERM INT
+
+for _ in $(seq 1 "$ready_timeout_seconds"); do
+  if curl -fsS "$ready_url" >/dev/null; then
+    break
+  fi
+  if ! kill -0 "$app_server_pid" 2>/dev/null; then
+    wait "$app_server_pid" || true
+    printf 'ade-control-plane worker: local Codex App Server stopped before becoming ready\n' >&2
+    exit 1
+  fi
+  sleep 1
+done
+
+if ! curl -fsS "$ready_url" >/dev/null; then
+  printf 'ade-control-plane worker: local Codex App Server did not become ready\n' >&2
+  stop_app_server
+  exit 1
+fi
+
+"$@" &
+worker_pid="$!"
+
+while kill -0 "$worker_pid" 2>/dev/null && kill -0 "$app_server_pid" 2>/dev/null; do
+  sleep 1
+done
+
+if ! kill -0 "$app_server_pid" 2>/dev/null; then
+  wait "$app_server_pid" || true
+  printf 'ade-control-plane worker: local Codex App Server stopped unexpectedly\n' >&2
+  kill -TERM "$worker_pid" 2>/dev/null || true
+  wait "$worker_pid" 2>/dev/null || true
+  exit 1
+fi
+
+if wait "$worker_pid"; then
+  worker_status=0
+else
+  worker_status="$?"
+fi
+stop_app_server
+exit "$worker_status"

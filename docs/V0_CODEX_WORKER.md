@@ -44,11 +44,11 @@ the worker can commit, push, or create a PR. The resulting PR records the
 context profile and the successful deterministic review; human review and
 merge stay explicit.
 
-The `codex-app-server` Compose service reads the same saved Codex login only
-on the private Docker network. Its normalized rate-limit observation is a
-fail-closed scheduling gate: unavailable or stale quota starts no task.
-Codex currently documents its WebSocket transport as experimental, so this
-endpoint is deliberately neither published nor exposed through Traefik.
+The worker starts Codex App Server with the same saved Codex login on its own
+loopback interface only. Its normalized rate-limit observation is a
+fail-closed scheduling gate: unavailable or stale quota starts no task. There
+is no App Server Compose service, published port, Docker network listener, or
+Traefik route.
 
 ## Cancellation and recovery
 

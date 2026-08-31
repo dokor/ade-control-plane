@@ -1,8 +1,8 @@
 # Codex Quota Adapter
 
 The control plane reads the stable Codex App Server JSON-RPC method
-`account/rateLimits/read`. The worker connects to the configured
-`CODEX_APP_SERVER_URL`, negotiates the documented `initialize` handshake and
+`account/rateLimits/read`. In production, the worker starts App Server on its
+own loopback interface, negotiates the documented `initialize` handshake and
 requests one snapshot before claiming new work. App Server owns the Codex
 authentication state in its `CODEX_HOME`; credentials are never placed in the
 WebSocket URL or persisted by the control plane.
@@ -19,20 +19,9 @@ policy evaluates the snapshot as `unknown`/fail-closed when appropriate. Raw
 JSON-RPC responses, auth headers and provider errors never reach PostgreSQL,
 logs or the Dashboard.
 
-When `CODEX_APP_SERVER_URL` is empty, the V0 worker keeps its existing behavior
-and does not claim a live quota source. To enable the gate, run App Server with
-the same Codex home as the worker, for example:
-
-```bash
-codex app-server --listen ws://127.0.0.1:4500
-```
-
-Then set:
-
-```dotenv
-CODEX_APP_SERVER_URL=ws://127.0.0.1:4500
-CODEX_CREDENTIAL_REF=codex-account-main
-```
+Compose fixes the endpoint to `ws://127.0.0.1:4500` inside the worker. There
+is no App Server port, external listener, or Traefik route to configure. The
+runtime still accepts a different endpoint for isolated development tests only.
 
 Successful observations are persisted with the derived policy state and are
 pruned with a provider/account-scoped rolling 30-day retention while always
