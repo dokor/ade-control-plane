@@ -12,6 +12,23 @@ die() {
   exit 1
 }
 
+wait_healthy() {
+  local service="$1"
+  local container_id status
+  for _ in $(seq 1 "$HEALTH_TIMEOUT_SECONDS"); do
+    container_id="$("${compose[@]}" ps -q "$service")"
+    if [[ -n "$container_id" ]]; then
+      status="$(docker inspect --format '{{.State.Health.Status}}' "$container_id" 2>/dev/null || true)"
+      if [[ "$status" == "healthy" ]]; then
+        return 0
+      fi
+    fi
+    sleep 1
+  done
+  "${compose[@]}" ps >&2 || true
+  die "$service did not become healthy"
+}
+
 [[ "$(id -u)" -eq 0 ]] || die "must run as root"
 [[ "$#" -eq 1 ]] || die "usage: deploy <40-character commit SHA>"
 
@@ -50,20 +67,3 @@ wait_healthy worker
 install -d -o root -g root -m 0755 "$(dirname "$DEPLOYED_SHA_FILE")"
 install -o root -g root -m 0644 <(printf '%s\n' "$requested_sha") "$DEPLOYED_SHA_FILE"
 printf 'deployed %s\n' "$requested_sha"
-
-wait_healthy() {
-  local service="$1"
-  local container_id status
-  for _ in $(seq 1 "$HEALTH_TIMEOUT_SECONDS"); do
-    container_id="$("${compose[@]}" ps -q "$service")"
-    if [[ -n "$container_id" ]]; then
-      status="$(docker inspect --format '{{.State.Health.Status}}' "$container_id" 2>/dev/null || true)"
-      if [[ "$status" == "healthy" ]]; then
-        return 0
-      fi
-    fi
-    sleep 1
-  done
-  "${compose[@]}" ps >&2 || true
-  die "$service did not become healthy"
-}
