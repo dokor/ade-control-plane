@@ -7,6 +7,7 @@ import type {
 import type { GithubIssueReader, GithubPullRequestClient, GithubRepositoryRef, GithubIssueSummary } from "@ade-control-plane/github";
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
+import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.js";
 
 interface V0Persistence {
@@ -21,6 +22,7 @@ export interface V0TaskExecutorOptions {
   commands: CommandRunner;
   projectRoot: string;
   codexExecutable?: string;
+  agentExecutor?: AgentExecutor;
   adeExecutable?: string;
   adeProfile?: AdeProfile;
   adeRuntimeVersion?: string;
@@ -37,6 +39,7 @@ type AbortReason = "cancel" | "timeout" | "shutdown" | null;
 
 export class V0TaskExecutor {
   private readonly codexExecutable: string;
+  private readonly agentExecutor: AgentExecutor;
   private readonly adeExecutable: string;
   private readonly adeProfile: AdeProfile;
   private readonly adeRuntimeVersion: string;
@@ -46,6 +49,11 @@ export class V0TaskExecutor {
 
   public constructor(private readonly options: V0TaskExecutorOptions) {
     this.codexExecutable = options.codexExecutable ?? "codex";
+    this.agentExecutor = options.agentExecutor ?? new CodexAgentExecutor({
+      commands: options.commands,
+      executable: this.codexExecutable,
+      environment: options.codexEnvironment ?? {},
+    });
     this.adeExecutable = options.adeExecutable ?? "ade";
     this.adeProfile = options.adeProfile ?? "normal";
     this.adeRuntimeVersion = options.adeRuntimeVersion ?? "unknown";
@@ -135,18 +143,18 @@ export class V0TaskExecutor {
       await this.prepareAdeContext(task.id, checkout.root, controller.signal);
       await this.assertCheckoutStillClean(checkout.root);
 
-      await this.log(task.id, `ADE runtime ${this.adeRuntimeVersion}; delivery source ${task.source.type}.`);
+      await this.log(task.id, `ADE runtime ${this.adeRuntimeVersion}; provider ${this.agentExecutor.provider}; delivery source ${task.source.type}.`);
       if (issue) await this.log(task.id, `GitHub issue #${issue.number}: ${issue.title}`);
       await this.log(task.id, "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
-      await this.mustRun(task.id, "Codex", {
-        executable: this.codexExecutable,
-        args: ["exec", "--sandbox", "workspace-write", "--ephemeral", "--json", "-"],
+      const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
-        stdin: buildCodexPrompt(task.prompt, this.adeProfile, issue),
-        env: this.codexEnvironment,
+        prompt: buildCodexPrompt(task.prompt, this.adeProfile, issue),
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });
+      if (agentResult.exitCode !== 0) {
+        throw new V0ExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
+      }
       await this.assertNotCancelled(task.id);
 
       const finalStatus = await this.git(checkout.root, [

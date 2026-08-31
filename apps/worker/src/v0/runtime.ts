@@ -4,9 +4,12 @@ import { dirname, isAbsolute } from "node:path";
 export interface V0WorkerRuntimeConfig {
   projectRoot: string;
   codexExecutable: string;
+  claudeExecutable: string;
+  agentProvider: "codex" | "claude-code";
   adeExecutable: string;
   adeProfile: "chill" | "normal" | "expert";
   codexEnvironment: Readonly<Record<string, string>>;
+  claudeEnvironment: Readonly<Record<string, string>>;
   gitEnvironment: Readonly<Record<string, string>>;
   codexAppServerUrl: string | null;
   quotaAccountRef: string;
@@ -33,6 +36,7 @@ export async function loadV0WorkerRuntime(
   const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
   if (!privateKey) throw new Error("GITHUB_APP_PRIVATE_KEY_FILE must reference a secret.");
   const codexApiKey = await readSecret(env, "CODEX_API_KEY");
+  const anthropicApiKey = await readSecret(env, "ANTHROPIC_API_KEY");
   const codexHome = requiredAbsolute(env.CODEX_HOME, "CODEX_HOME");
   const gitHome = requiredAbsolute(env.V0_GIT_HOME, "V0_GIT_HOME");
   const codexAppServerUrl = optionalWebSocketUrl(env.CODEX_APP_SERVER_URL);
@@ -45,12 +49,20 @@ export async function loadV0WorkerRuntime(
     CODEX_HOME: codexHome,
     ...(codexApiKey ? { CODEX_API_KEY: codexApiKey } : {}),
   };
+  const claudeEnvironment = {
+    ...childBase,
+    HOME: dirname(codexHome),
+    ...(anthropicApiKey ? { ANTHROPIC_API_KEY: anthropicApiKey } : {}),
+  };
   return {
     projectRoot,
     codexExecutable: env.CODEX_EXECUTABLE?.trim() || "codex",
+    claudeExecutable: env.CLAUDE_EXECUTABLE?.trim() || "claude",
+    agentProvider: agentProvider(env.V0_AGENT_PROVIDER),
     adeExecutable: env.ADE_EXECUTABLE?.trim() || "ade",
     adeProfile: adeProfile(env.V0_ADE_PROFILE),
     codexEnvironment,
+    claudeEnvironment,
     gitEnvironment: {
       ...childBase,
       HOME: gitHome,
@@ -65,6 +77,12 @@ export async function loadV0WorkerRuntime(
     adeRuntimeVersion: env.ADE_RUNTIME_VERSION?.trim() || "unknown",
     github: { appId, installationId, privateKey },
   };
+}
+
+function agentProvider(value: string | undefined): "codex" | "claude-code" {
+  const provider = value?.trim() || "codex";
+  if (provider === "codex" || provider === "claude-code") return provider;
+  throw new Error("V0_AGENT_PROVIDER must be codex or claude-code.");
 }
 
 function adeProfile(value: string | undefined): "chill" | "normal" | "expert" {

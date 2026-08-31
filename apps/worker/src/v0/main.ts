@@ -13,6 +13,7 @@ import {
 } from "@ade-control-plane/quota";
 
 import { NodeCommandRunner } from "./CommandRunner.js";
+import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
 import { V0TaskExecutor } from "./V0TaskExecutor.js";
 import { V0TaskWorker } from "./V0TaskWorker.js";
 import { loadV0WorkerRuntime } from "./runtime.js";
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
 
   try {
     await store.migrate();
+    const commands = new NodeCommandRunner();
     const tokens = new GithubAppTokenProvider({
       credentials: {
         appId: config.github.appId,
@@ -49,9 +51,12 @@ async function main(): Promise<void> {
       persistence: store,
       github,
       issueReader,
-      commands: new NodeCommandRunner(),
+      commands,
       projectRoot: config.projectRoot,
       codexExecutable: config.codexExecutable,
+      agentExecutor: config.agentProvider === "claude-code"
+        ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
+        : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment }),
       adeExecutable: config.adeExecutable,
       adeProfile: config.adeProfile,
       adeRuntimeVersion: config.adeRuntimeVersion,
