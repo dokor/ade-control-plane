@@ -145,9 +145,22 @@ export interface OverviewViewModel {
   quota: QuotaView;
   runners: readonly RunnerView[];
   runnerHealthSummary: string;
+  workerHealth: WorkerHealthView;
   activeExecutions: readonly ExecutionView[];
   attention: readonly AttentionItem[];
   projects: readonly ProjectView[];
+}
+
+export type WorkerHealthStatus = "healthy" | "idle" | "waiting-quota" | "degraded-github" | "stale/unhealthy";
+
+export interface WorkerHealthView {
+  status: WorkerHealthStatus;
+  startedAt: string | null;
+  lastHeartbeatAt: string | null;
+  lastSuccessfulCycleAt: string | null;
+  lastGithubReconcileAt: string | null;
+  nextWakeReason: string | null;
+  nextWakeAt: string | null;
 }
 
 export interface DecisionView {
@@ -196,11 +209,12 @@ export async function buildOverview(
     persistence.runners.list(),
     persistence.executions.listActive(),
   ]);
-  const [workItems, profiles, histories, quotaSnapshot] = await Promise.all([
+  const [workItems, profiles, histories, quotaSnapshot, recentAudits] = await Promise.all([
     persistence.githubWork.listForProjects(projects.map(({ id }) => id)),
     Promise.all(projects.map((project) => persistence.githubWork.getProfile(project.id))),
     Promise.all(projects.map((project) => persistence.executions.listByProjectId(project.id, 100))),
     persistence.providerQuotaSnapshots.getLatest(input.quotaProvider, input.quotaAccountRef),
+    persistence.auditEvents.listRecent(100),
   ]);
 
   const quota = buildQuotaView(
@@ -273,11 +287,48 @@ export async function buildOverview(
     quota,
     runners: runnerViews,
     runnerHealthSummary: summarizeRunners(runnerViews),
+    workerHealth: buildWorkerHealth(runnerViews, recentAudits, now, decision.nextWakeUpAt ?? null, settings.schedulerMode, quota.state),
     activeExecutions: activeExecutions.map((execution) =>
       toExecutionView(execution, projectNames.get(execution.projectId) ?? execution.projectId),
     ),
     attention: buildAttentionQueue(projectViews, runnerViews, quota, now),
     projects: [...projectViews].sort(compareProjectViews),
+  };
+}
+
+function buildWorkerHealth(
+  runners: readonly RunnerView[],
+  audits: readonly AuditEventRecord[],
+  now: string,
+  schedulerNextWakeAt: string | null,
+  schedulerMode: SchedulerMode,
+  quotaState: QuotaDecision["state"],
+): WorkerHealthView {
+  const workerAudits = audits.filter((event) => event.category === "worker");
+  const started = [...workerAudits].reverse().find((event) => event.action === "worker.started") ?? null;
+  const success = [...workerAudits].reverse().find((event) => event.action === "worker.cycle-succeeded") ?? null;
+  const failure = [...workerAudits].reverse().find((event) => event.action === "worker.cycle-failed") ?? null;
+  const lastHeartbeatAt = runners.map((runner) => runner.lastHeartbeatAt).filter((value): value is string => value !== null).sort().at(-1) ?? null;
+  const unhealthy = runners.length === 0 || runners.every((runner) => !runner.healthy);
+  const status: WorkerHealthStatus = unhealthy
+    ? "stale/unhealthy"
+    : failure && (!success || Date.parse(failure.occurredAt) > Date.parse(success.occurredAt))
+      ? "degraded-github"
+      : quotaState === "blocked"
+        ? "waiting-quota"
+        : schedulerMode !== "running" || success?.metadata.outcome === "idle"
+          ? "idle"
+          : success
+            ? "healthy"
+            : "stale/unhealthy";
+  return {
+    status,
+    startedAt: started?.occurredAt ?? null,
+    lastHeartbeatAt,
+    lastSuccessfulCycleAt: success?.occurredAt ?? null,
+    lastGithubReconcileAt: success?.occurredAt ?? null,
+    nextWakeReason: success && typeof success.metadata.wakeReason === "string" ? success.metadata.wakeReason : null,
+    nextWakeAt: success && typeof success.metadata.nextWakeAt === "string" ? success.metadata.nextWakeAt : schedulerNextWakeAt,
   };
 }
 

@@ -15,6 +15,8 @@ export interface V0WorkerRuntimeConfig {
   quotaAccountRef: string;
   taskTimeoutMs: number;
   idleDelayMs: number;
+  fullReconcileIntervalMs: number;
+  heartbeatIntervalMs: number;
   dashboardUrl: string;
   adeRuntimeVersion: string;
   github: {
@@ -73,6 +75,8 @@ export async function loadV0WorkerRuntime(
     quotaAccountRef: env.CODEX_CREDENTIAL_REF?.trim() || "codex-account-main",
     taskTimeoutMs: positiveInteger(env.V0_TASK_TIMEOUT_SECONDS, 3_600) * 1_000,
     idleDelayMs: positiveInteger(env.V0_WORKER_IDLE_SECONDS, 2) * 1_000,
+    fullReconcileIntervalMs: positiveInteger(env.V0_FULL_RECONCILE_SECONDS, 900) * 1_000,
+    heartbeatIntervalMs: positiveInteger(env.V0_HEARTBEAT_SECONDS, 30) * 1_000,
     dashboardUrl,
     adeRuntimeVersion: env.ADE_RUNTIME_VERSION?.trim() || "unknown",
     github: { appId, installationId, privateKey },

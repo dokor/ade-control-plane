@@ -45,7 +45,7 @@ export type GithubWebhookOutcome =
   | { status: "rejected"; code: string; httpStatus: number }
   | { status: "duplicate"; deliveryId: string }
   | { status: "ignored"; code: string }
-  | { status: "processed"; commandId: string | null; summary: string };
+  | { status: "processed"; commandId: string | null; summary: string; projectId: string };
 
 /**
  * Handles one GitHub delivery, in the order required by
@@ -103,7 +103,7 @@ export async function handleGithubDelivery(
       await dependencies.persistence.githubDeliveries.updateOutcome(deliveryId, {
         status: "processed", processedAt: now,
       });
-      return { status: "processed", commandId: null, summary: "GitHub work refreshed." };
+      return { status: "processed", commandId: null, summary: "GitHub work refreshed.", projectId: project.id };
     }
 
     const command = readCommand(event);
@@ -195,7 +195,7 @@ async function dispatch(
       status: "processed",
       processedAt: now,
     });
-    return { status: "processed", commandId: null, summary };
+    return { status: "processed", commandId: null, summary, projectId: project.id };
   }
 
   const request = await toControlCommandRequest(dependencies, event, project, command);
@@ -221,7 +221,7 @@ async function dispatch(
       processedAt: now,
     });
     await acknowledge(dependencies, event, project, command, "applied", outcome.summary, now);
-    return { status: "processed", commandId: outcome.commandId, summary: outcome.summary };
+    return { status: "processed", commandId: outcome.commandId, summary: outcome.summary, projectId: project.id };
   } catch (error) {
     // An authorized actor asked for something the control plane refuses, such as
     // retrying an ambiguous outcome. They get a plain explanation rather than

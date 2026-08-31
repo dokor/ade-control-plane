@@ -95,6 +95,23 @@ export default async function OverviewPage() {
         </article>
 
         <article className="card">
+          <h2>Worker health</h2>
+          <p className="value">
+            <span className={`badge ${overview.workerHealth.status === "healthy" || overview.workerHealth.status === "idle" ? "ok" : "warn"}`}>
+              {overview.workerHealth.status}
+            </span>
+          </p>
+          <p className="detail">
+            Heartbeat {formatInstant(overview.workerHealth.lastHeartbeatAt)}
+            <br />
+            Last cycle {formatInstant(overview.workerHealth.lastSuccessfulCycleAt)}
+            <br />
+            Next wake {formatInstant(overview.workerHealth.nextWakeAt)}
+            {overview.workerHealth.nextWakeReason ? ` (${overview.workerHealth.nextWakeReason})` : ""}
+          </p>
+        </article>
+
+        <article className="card">
           <h2>Active execution</h2>
           {overview.activeExecutions.length === 0 ? (
             <p className="detail">Nothing is executing right now.</p>

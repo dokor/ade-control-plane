@@ -40,6 +40,8 @@ export type {
   AgentUsageInput,
   AgentUsageQuery,
   AgentUsageRepository,
+  WorkerWakeup,
+  WorkerWakeupRepository,
 } from "./contracts.js";
 export type {
   AdeDecisionRecord,
