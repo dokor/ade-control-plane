@@ -90,6 +90,40 @@ test("blocks the commit, push, and PR when ADE staged review finds an error", as
   }
 });
 
+test("passes the selected GitHub issue through the existing Task pipeline", async () => {
+  const context = await setup();
+  try {
+    context.task.source = { type: "github-issue", issueNumber: 23 };
+    context.task.prompt = "Implement GitHub issue #23";
+    const commands = new SuccessfulCommands(context.task);
+    const github = new DeterministicFakeGithubClient();
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github,
+      issueReader: {
+        listIssues: async () => [],
+        getIssue: async () => ({
+          number: 23,
+          title: "Add the projects page",
+          state: "open",
+          url: "https://github.com/dokor/alpha/issues/23",
+          updatedAt: now,
+        }),
+      },
+      commands,
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    const codex = commands.calls.find(({ executable }) => executable === "codex");
+    assert.match(codex?.stdin ?? "", /#23: Add the projects page/);
+    assert.match(codex?.stdin ?? "", /github\.com\/dokor\/alpha\/issues\/23/);
+    assert.match(github.createdPullRequests[0]?.input.body ?? "", /Source issue: #23/);
+  } finally {
+    await context.close();
+  }
+});
+
 test("refuses ADE artifacts that are not ignored before Codex starts", async () => {
   const context = await setup();
   try {

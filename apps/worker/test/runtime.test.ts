@@ -67,6 +67,33 @@ test("accepts only ADE context profiles", async () => {
   }
 });
 
+test("selects Claude Code explicitly and keeps its credential isolated", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ade-v0-runtime-agent-"));
+  try {
+    const githubKey = join(directory, "github-key");
+    const anthropicKey = join(directory, "anthropic-key");
+    await writeFile(githubKey, "github-private-key", "utf8");
+    await writeFile(anthropicKey, "anthropic-api-key", "utf8");
+    const config = await loadV0WorkerRuntime({
+      V0_PROJECT_ROOT: directory,
+      DASHBOARD_PUBLIC_URL: "https://ade.example.com",
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_INSTALLATION_ID: "2",
+      GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
+      ANTHROPIC_API_KEY_FILE: anthropicKey,
+      V0_AGENT_PROVIDER: "claude-code",
+      CODEX_HOME: join(directory, "codex"),
+      V0_GIT_HOME: join(directory, "git"),
+    });
+
+    assert.equal(config.agentProvider, "claude-code");
+    assert.equal(config.claudeEnvironment.ANTHROPIC_API_KEY, "anthropic-api-key");
+    assert.equal(config.codexEnvironment.ANTHROPIC_API_KEY, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("accepts only WebSocket App Server URLs", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ade-v0-runtime-url-"));
   try {

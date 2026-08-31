@@ -126,6 +126,14 @@ export {
   type CommandRunner,
 } from "./v0/CommandRunner.js";
 export {
+  ClaudeCodeAgentExecutor,
+  CodexAgentExecutor,
+  type AgentExecutionRequest,
+  type AgentExecutor,
+  type AgentProvider,
+  type CommandAgentExecutorOptions,
+} from "./AgentExecutor.js";
+export {
   matchesGithubRemote,
   resolveProjectCheckout,
   type V0ProjectCheckout,
