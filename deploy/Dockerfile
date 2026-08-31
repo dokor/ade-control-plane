@@ -28,7 +28,9 @@ RUN groupadd --system --gid 10001 ade-dashboard \
 WORKDIR /workspace/apps/dashboard
 USER ade-dashboard
 EXPOSE 3000
-CMD ["pnpm", "start"]
+# Do not invoke pnpm/Corepack at runtime: its cache setup conflicts with the
+# read-only production filesystem. The Next.js CLI is already installed.
+CMD ["node", "node_modules/next/dist/bin/next", "start"]
 
 FROM workspace AS worker-runtime
 ENV NODE_ENV=production
