@@ -37,6 +37,9 @@ import type {
   V0TaskLogInput,
   V0TaskRepository,
   V0TaskTransitionInput,
+  AgentUsageInput,
+  AgentUsageRepository,
+  AgentUsageQuery,
 } from "../contracts.js";
 import type {
   AdeDecisionRecord,
@@ -48,6 +51,7 @@ import type {
   ControlPlaneSettingsRecord,
   ExecutionLeaseRecord,
   ExecutionRecord,
+  AgentUsageRecord,
   GithubBotCommentRecord,
   GithubDeliveryRecord,
   GithubDeliveryStatus,
@@ -202,6 +206,41 @@ function mapExecution(row: TimestampRow): ExecutionRecord {
     createdAt: toIsoString(row.created_at) ?? "",
     updatedAt: toIsoString(row.updated_at) ?? "",
   };
+}
+
+function mapAgentUsage(row: TimestampRow): AgentUsageRecord {
+  const optionalNumber = (key: string): number | undefined =>
+    row[key] === null || row[key] === undefined ? undefined : Number(String(row[key]));
+  const record: AgentUsageRecord = {
+    id: String(row.id),
+    executionId: row.execution_id === null ? null : String(row.execution_id),
+    taskId: row.task_id === null ? null : String(row.task_id),
+    projectId: String(row.project_id),
+    githubIssueNumber: row.github_issue_number === null ? null : Number(row.github_issue_number),
+    githubPullRequestNumber: row.github_pull_request_number === null ? null : Number(row.github_pull_request_number),
+    provider: String(row.provider),
+    ...(row.model === null ? {} : { model: String(row.model) }),
+    startedAt: toIsoString(row.started_at) ?? "",
+    finishedAt: toIsoString(row.finished_at),
+    wallDurationMs: row.wall_duration_ms === null ? null : Number(String(row.wall_duration_ms)),
+    ...(row.cost_amount === null ? {} : { costAmount: Number(String(row.cost_amount)) }),
+    ...(row.cost_currency === null ? {} : { costCurrency: String(row.cost_currency) }),
+    costKind: String(row.cost_kind) as AgentUsageRecord["costKind"],
+    usageSource: String(row.usage_source),
+    ...(row.provider_execution_ref === null ? {} : { providerExecutionRef: String(row.provider_execution_ref) }),
+    observedAt: toIsoString(row.observed_at) ?? "",
+  };
+  const numberFields: readonly [string, keyof AgentUsageRecord][] = [
+    ["provider_duration_ms", "providerDurationMs"], ["provider_api_duration_ms", "providerApiDurationMs"],
+    ["turn_count", "turnCount"], ["input_tokens", "inputTokens"], ["cached_input_tokens", "cachedInputTokens"],
+    ["cache_write_input_tokens", "cacheWriteInputTokens"], ["output_tokens", "outputTokens"],
+    ["reasoning_output_tokens", "reasoningOutputTokens"], ["total_tokens", "totalTokens"],
+  ];
+  for (const [column, field] of numberFields) {
+    const value = optionalNumber(column);
+    if (value !== undefined) record[field] = value as never;
+  }
+  return record;
 }
 
 function mapV0Task(row: TimestampRow): V0TaskRecord {
@@ -1448,6 +1487,61 @@ class PostgresExecutionRepository implements ExecutionRepository {
   }
 }
 
+class PostgresAgentUsageRepository implements AgentUsageRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async record(input: AgentUsageInput): Promise<AgentUsageRecord> {
+    const row = await queryRequired(
+      this.pool,
+      `
+        INSERT INTO agent_usage (
+          id, execution_id, task_id, project_id, github_issue_number,
+          github_pull_request_number, provider, model, started_at, finished_at,
+          wall_duration_ms, provider_duration_ms, provider_api_duration_ms,
+          turn_count, input_tokens, cached_input_tokens, cache_write_input_tokens,
+          output_tokens, reasoning_output_tokens, total_tokens, cost_amount,
+          cost_currency, cost_kind, usage_source, provider_execution_ref, observed_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+        RETURNING *
+      `,
+      [
+        input.id ?? randomUUID(), input.executionId ?? null, input.taskId ?? null,
+        input.projectId, input.githubIssueNumber ?? null, input.githubPullRequestNumber ?? null,
+        input.provider, input.model ?? null, input.startedAt, input.finishedAt ?? null,
+        input.wallDurationMs ?? null, input.providerDurationMs ?? null, input.providerApiDurationMs ?? null,
+        input.turnCount ?? null, input.inputTokens ?? null, input.cachedInputTokens ?? null,
+        input.cacheWriteInputTokens ?? null, input.outputTokens ?? null,
+        input.reasoningOutputTokens ?? null, input.totalTokens ?? null,
+        input.costAmount ?? null, input.costCurrency ?? null, input.costKind ?? "unknown",
+        input.usageSource ?? "unknown", input.providerExecutionRef ?? null, input.observedAt,
+      ],
+      "Failed to record agent usage.",
+    );
+    return mapAgentUsage(row);
+  }
+
+  public async list(query: AgentUsageQuery = {}): Promise<readonly AgentUsageRecord[]> {
+    const values: unknown[] = [];
+    const clauses: string[] = [];
+    const add = (clause: string, value: unknown): void => {
+      values.push(value);
+      clauses.push(clause.replace("$VALUE", `$${values.length}`));
+    };
+    if (query.projectId) add("project_id = $VALUE", query.projectId);
+    if (query.provider) add("provider = $VALUE", query.provider);
+    if (query.from) add("observed_at >= $VALUE", query.from);
+    if (query.to) add("observed_at < $VALUE", query.to);
+    values.push(boundedLimit(query.limit ?? 2000, 5000));
+    const result = await this.pool.query<TimestampRow>(
+      `SELECT * FROM agent_usage ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""} ORDER BY observed_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    );
+    return result.rows.map(mapAgentUsage);
+  }
+}
+
 class PostgresProviderQuotaSnapshotRepository
   implements ProviderQuotaSnapshotRepository
 {
@@ -2049,6 +2143,7 @@ function isTerminalStatus(status: ExecutionRecord["status"]): boolean {
 }
 
 export class PostgresControlPlaneStore implements ControlPlanePersistence {
+  public readonly agentUsage: AgentUsageRepository;
   public readonly v0Tasks: V0TaskRepository;
   public readonly adeDecisions: AdeDecisionRepository;
   public readonly auditEvents: AuditEventRepository;
@@ -2069,6 +2164,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
   public constructor(config: PostgresConnectionConfig) {
     this.pool = createPool(config);
     this.settings = new PostgresControlPlaneSettingsRepository(this.pool);
+    this.agentUsage = new PostgresAgentUsageRepository(this.pool);
     this.projects = new PostgresProjectRepository(this.pool);
     this.projectSnapshots = new PostgresProjectSnapshotRepository(this.pool);
     this.runners = new PostgresRunnerRepository(this.pool);

@@ -37,6 +37,9 @@ export type {
   V0TaskRepository,
   V0TaskTransitionInput,
   V0TaskPushedInput,
+  AgentUsageInput,
+  AgentUsageQuery,
+  AgentUsageRepository,
 } from "./contracts.js";
 export type {
   AdeDecisionRecord,
@@ -79,6 +82,9 @@ export type {
   V0TaskRecord,
   V0TaskSource,
   V0TaskStatus,
+  AgentUsageCostKind,
+  AgentUsageMetrics,
+  AgentUsageRecord,
 } from "./domain.js";
 export {
   DatabaseRecordNotFoundError,

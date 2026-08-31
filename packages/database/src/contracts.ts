@@ -38,6 +38,9 @@ import type {
   V0TaskRecord,
   V0TaskSource,
   V0TaskStatus,
+  AgentUsageCostKind,
+  AgentUsageMetrics,
+  AgentUsageRecord,
 } from "./domain.js";
 
 export interface ProjectRegistrationInput {
@@ -358,6 +361,34 @@ export interface V0TaskRepository {
   listLogs(taskId: string, limit: number): Promise<readonly V0TaskLogRecord[]>;
 }
 
+export interface AgentUsageInput extends AgentUsageMetrics {
+  id?: string;
+  executionId?: string | null;
+  taskId?: string | null;
+  projectId: string;
+  githubIssueNumber?: number | null;
+  githubPullRequestNumber?: number | null;
+  provider: string;
+  startedAt: string;
+  finishedAt?: string | null;
+  wallDurationMs?: number | null;
+  costKind?: AgentUsageCostKind;
+  observedAt: string;
+}
+
+export interface AgentUsageQuery {
+  projectId?: string;
+  provider?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface AgentUsageRepository {
+  record(input: AgentUsageInput): Promise<AgentUsageRecord>;
+  list(query?: AgentUsageQuery): Promise<readonly AgentUsageRecord[]>;
+}
+
 export interface ProjectRepository {
   getById(projectId: string): Promise<ProjectRecord | null>;
   getByRepositoryId(repositoryId: string): Promise<ProjectRecord | null>;
@@ -459,6 +490,7 @@ export interface ControlPlanePersistence {
   readonly providerQuotaSnapshots: ProviderQuotaSnapshotRepository;
   readonly controlCommands: ControlCommandRepository;
   readonly auditEvents: AuditEventRepository;
+  readonly agentUsage?: AgentUsageRepository;
   close(): Promise<void>;
   migrate(): Promise<readonly string[]>;
 }

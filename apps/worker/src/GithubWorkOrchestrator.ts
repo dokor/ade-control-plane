@@ -17,6 +17,7 @@ import type {
 } from "@ade-control-plane/database";
 import type { GithubWorkItem, GithubWorkReader, GithubWorkRepositoryProfile } from "@ade-control-plane/github";
 import type { AgentProvider } from "./AgentExecutor.js";
+import type { AgentUsageInput } from "@ade-control-plane/database";
 
 export interface GithubWorkDispatchRequest {
   executionId: string;
@@ -30,6 +31,8 @@ export interface GithubWorkDispatchResult {
   resultSummary?: Record<string, string | number>;
   errorCode?: string;
   errorSummary?: string;
+  provider?: string;
+  usage?: import("@ade-control-plane/database").AgentUsageMetrics;
 }
 
 /** A narrow port: all shell/Codex access remains behind a typed dispatch request. */
@@ -52,6 +55,7 @@ export interface GithubWorkOrchestratorOptions {
   /** Matches V0 behaviour when no App Server quota source is configured. */
   allowStartWithoutQuotaSnapshot?: boolean;
   provider?: AgentProvider;
+  agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
   leaseDurationMs?: number;
   now?(): Date;
 }
@@ -179,6 +183,7 @@ export class GithubWorkOrchestrator {
           metadata: { issueNumber: selection.item.issueNumber },
         },
       });
+      await this.recordUsage(scheduled.execution.startedAt ?? now, this.now().toISOString(), project.id, work, result, scheduled.execution.id);
       if (result.status === "failed") {
         await this.options.notifier?.failure(project, work, result.errorCode ?? "EXECUTION_FAILED");
       }
@@ -193,9 +198,45 @@ export class GithubWorkOrchestrator {
           action: "github-work.dispatch-failed", result: "failed", metadata: { issueNumber: selection.item.issueNumber },
         },
       });
+      await this.options.agentUsage?.record({
+        executionId: scheduled.execution.id,
+        projectId: project.id,
+        githubIssueNumber: work.issueNumber,
+        provider: this.options.provider ?? "codex",
+        startedAt: scheduled.execution.startedAt ?? now,
+        finishedAt: this.now().toISOString(),
+        costKind: "unknown",
+        usageSource: "unknown",
+        observedAt: this.now().toISOString(),
+      }).catch(() => undefined);
       await this.options.notifier?.failure(project, work, "AGENT_DISPATCH_FAILED");
     }
     return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
+  }
+
+  private async recordUsage(
+    startedAt: string,
+    finishedAt: string,
+    projectId: string,
+    work: GithubWorkItemRecord,
+    result: GithubWorkDispatchResult,
+    executionId: string,
+  ): Promise<void> {
+    const usageInput: AgentUsageInput = {
+      executionId,
+      projectId,
+      githubIssueNumber: work.issueNumber,
+      githubPullRequestNumber: typeof result.resultSummary?.pullRequestNumber === "number" ? result.resultSummary.pullRequestNumber : null,
+      provider: result.provider ?? this.options.provider ?? "codex",
+      startedAt,
+      finishedAt,
+      wallDurationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)),
+      costKind: result.usage?.costKind ?? "unknown",
+      usageSource: result.usage?.usageSource ?? "unknown",
+      ...(result.usage ?? {}),
+      observedAt: finishedAt,
+    };
+    await this.options.agentUsage?.record(usageInput).catch(() => undefined);
   }
 
   private async reconcileProject(project: ProjectRecord): Promise<void> {
