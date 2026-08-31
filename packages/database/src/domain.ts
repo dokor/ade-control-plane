@@ -291,6 +291,47 @@ export interface GithubBotCommentRecord {
   updatedAt: string;
 }
 
+export type AgentUsageCostKind =
+  | "provider_reported"
+  | "api_pricing_estimate"
+  | "subscription_included"
+  | "credit_consumption"
+  | "unknown";
+
+export interface AgentUsageMetrics {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  cacheWriteInputTokens?: number;
+  outputTokens?: number;
+  reasoningOutputTokens?: number;
+  totalTokens?: number;
+  providerDurationMs?: number;
+  providerApiDurationMs?: number;
+  turnCount?: number;
+  costAmount?: number;
+  costCurrency?: string;
+  costKind?: AgentUsageCostKind;
+  usageSource?: string;
+  providerExecutionRef?: string;
+  model?: string;
+}
+
+export interface AgentUsageRecord extends AgentUsageMetrics {
+  id: string;
+  executionId: string | null;
+  taskId: string | null;
+  projectId: string;
+  githubIssueNumber: number | null;
+  githubPullRequestNumber: number | null;
+  provider: string;
+  startedAt: string;
+  finishedAt: string | null;
+  wallDurationMs: number | null;
+  observedAt: string;
+  costKind: AgentUsageCostKind;
+  usageSource: string;
+}
+
 export interface AdeDecisionRecord {
   id: string;
   projectId: string;

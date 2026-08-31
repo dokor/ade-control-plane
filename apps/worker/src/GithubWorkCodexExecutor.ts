@@ -1,4 +1,4 @@
-import type { ProjectRecord } from "@ade-control-plane/database";
+import type { AgentUsageMetrics, ProjectRecord } from "@ade-control-plane/database";
 import type { GithubPullRequestClient } from "@ade-control-plane/github";
 
 import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDispatcher } from "./GithubWorkOrchestrator.js";
@@ -36,6 +36,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
 
   public async execute(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult> {
     let branchName: string | null = null;
+    let usage: AgentUsageMetrics | undefined;
     try {
       const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
       branchName = request.work.branchName ?? `ade/issue-${request.work.issueNumber}`;
@@ -57,6 +58,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         cwd: checkout.root,
         prompt: buildGithubWorkPrompt(request),
       });
+      usage = agentResult.usage;
       if (agentResult.exitCode !== 0) {
         throw new GithubWorkExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
@@ -85,10 +87,10 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           base: checkout.baseBranch,
         },
       );
-      return { status: "succeeded", resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url } };
+      return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url } };
     } catch (error) {
       const failure = classifyFailure(error);
-      return { status: "failed", errorCode: failure.code, errorSummary: failure.summary, ...(branchName ? { resultSummary: { branchName } } : {}) };
+      return { status: "failed", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), errorCode: failure.code, errorSummary: failure.summary, ...(branchName ? { resultSummary: { branchName } } : {}) };
     }
   }
 

@@ -1,4 +1,6 @@
 import type {
+  AgentUsageInput,
+  AgentUsageMetrics,
   ProjectRepository,
   ProjectRecord,
   V0TaskRepository,
@@ -13,6 +15,7 @@ import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.j
 interface V0Persistence {
   projects: Pick<ProjectRepository, "getById">;
   v0Tasks: Pick<V0TaskRepository, "getById" | "complete" | "appendLog">;
+  agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
 }
 
 export interface V0TaskExecutorOptions {
@@ -78,6 +81,8 @@ export class V0TaskExecutor {
     const controller = new AbortController();
     let abortReason: AbortReason = null;
     let branchName: string | null = null;
+    let usage: AgentUsageMetrics | undefined;
+    const startedAt = task.startedAt ?? this.now().toISOString();
     let checkingCancellation = false;
     const abort = (reason: Exclude<AbortReason, null>): void => {
       if (controller.signal.aborted) return;
@@ -155,6 +160,7 @@ export class V0TaskExecutor {
       if (agentResult.exitCode !== 0) {
         throw new V0ExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
+      usage = agentResult.usage;
       await this.assertNotCancelled(task.id);
 
       const finalStatus = await this.git(checkout.root, [
@@ -249,6 +255,23 @@ export class V0TaskExecutor {
         cancelled ? "Task cancelled." : `Task failed: ${failure.summary}`,
       ).catch(() => undefined);
     } finally {
+      const finishedAt = this.now().toISOString();
+      const latest = await this.options.persistence.v0Tasks.getById(task.id);
+      const usageInput: AgentUsageInput = {
+        taskId: task.id,
+        projectId: task.projectId,
+        provider: this.agentExecutor.provider,
+        startedAt,
+        finishedAt,
+        wallDurationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt)),
+        githubIssueNumber: task.source.type === "github-issue" ? task.source.issueNumber : null,
+        githubPullRequestNumber: latest?.pullRequestNumber ?? null,
+        costKind: usage?.costKind ?? "unknown",
+        usageSource: usage?.usageSource ?? "unknown",
+        ...(usage ?? {}),
+        observedAt: finishedAt,
+      };
+      await this.options.persistence.agentUsage?.record(usageInput).catch(() => undefined);
       clearTimeout(timeout);
       clearInterval(cancellation);
       shutdownSignal?.removeEventListener("abort", shutdown);
