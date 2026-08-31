@@ -10,6 +10,7 @@ export interface DashboardConfig {
   quotaProvider: string;
   quotaAccountRef: string;
   refreshIntervalMs: number;
+  adeRuntimeVersion: string;
 }
 
 /**
@@ -53,6 +54,7 @@ export async function loadDashboardConfig(
     quotaProvider: env.QUOTA_PROVIDER?.trim() || "openai",
     quotaAccountRef: env.CODEX_CREDENTIAL_REF?.trim() || "codex-account-main",
     refreshIntervalMs: positiveNumber(env.DASHBOARD_REFRESH_SECONDS, 15) * 1_000,
+    adeRuntimeVersion: env.ADE_RUNTIME_VERSION?.trim() || "unknown",
   };
 }
 

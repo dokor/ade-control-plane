@@ -1,4 +1,9 @@
+ARG ADE_VERSION=0.4.0
+
 FROM node:22-bookworm-slim AS workspace
+
+ARG ADE_VERSION
+ENV ADE_RUNTIME_VERSION=${ADE_VERSION}
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=${PNPM_HOME}:${PATH}
@@ -33,6 +38,7 @@ EXPOSE 3000
 CMD ["node", "node_modules/next/dist/bin/next", "start"]
 
 FROM workspace AS worker-runtime
+ARG ADE_VERSION
 ENV NODE_ENV=production
 ENV HOME=/home/ade-worker
 ENV CODEX_HOME=/home/ade-worker/.codex
@@ -48,7 +54,7 @@ RUN groupadd --system --gid 10002 ade-worker \
 COPY deploy/bin/worker-entrypoint /usr/local/bin/ade-control-plane-worker
 RUN chmod 0755 /usr/local/bin/ade-control-plane-worker
 # Keep the ADE CLI immutable and outside the writable Codex home volume.
-RUN npm install --global @alelouet/ai-delivery-engine@0.4.0 \
+RUN npm install --global "@alelouet/ai-delivery-engine@${ADE_VERSION}" \
   && command -v ade
 # The official installer selects the native Linux binary for the build
 # architecture, including linux/arm64 when built on Raspberry Pi.

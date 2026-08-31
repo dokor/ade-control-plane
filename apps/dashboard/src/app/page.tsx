@@ -15,6 +15,7 @@ export default async function OverviewPage() {
     persistence: await getPersistence(),
     quotaProvider: config.quotaProvider,
     quotaAccountRef: config.quotaAccountRef,
+    adeRuntimeVersion: config.adeRuntimeVersion,
   });
 
   return (
@@ -85,6 +86,12 @@ export default async function OverviewPage() {
           <p className="detail">
             <Link href="/runners">Manage runners</Link>
           </p>
+        </article>
+
+        <article className="card">
+          <h2>ADE runtime</h2>
+          <p className="value">{overview.adeRuntimeVersion}</p>
+          <p className="detail">Pinned runtime used by the worker.</p>
         </article>
 
         <article className="card">
