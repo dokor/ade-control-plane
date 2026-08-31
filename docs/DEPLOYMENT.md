@@ -20,6 +20,7 @@ checkout, matching the other Raspberry applications:
 sudo install -d -o root -g root -m 0750 /srv/configs/ade-control-plane
 sudo install -d -o root -g root -m 0700 /srv/configs/ade-control-plane/secrets
 sudo install -o root -g root -m 0600 .env.example /srv/configs/ade-control-plane/.env.prod
+sudo groupadd --system ade-secrets
 ```
 
 Populate `/srv/configs/ade-control-plane/.env.prod` with `DASHBOARD_PUBLIC_URL`, `GITHUB_APP_ID`,
@@ -31,6 +32,10 @@ repositories. Do not mount a Docker socket.
 Create the runtime files described in [`secrets/README.md`](../secrets/README.md)
 under `/srv/configs/ade-control-plane/secrets` and set `SECRETS_DIR` to that
 directory in `.env.prod`.
+Set `SECRETS_GID` to the numeric GID of `ade-secrets`, then make each secret
+file `root:ade-secrets` with mode `0640`. The secret directory itself remains
+root-only; the group only grants the non-root Dashboard/worker processes read
+access to the individual files that Compose already mounts for them.
 The database URL must use the Compose service name `postgres`, not a public
 host address. Register projects with a numeric GitHub repository ID and a relative `configuration.v0.checkout`
 under `V0_PROJECTS_HOST`; the worker rejects absolute paths, traversal and
