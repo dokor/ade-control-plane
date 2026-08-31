@@ -40,7 +40,6 @@ Secrets and persistent data must not live inside the Git checkout.
 - normal admin account for host maintenance;
 - application containers running non-root;
 - dedicated deployment user for #36 later;
-- dedicated host runner identity when #11 is enabled.
 
 No routine service should run as root when a narrower identity is sufficient.
 
@@ -54,7 +53,6 @@ Minimum expected secrets/configuration:
 - Codex credential/auth state required by the selected runtime;
 - Git credential capable of pushing only to required repositories;
 - GitHub App private key + webhook secret if GitHub integration is enabled;
-- runner HMAC secret only when the host runner path is enabled.
 
 Rules:
 

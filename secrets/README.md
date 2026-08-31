@@ -12,7 +12,8 @@ Required files:
 - `dashboard_password_hash` — output of
   `pnpm --filter @ade-control-plane/dashboard exec tsx scripts/hash-password.ts`;
 - `github_app_private_key` — the GitHub App PEM private key;
-- `codex_api_key` — the API key used by the non-interactive Codex worker.
+- `codex_api_key` — optional API key for the non-interactive Codex worker;
+  create an empty file when using persisted Codex/ChatGPT login instead.
 
 Keep the directory owned and searchable only by the deployment administrator
 (`chmod 700 secrets`). With local Docker Compose, file-backed secrets are bind
