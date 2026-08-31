@@ -13,6 +13,7 @@ export interface V0WorkerRuntimeConfig {
   taskTimeoutMs: number;
   idleDelayMs: number;
   dashboardUrl: string;
+  adeRuntimeVersion: string;
   github: {
     appId: string;
     installationId: string;
@@ -61,6 +62,7 @@ export async function loadV0WorkerRuntime(
     taskTimeoutMs: positiveInteger(env.V0_TASK_TIMEOUT_SECONDS, 3_600) * 1_000,
     idleDelayMs: positiveInteger(env.V0_WORKER_IDLE_SECONDS, 2) * 1_000,
     dashboardUrl,
+    adeRuntimeVersion: env.ADE_RUNTIME_VERSION?.trim() || "unknown",
     github: { appId, installationId, privateKey },
   };
 }

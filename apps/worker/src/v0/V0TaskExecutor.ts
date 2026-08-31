@@ -22,6 +22,7 @@ export interface V0TaskExecutorOptions {
   codexExecutable?: string;
   adeExecutable?: string;
   adeProfile?: AdeProfile;
+  adeRuntimeVersion?: string;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
   timeoutMs?: number;
@@ -37,6 +38,7 @@ export class V0TaskExecutor {
   private readonly codexExecutable: string;
   private readonly adeExecutable: string;
   private readonly adeProfile: AdeProfile;
+  private readonly adeRuntimeVersion: string;
   private readonly timeoutMs: number;
   private readonly cancelPollMs: number;
   private readonly now: () => Date;
@@ -45,6 +47,7 @@ export class V0TaskExecutor {
     this.codexExecutable = options.codexExecutable ?? "codex";
     this.adeExecutable = options.adeExecutable ?? "ade";
     this.adeProfile = options.adeProfile ?? "normal";
+    this.adeRuntimeVersion = options.adeRuntimeVersion ?? "unknown";
     this.timeoutMs = options.timeoutMs ?? 60 * 60 * 1_000;
     this.cancelPollMs = options.cancelPollMs ?? 1_000;
     this.now = options.now ?? (() => new Date());
@@ -130,7 +133,7 @@ export class V0TaskExecutor {
       await this.prepareAdeContext(task.id, checkout.root, controller.signal);
       await this.assertCheckoutStillClean(checkout.root);
 
-      await this.log(task.id, "Starting Codex in workspace-write sandbox.");
+      await this.log(task.id, `ADE runtime ${this.adeRuntimeVersion}; starting Codex in workspace-write sandbox.`);
       await this.mustRun(task.id, "Codex", {
         executable: this.codexExecutable,
         args: ["exec", "--sandbox", "workspace-write", "--ephemeral", "--json", "-"],

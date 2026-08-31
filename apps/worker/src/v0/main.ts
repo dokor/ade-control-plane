@@ -48,6 +48,7 @@ async function main(): Promise<void> {
       codexExecutable: config.codexExecutable,
       adeExecutable: config.adeExecutable,
       adeProfile: config.adeProfile,
+      adeRuntimeVersion: config.adeRuntimeVersion,
       codexEnvironment: config.codexEnvironment,
       gitEnvironment: config.gitEnvironment,
       timeoutMs: config.taskTimeoutMs,

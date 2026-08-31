@@ -131,6 +131,7 @@ export interface TimelineEntry {
 
 export interface OverviewViewModel {
   generatedAt: string;
+  adeRuntimeVersion: string;
   schedulerMode: SchedulerMode;
   schedulerExplanation: string;
   nextWakeUpAt: string | null;
@@ -171,6 +172,7 @@ export interface ReadModelInput {
   quotaProvider: string;
   quotaAccountRef: string;
   now?: string;
+  adeRuntimeVersion?: string;
 }
 
 const STALE_SNAPSHOT_MS = 300_000;
@@ -256,6 +258,7 @@ export async function buildOverview(
 
   return {
     generatedAt: now,
+    adeRuntimeVersion: input.adeRuntimeVersion ?? "unknown",
     schedulerMode: settings.schedulerMode,
     schedulerExplanation: explainSchedule(decision, settings.schedulerMode, projectViews),
     nextWakeUpAt: decision.nextWakeUpAt ?? null,
