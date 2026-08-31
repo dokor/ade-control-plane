@@ -39,6 +39,7 @@ async function main(): Promise<void> {
           : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment }),
       }),
       provider: config.agentProvider,
+      agentUsage: store.agentUsage,
       ownerId: `github-work:${hostname()}:${process.pid}`,
       allowStartWithoutQuotaSnapshot: config.codexAppServerUrl === null,
       notifier: new GithubWorkNotifier({
