@@ -86,6 +86,93 @@ export interface SchedulerCandidate {
   lastSuccessfulExecutionAt?: string;
 }
 
+/**
+ * Shared delivery gates used by manual issue runs and the automatic scheduler.
+ * The state is intentionally provider-agnostic: an agent may implement the
+ * work, but only ADE gates can move it towards a pull request.
+ */
+export type AdeDeliveryStage =
+  | "issue-enrichment"
+  | "ready-for-dev"
+  | "implementation"
+  | "deterministic-validation"
+  | "profile-reviews"
+  | "pr-ready"
+  | "human-merge"
+  | "blocked";
+
+export type AdeDeliveryEvent =
+  | "issue-enriched"
+  | "ready-for-dev"
+  | "implementation-complete"
+  | "deterministic-validation-passed"
+  | "profile-reviews-passed"
+  | "human-merged"
+  | "correction-required";
+
+export interface AdeDeliveryPipelineState {
+  stage: AdeDeliveryStage;
+  reviewAttempt: number;
+  maxReviewAttempts: number;
+  source: "github-issue" | "prompt";
+  issueNumber: number | null;
+}
+
+export function createAdeDeliveryPipeline(input: {
+  source: "github-issue" | "prompt";
+  issueNumber?: number;
+  maxReviewAttempts?: number;
+}): AdeDeliveryPipelineState {
+  if (input.source === "github-issue" && (!Number.isInteger(input.issueNumber) || input.issueNumber! < 1)) {
+    throw new Error("GitHub issue delivery requires a positive issue number.");
+  }
+  const maxReviewAttempts = input.maxReviewAttempts ?? 2;
+  if (!Number.isInteger(maxReviewAttempts) || maxReviewAttempts < 1 || maxReviewAttempts > 3) {
+    throw new Error("ADE review correction attempts must be between 1 and 3.");
+  }
+  return {
+    stage: input.source === "github-issue" ? "issue-enrichment" : "implementation",
+    reviewAttempt: 0,
+    maxReviewAttempts,
+    source: input.source,
+    issueNumber: input.issueNumber ?? null,
+  };
+}
+
+export function advanceAdeDeliveryPipeline(
+  state: AdeDeliveryPipelineState,
+  event: AdeDeliveryEvent,
+): AdeDeliveryPipelineState {
+  if (event === "correction-required") {
+    if (state.stage !== "profile-reviews") {
+      throw new Error(`Invalid ADE delivery transition: ${state.stage} + ${event}.`);
+    }
+    const reviewAttempt = state.reviewAttempt + 1;
+    if (reviewAttempt > state.maxReviewAttempts) {
+      return { ...state, stage: "blocked", reviewAttempt };
+    }
+    return { ...state, stage: "implementation", reviewAttempt };
+  }
+  const nextStage = nextAdeDeliveryStage(state.stage, event);
+  return { ...state, stage: nextStage };
+}
+
+function nextAdeDeliveryStage(stage: AdeDeliveryStage, event: AdeDeliveryEvent): AdeDeliveryStage {
+  const transitions: Record<AdeDeliveryStage, Partial<Record<AdeDeliveryEvent, AdeDeliveryStage>>> = {
+    "issue-enrichment": { "issue-enriched": "ready-for-dev" },
+    "ready-for-dev": { "ready-for-dev": "implementation" },
+    implementation: { "implementation-complete": "deterministic-validation" },
+    "deterministic-validation": { "deterministic-validation-passed": "profile-reviews" },
+    "profile-reviews": { "profile-reviews-passed": "pr-ready" },
+    "pr-ready": { "human-merged": "human-merge" },
+    "human-merge": {},
+    blocked: {},
+  };
+  const next = transitions[stage][event];
+  if (!next) throw new Error(`Invalid ADE delivery transition: ${stage} + ${event}.`);
+  return next;
+}
+
 export interface SchedulerQuota {
   state: SchedulerQuotaState;
   resetsAt?: string;
