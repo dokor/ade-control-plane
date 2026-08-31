@@ -38,6 +38,9 @@ ENV HOME=/home/ade-worker
 ENV CODEX_HOME=/home/ade-worker/.codex
 ENV V0_GIT_HOME=/home/ade-git
 ENV PATH=/home/ade-worker/.local/bin:${PATH}
+RUN apt-get update \
+  && apt-get install --no-install-recommends -y bubblewrap \
+  && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 10002 ade-worker \
   && useradd --system --uid 10002 --gid ade-worker --home-dir /home/ade-worker --create-home ade-worker \
   && mkdir -p /home/ade-worker/.codex /home/ade-git \

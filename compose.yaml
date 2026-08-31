@@ -148,6 +148,11 @@ services:
       start_period: 20s
     security_opt:
       - no-new-privileges:true
+      # Codex creates an inner Bubblewrap user namespace for its workspace-write
+      # sandbox. Docker's default seccomp profile rejects that clone operation.
+      # The worker remains non-root, cap-less, read-only outside its declared
+      # mounts, and has no Docker socket.
+      - seccomp=unconfined
     cap_drop:
       - ALL
 
