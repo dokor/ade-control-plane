@@ -35,6 +35,7 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
 
     assert.equal(context.task.status, "SUCCESS");
     assert.equal(context.task.branchName, `ade/${context.task.id}`);
+    assert.equal(context.task.headSha, "0123456789012345678901234567890123456789");
     assert.equal(context.task.pullRequestNumber, 1);
     assert.match(context.task.pullRequestUrl ?? "", /github\.com/);
     const codex = commands.calls.find(({ executable }) => executable === "codex");
@@ -210,6 +211,7 @@ class SuccessfulCommands implements CommandRunner {
   public async run(input: CommandInput): Promise<CommandResult> {
     this.calls.push(input);
     if (input.args.includes("get-url")) return result(this.remote);
+    if (input.args.includes("rev-parse")) return result("0123456789012345678901234567890123456789\n");
     if (input.args.includes("--porcelain=v1")) {
       const statusCall = this.statusCalls++;
       if (statusCall === 0) return result("");

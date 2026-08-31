@@ -24,6 +24,11 @@ export interface GithubPullRequestClient {
     repository: GithubRepositoryRef,
     input: GithubPullRequestInput,
   ): Promise<GithubPullRequest>;
+  findPullRequest?(
+    repository: GithubRepositoryRef,
+    head: string,
+    base: string,
+  ): Promise<GithubPullRequest | null>;
 }
 
 /**
@@ -60,12 +65,14 @@ export interface HttpGithubClientOptions {
 
 export class GithubApiError extends Error {
   public readonly status: number;
+  public readonly detail: string | null;
 
-  public constructor(status: number, action: string) {
+  public constructor(status: number, action: string, detail: string | null = null) {
     // The GitHub response body may echo request content; only the status is kept.
     super(`GitHub API ${action} failed with status ${status}.`);
     this.name = "GithubApiError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -127,7 +134,7 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient {
     );
 
     if (!response.ok) {
-      throw new GithubApiError(response.status, "create pull request");
+      throw new GithubApiError(response.status, "create pull request", await safeGithubErrorDetail(response));
     }
 
     const parsed = (await response.json()) as {
@@ -150,6 +157,26 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient {
       head: typeof parsed.head?.ref === "string" ? parsed.head.ref : input.head,
       base: typeof parsed.base?.ref === "string" ? parsed.base.ref : input.base,
     };
+  }
+
+  public async findPullRequest(
+    repository: GithubRepositoryRef,
+    head: string,
+    base: string,
+  ): Promise<GithubPullRequest | null> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/pulls?state=open&head=${encodeURIComponent(`${repository.owner}:${head}`)}&base=${encodeURIComponent(base)}&per_page=20`,
+      { headers: this.headers(token) },
+    );
+    if (!response.ok) throw new GithubApiError(response.status, "find pull request", await safeGithubErrorDetail(response));
+    const parsed: unknown = await response.json().catch(() => null);
+    if (!Array.isArray(parsed)) throw new Error("GitHub pull request list response is invalid.");
+    for (const value of parsed) {
+      const candidate = normalizePullRequest(value, head, base);
+      if (candidate) return candidate;
+    }
+    return null;
   }
 
   private async request(
@@ -181,6 +208,39 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient {
       body: typeof parsed.body === "string" ? parsed.body : body,
     };
   }
+
+  private headers(token: string): Record<string, string> {
+    return {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${token}`,
+      "user-agent": this.userAgent,
+      "x-github-api-version": "2022-11-28",
+    };
+  }
+}
+
+function normalizePullRequest(value: unknown, head: string, base: string): GithubPullRequest | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const candidate = value as { number?: unknown; html_url?: unknown; head?: { ref?: unknown }; base?: { ref?: unknown } };
+  if (!Number.isInteger(candidate.number) || typeof candidate.html_url !== "string" || !isGithubUrl(candidate.html_url) || candidate.head?.ref !== head || candidate.base?.ref !== base) return null;
+  return { number: Number(candidate.number), url: candidate.html_url, head, base };
+}
+
+function isGithubUrl(value: string): boolean {
+  try { const url = new URL(value); return url.protocol === "https:" && url.hostname === "github.com"; } catch { return false; }
+}
+
+async function safeGithubErrorDetail(response: Response): Promise<string | null> {
+  const payload: unknown = await response.json().catch(() => null);
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
+  const errors = (payload as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return null;
+  for (const error of errors) {
+    if (typeof error !== "object" || error === null || Array.isArray(error)) continue;
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && /^[a-zA-Z0-9 .,:'()/_#-]{1,240}$/u.test(message)) return message;
+  }
+  return null;
 }
 
 /** Deterministic double used by tests and local runs without GitHub access. */

@@ -218,6 +218,8 @@ function mapV0Task(row: TimestampRow): V0TaskRecord {
     status: row.status as V0TaskRecord["status"],
     cancelRequested: Boolean(row.cancel_requested),
     branchName: row.branch_name === null ? null : String(row.branch_name),
+    headSha: row.head_sha === null || row.head_sha === undefined ? null : String(row.head_sha),
+    prRetryRequested: Boolean(row.pr_retry_requested),
     pullRequestNumber:
       row.pull_request_number === null ? null : Number(row.pull_request_number),
     pullRequestUrl: row.pull_request_url === null ? null : String(row.pull_request_url),
@@ -1923,14 +1925,16 @@ class PostgresV0TaskRepository implements V0TaskRepository {
   public async complete(input: V0TaskTransitionInput): Promise<V0TaskRecord> {
     const result = await this.pool.query<TimestampRow>(
       `UPDATE v0_tasks SET status = $2, finished_at = $3, updated_at = $3,
-       branch_name = COALESCE($4, branch_name), pull_request_number = COALESCE($5, pull_request_number),
-       pull_request_url = COALESCE($6, pull_request_url), error_code = $7, error_summary = $8
-       WHERE id = $1 AND status = 'RUNNING' RETURNING *`,
+       branch_name = COALESCE($4, branch_name), head_sha = COALESCE($5, head_sha),
+       pull_request_number = COALESCE($6, pull_request_number), pull_request_url = COALESCE($7, pull_request_url),
+       error_code = $8, error_summary = $9, pr_retry_requested = false
+       WHERE id = $1 AND (status = 'RUNNING' OR (status = 'FAILED' AND pr_retry_requested = true)) RETURNING *`,
       [
         input.taskId,
         input.status,
         input.finishedAt,
         input.branchName ?? null,
+        input.headSha ?? null,
         input.pullRequestNumber ?? null,
         input.pullRequestUrl ?? null,
         input.errorCode ?? null,
@@ -1948,6 +1952,28 @@ class PostgresV0TaskRepository implements V0TaskRepository {
         `V0 task ${input.taskId} is already ${current.status}.`,
       );
     }
+    return current;
+  }
+
+  public async markPushed(input: { taskId: string; branchName: string; headSha: string }): Promise<V0TaskRecord> {
+    const result = await this.pool.query<TimestampRow>(
+      "UPDATE v0_tasks SET branch_name = $2, head_sha = $3, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND status = 'RUNNING' RETURNING *",
+      [input.taskId, input.branchName, input.headSha],
+    );
+    if (result.rows[0]) return mapV0Task(result.rows[0]);
+    const current = await this.getById(input.taskId);
+    if (!current) throw new DatabaseRecordNotFoundError(`V0 task ${input.taskId} was not found.`);
+    return current;
+  }
+
+  public async requestPrRetry(taskId: string, requestedAt: string): Promise<V0TaskRecord> {
+    const result = await this.pool.query<TimestampRow>(
+      "UPDATE v0_tasks SET pr_retry_requested = true, updated_at = $2 WHERE id = $1 AND status = 'FAILED' AND error_code = 'GITHUB_PR_CREATE_FAILED' RETURNING *",
+      [taskId, requestedAt],
+    );
+    if (result.rows[0]) return mapV0Task(result.rows[0]);
+    const current = await this.getById(taskId);
+    if (!current) throw new DatabaseRecordNotFoundError(`V0 task ${taskId} was not found.`);
     return current;
   }
 

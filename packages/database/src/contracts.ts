@@ -325,10 +325,17 @@ export interface V0TaskTransitionInput {
   status: Extract<V0TaskStatus, "SUCCESS" | "FAILED" | "CANCELLED">;
   finishedAt: string;
   branchName?: string | null;
+  headSha?: string | null;
   pullRequestNumber?: number | null;
   pullRequestUrl?: string | null;
   errorCode?: string | null;
   errorSummary?: string | null;
+}
+
+export interface V0TaskPushedInput {
+  taskId: string;
+  branchName: string;
+  headSha: string;
 }
 
 export interface V0TaskLogInput {
@@ -345,6 +352,8 @@ export interface V0TaskRepository {
   claimPending(startedAt: string): Promise<V0TaskRecord | null>;
   requestCancel(taskId: string, requestedAt: string): Promise<V0TaskRecord>;
   complete(input: V0TaskTransitionInput): Promise<V0TaskRecord>;
+  markPushed?(input: V0TaskPushedInput): Promise<V0TaskRecord>;
+  requestPrRetry?(taskId: string, requestedAt: string): Promise<V0TaskRecord>;
   appendLog(input: V0TaskLogInput): Promise<V0TaskLogRecord | null>;
   listLogs(taskId: string, limit: number): Promise<readonly V0TaskLogRecord[]>;
 }

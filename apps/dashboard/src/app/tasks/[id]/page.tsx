@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { Shell } from "../../../components/Shell.js";
 import { TaskCancelButton } from "../../../components/TaskCancelButton.js";
+import { TaskPrRetryButton } from "../../../components/TaskPrRetryButton.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
 import { formatInstant } from "../../../lib/format.js";
 import { getPersistence } from "../../../lib/persistence.js";
@@ -48,6 +49,7 @@ export default async function TaskDetailPage({
               status={task.status as "PENDING" | "RUNNING"}
             />
           ) : null}
+          {task.status === "FAILED" && task.errorCode === "GITHUB_PR_CREATE_FAILED" ? <TaskPrRetryButton taskId={task.id} /> : null}
           {pullRequestUrl ? (
             <a className="button primary" href={pullRequestUrl} target="_blank" rel="noreferrer noopener">
               Open PR #{task.pullRequestNumber}

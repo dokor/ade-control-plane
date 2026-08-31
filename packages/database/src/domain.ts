@@ -323,6 +323,8 @@ export interface V0TaskRecord {
   status: V0TaskStatus;
   cancelRequested: boolean;
   branchName: string | null;
+  headSha?: string | null;
+  prRetryRequested?: boolean;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
   errorCode: string | null;
