@@ -20,6 +20,8 @@ export interface V0TaskExecutorOptions {
   commands: CommandRunner;
   projectRoot: string;
   codexExecutable?: string;
+  adeExecutable?: string;
+  adeProfile?: AdeProfile;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
   timeoutMs?: number;
@@ -27,16 +29,22 @@ export interface V0TaskExecutorOptions {
   now?(): Date;
 }
 
+export type AdeProfile = "chill" | "normal" | "expert";
+
 type AbortReason = "cancel" | "timeout" | "shutdown" | null;
 
 export class V0TaskExecutor {
   private readonly codexExecutable: string;
+  private readonly adeExecutable: string;
+  private readonly adeProfile: AdeProfile;
   private readonly timeoutMs: number;
   private readonly cancelPollMs: number;
   private readonly now: () => Date;
 
   public constructor(private readonly options: V0TaskExecutorOptions) {
     this.codexExecutable = options.codexExecutable ?? "codex";
+    this.adeExecutable = options.adeExecutable ?? "ade";
+    this.adeProfile = options.adeProfile ?? "normal";
     this.timeoutMs = options.timeoutMs ?? 60 * 60 * 1_000;
     this.cancelPollMs = options.cancelPollMs ?? 1_000;
     this.now = options.now ?? (() => new Date());
@@ -119,12 +127,15 @@ export class V0TaskExecutor {
       });
       await this.assertNotCancelled(task.id);
 
+      await this.prepareAdeContext(task.id, checkout.root, controller.signal);
+      await this.assertCheckoutStillClean(checkout.root);
+
       await this.log(task.id, "Starting Codex in workspace-write sandbox.");
       await this.mustRun(task.id, "Codex", {
         executable: this.codexExecutable,
         args: ["exec", "--sandbox", "workspace-write", "--ephemeral", "--json", "-"],
         cwd: checkout.root,
-        stdin: buildCodexPrompt(task.prompt),
+        stdin: buildCodexPrompt(task.prompt, this.adeProfile),
         env: this.codexEnvironment,
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
@@ -147,6 +158,15 @@ export class V0TaskExecutor {
         env: this.gitEnvironment,
         signal: controller.signal,
       });
+      await this.mustRun(task.id, "ADE staged review", {
+        executable: this.adeExecutable,
+        args: ["review", "--staged", "--json"],
+        cwd: checkout.root,
+        env: this.gitEnvironment,
+        signal: controller.signal,
+        onOutput: (output) => this.logCommandOutput(task.id, output),
+      });
+      await this.assertNotCancelled(task.id);
       await this.mustRun(task.id, "git commit", {
         executable: "git",
         args: [
@@ -183,7 +203,7 @@ export class V0TaskExecutor {
         },
         {
           title: `ADE task ${task.id.slice(0, 8)}`,
-          body: buildPullRequestBody(task),
+          body: buildPullRequestBody(task, this.adeProfile),
           head: branchName,
           base: checkout.baseBranch,
         },
@@ -229,6 +249,43 @@ export class V0TaskExecutor {
   private async assertNotCancelled(taskId: string): Promise<void> {
     if ((await this.options.persistence.v0Tasks.getById(taskId))?.cancelRequested) {
       throw new V0CancelledError();
+    }
+  }
+
+  private async prepareAdeContext(
+    taskId: string,
+    cwd: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    await this.mustRun(taskId, "ADE configuration validation", {
+      executable: this.adeExecutable,
+      args: ["config", "validate"],
+      cwd,
+      env: this.gitEnvironment,
+      signal,
+      onOutput: (output) => this.logCommandOutput(taskId, output),
+    });
+    await this.mustRun(taskId, `ADE ${this.adeProfile} context pack`, {
+      executable: this.adeExecutable,
+      args: ["context", "pack", this.adeProfile],
+      cwd,
+      env: this.gitEnvironment,
+      signal,
+      onOutput: (output) => this.logCommandOutput(taskId, output),
+    });
+  }
+
+  private async assertCheckoutStillClean(cwd: string): Promise<void> {
+    const status = await this.git(cwd, [
+      "status",
+      "--porcelain=v1",
+      "--untracked-files=all",
+    ]);
+    if (status.stdout.trim()) {
+      throw new V0ExecutionError(
+        "ADE_ARTIFACTS_UNIGNORED",
+        "ADE context artifacts must be ignored before a task can start.",
+      );
     }
   }
 
@@ -313,10 +370,11 @@ function classifyFailure(
   return { code: "EXECUTION_FAILED", summary: "Task execution failed." };
 }
 
-function buildCodexPrompt(prompt: string): string {
+function buildCodexPrompt(prompt: string, adeProfile: AdeProfile): string {
   return [
     "Implement the following task in this repository.",
     "Keep the change scoped, follow AGENTS.md, and run the relevant checks.",
+    `ADE has prepared the ${adeProfile} context profile for this task. Use the repository's ADE configuration and context pack as delivery guidance.`,
     "Do not commit, push, create a pull request, or expose credentials; the worker owns those steps.",
     "",
     "Task:",
@@ -324,9 +382,10 @@ function buildCodexPrompt(prompt: string): string {
   ].join("\n");
 }
 
-function buildPullRequestBody(task: V0TaskRecord): string {
+function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile): string {
   return [
     `Automated implementation for ADE Control Plane task \`${task.id}\`.`,
+    `ADE deterministic staged review passed (context profile: \`${adeProfile}\`).`,
     "",
     "@dokor",
     "",

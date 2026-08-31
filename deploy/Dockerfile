@@ -42,6 +42,9 @@ RUN groupadd --system --gid 10002 ade-worker \
   && useradd --system --uid 10002 --gid ade-worker --home-dir /home/ade-worker --create-home ade-worker \
   && mkdir -p /home/ade-worker/.codex /home/ade-git \
   && chown -R ade-worker:ade-worker /home/ade-worker
+# Keep the ADE CLI immutable and outside the writable Codex home volume.
+RUN npm install --global @alelouet/ai-delivery-engine@0.4.0 \
+  && command -v ade
 # The official installer selects the native Linux binary for the build
 # architecture, including linux/arm64 when built on Raspberry Pi.
 USER ade-worker

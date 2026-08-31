@@ -4,6 +4,8 @@ import { dirname, isAbsolute } from "node:path";
 export interface V0WorkerRuntimeConfig {
   projectRoot: string;
   codexExecutable: string;
+  adeExecutable: string;
+  adeProfile: "chill" | "normal" | "expert";
   codexEnvironment: Readonly<Record<string, string>>;
   gitEnvironment: Readonly<Record<string, string>>;
   codexAppServerUrl: string | null;
@@ -45,6 +47,8 @@ export async function loadV0WorkerRuntime(
   return {
     projectRoot,
     codexExecutable: env.CODEX_EXECUTABLE?.trim() || "codex",
+    adeExecutable: env.ADE_EXECUTABLE?.trim() || "ade",
+    adeProfile: adeProfile(env.V0_ADE_PROFILE),
     codexEnvironment,
     gitEnvironment: {
       ...childBase,
@@ -59,6 +63,12 @@ export async function loadV0WorkerRuntime(
     dashboardUrl,
     github: { appId, installationId, privateKey },
   };
+}
+
+function adeProfile(value: string | undefined): "chill" | "normal" | "expert" {
+  const profile = value?.trim() || "normal";
+  if (profile === "chill" || profile === "normal" || profile === "expert") return profile;
+  throw new Error("V0_ADE_PROFILE must be chill, normal, or expert.");
 }
 
 function optionalWebSocketUrl(value: string | undefined): string | null {

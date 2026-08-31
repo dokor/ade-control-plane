@@ -106,9 +106,11 @@ services:
       DATABASE_URL_FILE: /run/secrets/database_url
       V0_PROJECT_ROOT: /srv/ade-projects
       CODEX_EXECUTABLE: ${CODEX_EXECUTABLE:-codex}
+      ADE_EXECUTABLE: ${ADE_EXECUTABLE:-ade}
+      V0_ADE_PROFILE: ${V0_ADE_PROFILE:-normal}
       CODEX_API_KEY_FILE: /run/secrets/codex_api_key
       CODEX_HOME: /home/ade-worker/.codex
-      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-}
+      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
       CODEX_CREDENTIAL_REF: ${CODEX_CREDENTIAL_REF:-codex-account-main}
       V0_GIT_HOME: /home/ade-git
       V0_TASK_TIMEOUT_SECONDS: ${V0_TASK_TIMEOUT_SECONDS:-3600}
@@ -130,6 +132,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      codex-app-server:
+        condition: service_healthy
     networks:
       - control
       # Outbound-only Docker bridge access is required for Codex and GitHub.
@@ -141,6 +145,38 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  # The App Server reuses the saved ChatGPT Codex login from codex_home and
+  # exposes quota only inside the private egress Docker network. Its WebSocket
+  # transport is never published or routed through Traefik.
+  codex-app-server:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: worker-runtime
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid,nodev
+    command: ["codex", "app-server", "--listen", "ws://0.0.0.0:4500"]
+    environment:
+      HOME: /home/ade-worker
+      CODEX_HOME: /home/ade-worker/.codex
+    volumes:
+      - codex_home:/home/ade-worker/.codex
+    networks:
+      - egress
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4500/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
       start_period: 20s
     security_opt:
       - no-new-privileges:true
