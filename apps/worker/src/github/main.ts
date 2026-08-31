@@ -33,6 +33,8 @@ async function main(): Promise<void> {
       dispatcher: new GithubWorkCodexExecutor({
         github, commands, projectRoot: config.projectRoot,
         codexExecutable: config.codexExecutable, codexEnvironment: config.codexEnvironment,
+        adeExecutable: config.adeExecutable, adeRuntimeVersion: config.adeRuntimeVersion,
+        adeContextProfile: config.adeProfile,
         gitEnvironment: config.gitEnvironment,
         agentExecutor: config.agentProvider === "claude-code"
           ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })

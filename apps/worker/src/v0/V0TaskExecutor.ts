@@ -10,6 +10,7 @@ import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, t
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
+import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.js";
 
 interface V0Persistence {
@@ -28,6 +29,7 @@ export interface V0TaskExecutorOptions {
   projectRoot: string;
   codexExecutable?: string;
   agentExecutor?: AgentExecutor;
+  deliveryRuntime?: AdeDeliveryRuntime;
   adeExecutable?: string;
   adeProfile?: AdeProfile;
   adeRuntimeVersion?: string;
@@ -45,9 +47,8 @@ type AbortReason = "cancel" | "timeout" | "shutdown" | null;
 export class V0TaskExecutor {
   private readonly codexExecutable: string;
   private readonly agentExecutor: AgentExecutor;
-  private readonly adeExecutable: string;
+  private readonly deliveryRuntime: AdeDeliveryRuntime;
   private readonly adeProfile: AdeProfile;
-  private readonly adeRuntimeVersion: string;
   private readonly timeoutMs: number;
   private readonly cancelPollMs: number;
   private readonly now: () => Date;
@@ -59,9 +60,13 @@ export class V0TaskExecutor {
       executable: this.codexExecutable,
       environment: options.codexEnvironment ?? {},
     });
-    this.adeExecutable = options.adeExecutable ?? "ade";
+    this.deliveryRuntime = options.deliveryRuntime ?? new AdeDeliveryRuntime({
+      commands: options.commands,
+      ...(options.adeExecutable ? { executable: options.adeExecutable } : {}),
+      ...(options.adeRuntimeVersion ? { expectedVersion: options.adeRuntimeVersion } : {}),
+      ...(options.gitEnvironment ? { environment: options.gitEnvironment } : {}),
+    });
     this.adeProfile = options.adeProfile ?? "normal";
-    this.adeRuntimeVersion = options.adeRuntimeVersion ?? "unknown";
     this.timeoutMs = options.timeoutMs ?? 60 * 60 * 1_000;
     this.cancelPollMs = options.cancelPollMs ?? 1_000;
     this.now = options.now ?? (() => new Date());
@@ -85,6 +90,7 @@ export class V0TaskExecutor {
     let branchName: string | null = null;
     let headSha: string | null = null;
     let usage: AgentUsageMetrics | undefined;
+    let reviewResult: AdeDeliveryReviewResult | undefined;
     const startedAt = task.startedAt ?? this.now().toISOString();
     let checkingCancellation = false;
     const abort = (reason: Exclude<AbortReason, null>): void => {
@@ -148,10 +154,23 @@ export class V0TaskExecutor {
       });
       await this.assertNotCancelled(task.id);
 
-      await this.prepareAdeContext(task.id, checkout.root, controller.signal);
+      const work = {
+        project,
+        source: task.source.type,
+        prompt: task.prompt,
+        ...(task.source.type === "github-issue" ? { issueNumber: task.source.issueNumber } : {}),
+        ...(issue?.title ? { issueTitle: issue.title } : {}),
+      } as const;
+      const prepared = await this.deliveryRuntime.prepare({
+        cwd: checkout.root,
+        work,
+        contextProfile: this.adeProfile,
+        signal: controller.signal,
+        onOutput: (output) => this.logCommandOutput(task.id, output),
+      });
       await this.assertCheckoutStillClean(checkout.root);
 
-      await this.log(task.id, `ADE runtime ${this.adeRuntimeVersion}; provider ${this.agentExecutor.provider}; delivery source ${task.source.type}.`);
+      await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; provider ${this.agentExecutor.provider}; delivery source ${task.source.type}.`);
       if (issue) await this.log(task.id, `GitHub issue #${issue.number}: ${issue.title}`);
       await this.log(task.id, "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
       const agentResult = await this.agentExecutor.execute({
@@ -175,21 +194,15 @@ export class V0TaskExecutor {
         throw new V0ExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");
       }
 
-      await this.mustRun(task.id, "git add", {
-        executable: "git",
-        args: ["add", "--all"],
+      reviewResult = await this.deliveryRuntime.runPostAgentGates({
         cwd: checkout.root,
-        env: this.gitEnvironment,
-        signal: controller.signal,
-      });
-      await this.mustRun(task.id, "ADE staged review", {
-        executable: this.adeExecutable,
-        args: ["review", "--staged", "--json"],
-        cwd: checkout.root,
-        env: this.gitEnvironment,
+        work,
+        agentExecutor: this.agentExecutor,
+        prepared,
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });
+      await this.log(task.id, `ADE deterministic review and profiles passed: ${reviewResult.provenance.selectedProfiles.join(", ")}.`);
       await this.assertNotCancelled(task.id);
       await this.mustRun(task.id, "git commit", {
         executable: "git",
@@ -222,7 +235,7 @@ export class V0TaskExecutor {
 
       await this.log(task.id, "Creating GitHub pull request.");
       const repository = { id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`, owner: project.repositoryOwner, name: project.repositoryName };
-      const pullRequest = await this.createOrReconcilePullRequest(repository, branchName, checkout.baseBranch, task, issue);
+      const pullRequest = await this.createOrReconcilePullRequest(repository, branchName, checkout.baseBranch, task, issue, reviewResult);
       await this.log(task.id, "Pull request created; recording terminal status.");
       await this.options.persistence.v0Tasks.complete({
         taskId: task.id,
@@ -232,6 +245,7 @@ export class V0TaskExecutor {
         headSha,
         pullRequestNumber: pullRequest.number,
         pullRequestUrl: pullRequest.url,
+        adeProvenance: AdeDeliveryRuntime.provenanceSummary(reviewResult.provenance),
       });
     } catch (error) {
       const latest = await this.options.persistence.v0Tasks.getById(task.id);
@@ -322,6 +336,7 @@ export class V0TaskExecutor {
     baseBranch: string,
     task: V0TaskRecord,
     issue: GithubIssueSummary | null,
+    reviewResult?: AdeDeliveryReviewResult,
   ): Promise<GithubPullRequest> {
     try {
       const existing = await this.options.github.findPullRequest?.(repository, branchName, baseBranch);
@@ -331,7 +346,7 @@ export class V0TaskExecutor {
       }
       return await this.options.github.createPullRequest(repository, {
         title: `ADE task ${task.id.slice(0, 8)}`,
-        body: buildPullRequestBody(task, this.adeProfile, issue),
+        body: buildPullRequestBody(task, this.adeProfile, issue, reviewResult),
         head: branchName,
         base: baseBranch,
       });
@@ -373,29 +388,6 @@ export class V0TaskExecutor {
     if ((await this.options.persistence.v0Tasks.getById(taskId))?.cancelRequested) {
       throw new V0CancelledError();
     }
-  }
-
-  private async prepareAdeContext(
-    taskId: string,
-    cwd: string,
-    signal: AbortSignal,
-  ): Promise<void> {
-    await this.mustRun(taskId, "ADE configuration validation", {
-      executable: this.adeExecutable,
-      args: ["config", "validate"],
-      cwd,
-      env: this.gitEnvironment,
-      signal,
-      onOutput: (output) => this.logCommandOutput(taskId, output),
-    });
-    await this.mustRun(taskId, `ADE ${this.adeProfile} context pack`, {
-      executable: this.adeExecutable,
-      args: ["context", "pack", this.adeProfile],
-      cwd,
-      env: this.gitEnvironment,
-      signal,
-      onOutput: (output) => this.logCommandOutput(taskId, output),
-    });
   }
 
   private async assertCheckoutStillClean(cwd: string): Promise<void> {
@@ -487,6 +479,9 @@ function classifyFailure(
   if (abortReason === "shutdown") {
     return { code: "WORKER_SHUTDOWN", summary: "Worker stopped during task execution." };
   }
+  if (error instanceof AdeDeliveryError) {
+    return { code: error.code, summary: error.safeSummary };
+  }
   if (error instanceof V0ExecutionError) {
     return { code: error.code, summary: error.safeSummary };
   }
@@ -510,11 +505,18 @@ function buildCodexPrompt(prompt: string, adeProfile: AdeProfile, issue: GithubI
   ].join("\n");
 }
 
-function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile, issue: GithubIssueSummary | null): string {
+function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile, issue: GithubIssueSummary | null, reviewResult?: AdeDeliveryReviewResult): string {
+  const provenance = reviewResult ? AdeDeliveryRuntime.provenanceSummary(reviewResult.provenance) : {};
   return [
     `Automated implementation for ADE Control Plane task \`${task.id}\`.`,
     ...(issue ? [`Source issue: #${issue.number} — ${issue.url}`] : []),
-    `ADE deterministic staged review passed (context profile: \`${adeProfile}\`).`,
+    "",
+    "## ADE runtime",
+    "ADE deterministic staged review passed.",
+    `- Runtime: \`${String(provenance.adeRuntimeVersion ?? "unknown")}\``,
+    `- Context: \`${String(provenance.adeContextProfile ?? adeProfile)}\` (${String(provenance.adeContextStatus ?? "unknown")})`,
+    `- Deterministic review: ${String(provenance.adeDeterministicReview ?? "passed")}`,
+    `- Profile reviews: ${String(provenance.adeSelectedProfiles ?? "none")} (${String(provenance.adeProfileReview ?? "passed")})`,
     "",
     "@dokor",
     "",

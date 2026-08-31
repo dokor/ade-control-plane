@@ -153,6 +153,15 @@ export {
   buildGithubWorkPrompt,
   type GithubWorkCodexExecutorOptions,
 } from "./GithubWorkCodexExecutor.js";
+export {
+  AdeDeliveryError,
+  AdeDeliveryRuntime,
+  selectProfiles,
+  type AdeDeliveryProvenance,
+  type AdeDeliveryReviewResult,
+  type AdeDeliveryWorkContext,
+  type AdeProfileFinding,
+} from "./AdeDeliveryRuntime.js";
 export { GithubWorkNotifier, type GithubWorkNotifierOptions } from "./GithubWorkNotifier.js";
 export {
   UnixRunnerControlPlaneClient,
