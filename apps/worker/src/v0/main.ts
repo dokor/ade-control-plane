@@ -4,6 +4,7 @@ import {
 } from "@ade-control-plane/database";
 import {
   GithubAppTokenProvider,
+  HttpGithubIssueAdapter,
   HttpGithubClient,
 } from "@ade-control-plane/github";
 import {
@@ -40,9 +41,14 @@ async function main(): Promise<void> {
       tokens,
       installationId: config.github.installationId,
     });
+    const issueReader = new HttpGithubIssueAdapter({
+      tokens,
+      installationId: config.github.installationId,
+    });
     const executor = new V0TaskExecutor({
       persistence: store,
       github,
+      issueReader,
       commands: new NodeCommandRunner(),
       projectRoot: config.projectRoot,
       codexExecutable: config.codexExecutable,

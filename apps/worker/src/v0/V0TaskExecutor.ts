@@ -4,7 +4,7 @@ import type {
   V0TaskRepository,
   V0TaskRecord,
 } from "@ade-control-plane/database";
-import type { GithubPullRequestClient } from "@ade-control-plane/github";
+import type { GithubIssueReader, GithubPullRequestClient, GithubRepositoryRef, GithubIssueSummary } from "@ade-control-plane/github";
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.js";
@@ -17,6 +17,7 @@ interface V0Persistence {
 export interface V0TaskExecutorOptions {
   persistence: V0Persistence;
   github: GithubPullRequestClient;
+  issueReader?: GithubIssueReader;
   commands: CommandRunner;
   projectRoot: string;
   codexExecutable?: string;
@@ -97,6 +98,7 @@ export class V0TaskExecutor {
     try {
       const project = await this.requireProject(task.projectId);
       const checkout = await resolveProjectCheckout(this.options.projectRoot, project);
+      const issue = await this.resolveIssue(task, project);
       branchName = `ade/${task.id}`;
       await this.log(task.id, "Preparing allow-listed checkout.");
       await this.assertNotCancelled(task.id);
@@ -133,12 +135,14 @@ export class V0TaskExecutor {
       await this.prepareAdeContext(task.id, checkout.root, controller.signal);
       await this.assertCheckoutStillClean(checkout.root);
 
-      await this.log(task.id, `ADE runtime ${this.adeRuntimeVersion}; starting Codex in workspace-write sandbox.`);
+      await this.log(task.id, `ADE runtime ${this.adeRuntimeVersion}; delivery source ${task.source.type}.`);
+      if (issue) await this.log(task.id, `GitHub issue #${issue.number}: ${issue.title}`);
+      await this.log(task.id, "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
       await this.mustRun(task.id, "Codex", {
         executable: this.codexExecutable,
         args: ["exec", "--sandbox", "workspace-write", "--ephemeral", "--json", "-"],
         cwd: checkout.root,
-        stdin: buildCodexPrompt(task.prompt, this.adeProfile),
+        stdin: buildCodexPrompt(task.prompt, this.adeProfile, issue),
         env: this.codexEnvironment,
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
@@ -206,7 +210,7 @@ export class V0TaskExecutor {
         },
         {
           title: `ADE task ${task.id.slice(0, 8)}`,
-          body: buildPullRequestBody(task, this.adeProfile),
+          body: buildPullRequestBody(task, this.adeProfile, issue),
           head: branchName,
           base: checkout.baseBranch,
         },
@@ -247,6 +251,26 @@ export class V0TaskExecutor {
     const project = await this.options.persistence.projects.getById(projectId);
     if (!project) throw new V0ExecutionError("PROJECT_NOT_FOUND", "Registered project was not found.");
     return project;
+  }
+
+  private async resolveIssue(task: V0TaskRecord, project: ProjectRecord): Promise<GithubIssueSummary | null> {
+    if (task.source.type !== "github-issue") return null;
+    const repository: GithubRepositoryRef = {
+      id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`,
+      owner: project.repositoryOwner,
+      name: project.repositoryName,
+    };
+    const issue = await this.options.issueReader?.getIssue(repository, task.source.issueNumber);
+    if (this.options.issueReader && !issue) {
+      throw new V0ExecutionError("GITHUB_ISSUE_NOT_FOUND", "The selected GitHub issue is no longer available.");
+    }
+    return issue ?? {
+      number: task.source.issueNumber,
+      title: task.prompt,
+      state: "open",
+      url: `https://github.com/${project.repositoryOwner}/${project.repositoryName}/issues/${task.source.issueNumber}`,
+      updatedAt: this.now().toISOString(),
+    };
   }
 
   private async assertNotCancelled(taskId: string): Promise<void> {
@@ -373,21 +397,27 @@ function classifyFailure(
   return { code: "EXECUTION_FAILED", summary: "Task execution failed." };
 }
 
-function buildCodexPrompt(prompt: string, adeProfile: AdeProfile): string {
+function buildCodexPrompt(prompt: string, adeProfile: AdeProfile, issue: GithubIssueSummary | null): string {
   return [
     "Implement the following task in this repository.",
     "Keep the change scoped, follow AGENTS.md, and run the relevant checks.",
     `ADE has prepared the ${adeProfile} context profile for this task. Use the repository's ADE configuration and context pack as delivery guidance.`,
     "Do not commit, push, create a pull request, or expose credentials; the worker owns those steps.",
+    ...(issue ? [
+      "The selected GitHub issue is the authoritative work reference. Read only the issue context needed to implement it.",
+      `GitHub issue #${issue.number}: ${issue.title}`,
+      `Issue URL: ${issue.url}`,
+    ] : []),
     "",
     "Task:",
     prompt,
   ].join("\n");
 }
 
-function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile): string {
+function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile, issue: GithubIssueSummary | null): string {
   return [
     `Automated implementation for ADE Control Plane task \`${task.id}\`.`,
+    ...(issue ? [`Source issue: #${issue.number} — ${issue.url}`] : []),
     `ADE deterministic staged review passed (context profile: \`${adeProfile}\`).`,
     "",
     "@dokor",
