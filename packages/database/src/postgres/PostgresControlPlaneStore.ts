@@ -259,6 +259,7 @@ function mapV0Task(row: TimestampRow): V0TaskRecord {
     branchName: row.branch_name === null ? null : String(row.branch_name),
     headSha: row.head_sha === null || row.head_sha === undefined ? null : String(row.head_sha),
     prRetryRequested: Boolean(row.pr_retry_requested),
+    adeProvenance: row.ade_provenance === null || row.ade_provenance === undefined ? null : toJsonObject(row.ade_provenance),
     pullRequestNumber:
       row.pull_request_number === null ? null : Number(row.pull_request_number),
     pullRequestUrl: row.pull_request_url === null ? null : String(row.pull_request_url),
@@ -2021,7 +2022,7 @@ class PostgresV0TaskRepository implements V0TaskRepository {
       `UPDATE v0_tasks SET status = $2, finished_at = $3, updated_at = $3,
        branch_name = COALESCE($4, branch_name), head_sha = COALESCE($5, head_sha),
        pull_request_number = COALESCE($6, pull_request_number), pull_request_url = COALESCE($7, pull_request_url),
-       error_code = $8, error_summary = $9, pr_retry_requested = false
+       error_code = $8, error_summary = $9, ade_provenance = COALESCE($10::jsonb, ade_provenance), pr_retry_requested = false
        WHERE id = $1 AND (status = 'RUNNING' OR (status = 'FAILED' AND pr_retry_requested = true)) RETURNING *`,
       [
         input.taskId,
@@ -2033,6 +2034,7 @@ class PostgresV0TaskRepository implements V0TaskRepository {
         input.pullRequestUrl ?? null,
         input.errorCode ?? null,
         truncateUtf8(sanitizeV0Log(input.errorSummary ?? ""), 4096) || null,
+        input.adeProvenance ? JSON.stringify(input.adeProvenance) : null,
       ],
     );
     const updated = result.rows[0];

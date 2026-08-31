@@ -10,6 +10,17 @@ must first run the ADE compatibility checks and representative task smoke tests,
 then change `ADE_VERSION` in a dedicated PR. The image must never install the
 floating `latest` tag.
 
+Every mutating delivery path uses the worker's shared `AdeDeliveryRuntime`.
+It validates the installed runtime and project configuration, prepares one
+targeted context pack, runs the deterministic staged review, then selects and
+executes the applicable specialist profile reviews through the configured
+agent provider. A blocking profile finding gets at most the configured bounded
+correction attempts; it can never publish a commit, push or PR by itself.
+
+Only safe provenance is retained per execution: runtime/config/context status,
+rule-pack and selected-profile identifiers, review status and attempt count.
+Raw provider output and chain-of-thought are not persisted.
+
 The supported 0.6.1 contract used by Control Plane is:
 
 - Node.js 22 or newer;

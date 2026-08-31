@@ -331,6 +331,7 @@ export interface V0TaskTransitionInput {
   headSha?: string | null;
   pullRequestNumber?: number | null;
   pullRequestUrl?: string | null;
+  adeProvenance?: JsonObject | null;
   errorCode?: string | null;
   errorSummary?: string | null;
 }

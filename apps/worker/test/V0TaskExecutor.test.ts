@@ -55,6 +55,7 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
     assert.deepEqual(
       commands.calls.filter(({ executable }) => executable === "ade").map(({ args }) => args),
       [
+        ["--version"],
         ["config", "validate"],
         ["context", "pack", "normal"],
         ["review", "--staged", "--json"],
@@ -82,7 +83,7 @@ test("blocks the commit, push, and PR when ADE staged review finds an error", as
     }).execute(context.task);
 
     assert.equal(context.task.status, "FAILED");
-    assert.equal(context.task.errorCode, "ADE_STAGED_REVIEW_FAILED");
+    assert.equal(context.task.errorCode, "ADE_DETERMINISTIC_REVIEW_FAILED");
     assert.equal(github.createdPullRequests.length, 0);
     assert.equal(commands.calls.some(({ args }) => args.includes("commit")), false);
     assert.equal(commands.calls.some(({ args }) => args.includes("push")), false);
