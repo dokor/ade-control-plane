@@ -46,6 +46,8 @@ async function main(): Promise<void> {
       commands: new NodeCommandRunner(),
       projectRoot: config.projectRoot,
       codexExecutable: config.codexExecutable,
+      adeExecutable: config.adeExecutable,
+      adeProfile: config.adeProfile,
       codexEnvironment: config.codexEnvironment,
       gitEnvironment: config.gitEnvironment,
       timeoutMs: config.taskTimeoutMs,

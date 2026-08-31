@@ -33,8 +33,35 @@ test("passes only dedicated credentials to Codex", async () => {
     assert.equal(config.codexEnvironment.DATABASE_URL, undefined);
     assert.equal(config.codexEnvironment.GITHUB_APP_PRIVATE_KEY_FILE, undefined);
     assert.equal(config.gitEnvironment.CODEX_API_KEY, undefined);
+    assert.equal(config.adeExecutable, "ade");
+    assert.equal(config.adeProfile, "normal");
     assert.equal(config.codexEnvironment.HOME, dirname(codexHome));
     assert.equal(config.gitEnvironment.HOME, gitHome);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("accepts only ADE context profiles", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ade-v0-runtime-profile-"));
+  try {
+    const githubKey = join(directory, "github-key");
+    await writeFile(githubKey, "github-private-key", "utf8");
+    const environment = {
+      V0_PROJECT_ROOT: directory,
+      DASHBOARD_PUBLIC_URL: "https://ade.example.com",
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_INSTALLATION_ID: "2",
+      GITHUB_APP_PRIVATE_KEY_FILE: githubKey,
+      CODEX_HOME: join(directory, "codex"),
+      V0_GIT_HOME: join(directory, "git"),
+    };
+
+    assert.equal((await loadV0WorkerRuntime({ ...environment, V0_ADE_PROFILE: "expert" })).adeProfile, "expert");
+    await assert.rejects(
+      () => loadV0WorkerRuntime({ ...environment, V0_ADE_PROFILE: "agent" }),
+      /V0_ADE_PROFILE must be chill, normal, or expert/,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

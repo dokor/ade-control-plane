@@ -50,7 +50,62 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
     assert.doesNotMatch(codex.args.join(" "), /Implement the API/);
     assert.match(codex.stdin ?? "", /Implement the API/);
     assert.equal(codex.env?.DATABASE_URL, undefined);
+    assert.match(codex.stdin ?? "", /ADE has prepared the normal context profile/);
+    assert.deepEqual(
+      commands.calls.filter(({ executable }) => executable === "ade").map(({ args }) => args),
+      [
+        ["config", "validate"],
+        ["context", "pack", "normal"],
+        ["review", "--staged", "--json"],
+      ],
+    );
     assert.match(github.createdPullRequests[0]?.input.body ?? "", /@dokor/);
+    assert.match(github.createdPullRequests[0]?.input.body ?? "", /ADE deterministic staged review passed/);
+  } finally {
+    await context.close();
+  }
+});
+
+test("blocks the commit, push, and PR when ADE staged review finds an error", async () => {
+  const context = await setup();
+  try {
+    const commands = new SuccessfulCommands(context.task);
+    commands.adeReviewExitCode = 1;
+    const github = new DeterministicFakeGithubClient();
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github,
+      commands,
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "FAILED");
+    assert.equal(context.task.errorCode, "ADE_STAGED_REVIEW_FAILED");
+    assert.equal(github.createdPullRequests.length, 0);
+    assert.equal(commands.calls.some(({ args }) => args.includes("commit")), false);
+    assert.equal(commands.calls.some(({ args }) => args.includes("push")), false);
+  } finally {
+    await context.close();
+  }
+});
+
+test("refuses ADE artifacts that are not ignored before Codex starts", async () => {
+  const context = await setup();
+  try {
+    const commands = new SuccessfulCommands(context.task);
+    commands.adeArtifactsDirty = true;
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github: new DeterministicFakeGithubClient(),
+      commands,
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "FAILED");
+    assert.equal(context.task.errorCode, "ADE_ARTIFACTS_UNIGNORED");
+    assert.equal(commands.calls.some(({ executable }) => executable === "codex"), false);
   } finally {
     await context.close();
   }
@@ -109,6 +164,8 @@ test("refuses a checkout whose origin does not match the registered project", as
 class SuccessfulCommands implements CommandRunner {
   public readonly calls: CommandInput[] = [];
   public remote = "git@github.com:dokor/alpha.git";
+  public adeReviewExitCode = 0;
+  public adeArtifactsDirty = false;
   private statusCalls = 0;
 
   public constructor(
@@ -120,8 +177,12 @@ class SuccessfulCommands implements CommandRunner {
     this.calls.push(input);
     if (input.args.includes("get-url")) return result(this.remote);
     if (input.args.includes("--porcelain=v1")) {
-      return result(this.statusCalls++ === 0 ? "" : " M src/index.ts");
+      const statusCall = this.statusCalls++;
+      if (statusCall === 0) return result("");
+      if (statusCall === 1) return result(this.adeArtifactsDirty ? "?? outputs/context/context-pack.md" : "");
+      return result(" M src/index.ts");
     }
+    if (input.executable === "ade" && input.args[0] === "review") return result("", this.adeReviewExitCode);
     if (input.executable === "codex") {
       await input.onOutput?.({ stream: "stdout", message: "implementation completed" });
       if (this.cancelAfterCodex) this.task.cancelRequested = true;
@@ -202,6 +263,6 @@ async function setup() {
   };
 }
 
-function result(stdout: string): CommandResult {
-  return { exitCode: 0, signal: null, stdout, stderr: "" };
+function result(stdout: string, exitCode = 0): CommandResult {
+  return { exitCode, signal: null, stdout, stderr: "" };
 }

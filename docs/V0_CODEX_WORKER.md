@@ -31,6 +31,25 @@ Start the worker with `pnpm --filter @ade-control-plane/worker start:v0`. It per
 
 Codex receives only an allow-listed child environment and its dedicated credential. Database and GitHub App secrets are not inherited. Git uses a separate environment and host credential mechanism such as a dedicated SSH key or credential helper.
 
+## ADE delivery guardrails
+
+The production worker includes the pinned `@alelouet/ai-delivery-engine` CLI.
+Before Codex starts, it validates the project's `ade.config` and creates the
+configured context pack using `V0_ADE_PROFILE` (`chill`, `normal`, or
+`expert`; default `normal`). ADE output directories must be ignored by Git: a
+generated, unignored artifact stops the task before Codex can change source.
+
+After Codex changes are staged, `ade review --staged --json` must pass before
+the worker can commit, push, or create a PR. The resulting PR records the
+context profile and the successful deterministic review; human review and
+merge stay explicit.
+
+The `codex-app-server` Compose service reads the same saved Codex login only
+on the private Docker network. Its normalized rate-limit observation is a
+fail-closed scheduling gate: unavailable or stale quota starts no task.
+Codex currently documents its WebSocket transport as experimental, so this
+endpoint is deliberately neither published nor exposed through Traefik.
+
 ## Cancellation and recovery
 
 While Codex runs, the worker polls durable cancellation intent. Cancel or timeout sends `SIGTERM` to the execution process group and escalates to `SIGKILL` after five seconds. No push or PR is attempted after cancellation is observed.
