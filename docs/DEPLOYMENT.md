@@ -58,6 +58,10 @@ The worker has a separate, non-published outbound bridge network for Codex,
 GitHub and Git-over-SSH. PostgreSQL remains on the internal control network
 only; the worker does not expose an inbound host port.
 
+PostgreSQL uses the upstream image's short root bootstrap to initialize its
+owned volume and switch to the `postgres` account. The Dashboard and worker
+remain non-root, read-only and drop all capabilities.
+
 The official Codex installer in the worker image selects the native image
 architecture. The worker receives the Codex API key only through a Compose
 secret and passes it only to the Codex child process; the Git process receives

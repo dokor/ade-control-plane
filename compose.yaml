@@ -22,8 +22,9 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
-    cap_drop:
-      - ALL
+    # The official image starts as root long enough to initialize the volume
+    # and switch to its postgres account. Dropping all capabilities prevents
+    # that documented bootstrap sequence; Dashboard and worker stay cap-less.
 
   dashboard:
     build:
