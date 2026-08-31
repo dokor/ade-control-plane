@@ -213,6 +213,7 @@ async function setup() {
   const task: V0TaskRecord = {
     id: "22222222-2222-4222-8222-222222222222",
     projectId: project.id,
+    source: { type: "prompt", prompt: "Implement the API" },
     prompt: "Implement the API",
     status: "RUNNING",
     cancelRequested: false,

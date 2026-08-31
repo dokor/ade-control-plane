@@ -3,17 +3,19 @@ import { readFile } from "node:fs/promises";
 import {
   GithubAppTokenProvider,
   HttpGithubClient,
+  HttpGithubIssueAdapter,
   HttpGithubWorkAdapter,
   parseActorIdList,
   type GithubAuthorizationPolicy,
   type GithubClient,
+  type GithubIssueReader,
   type GithubWorkReader,
 } from "@ade-control-plane/github";
 
 import { loadDashboardConfig } from "./config.js";
 
 export interface GithubRuntime {
-  webhookSecret: string;
+  webhookSecret: string | null;
   policy: GithubAuthorizationPolicy;
   dashboardUrl: string;
   quotaProvider: string;
@@ -22,6 +24,7 @@ export interface GithubRuntime {
   client: GithubClient | undefined;
   /** Repository-scoped reader used only after a verified GitHub delivery. */
   workReader: GithubWorkReader | undefined;
+  issueReader: GithubIssueReader | undefined;
 }
 
 let cached: Promise<GithubRuntime | null> | null = null;
@@ -29,8 +32,8 @@ let cached: Promise<GithubRuntime | null> | null = null;
 /**
  * Builds the GitHub integration from runtime configuration.
  *
- * Returns `null` when no webhook secret is configured, so an unconfigured
- * deployment answers 503 rather than accepting unverifiable deliveries.
+ * Returns `null` when neither webhook verification nor GitHub App access is
+ * configured. The authenticated issue API only needs the latter.
  */
 export function loadGithubRuntime(
   env: NodeJS.ProcessEnv = process.env,
@@ -41,9 +44,11 @@ export function loadGithubRuntime(
 
 async function build(env: NodeJS.ProcessEnv): Promise<GithubRuntime | null> {
   const webhookSecret = await readSecret(env, "GITHUB_WEBHOOK_SECRET");
-  if (!webhookSecret) return null;
-
   const config = await loadDashboardConfig(env);
+  const client = await buildClient(env);
+  const workReader = await buildWorkReader(env);
+  const issueReader = await buildIssueReader(env);
+  if (!webhookSecret && !client && !workReader && !issueReader) return null;
   const policy: GithubAuthorizationPolicy = {
     allowedActorIds: parseActorIdList(env.GITHUB_ALLOWED_ACTOR_IDS),
     allowedInstallationIds: parseActorIdList(env.GITHUB_ALLOWED_INSTALLATION_IDS),
@@ -55,9 +60,21 @@ async function build(env: NodeJS.ProcessEnv): Promise<GithubRuntime | null> {
     dashboardUrl: config.publicOrigin,
     quotaProvider: config.quotaProvider,
     quotaAccountRef: config.quotaAccountRef,
-    client: await buildClient(env),
-    workReader: await buildWorkReader(env),
+    client,
+    workReader,
+    issueReader,
   };
+}
+
+async function buildIssueReader(env: NodeJS.ProcessEnv): Promise<GithubIssueReader | undefined> {
+  const appId = env.GITHUB_APP_ID?.trim();
+  const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim();
+  const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
+  if (!appId || !installationId || !privateKey) return undefined;
+  return new HttpGithubIssueAdapter({
+    tokens: new GithubAppTokenProvider({ credentials: { appId, privateKey } }),
+    installationId,
+  });
 }
 
 async function buildWorkReader(env: NodeJS.ProcessEnv): Promise<GithubWorkReader | undefined> {

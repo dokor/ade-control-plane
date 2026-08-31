@@ -65,7 +65,9 @@ export default async function TasksPage() {
                 {dashboard.activeTask.status}
               </span>
               <h3>{dashboard.activeTask.projectName}</h3>
-              <p>{dashboard.activeTask.prompt}</p>
+              <p>{dashboard.activeTask.source.type === "github-issue"
+                ? `GitHub issue #${dashboard.activeTask.source.issueNumber}`
+                : dashboard.activeTask.prompt}</p>
               <dl className="task-meta">
                 <div><dt>Created</dt><dd>{formatInstant(dashboard.activeTask.createdAt)}</dd></div>
                 <div><dt>Repository</dt><dd>{dashboard.activeTask.repository}</dd></div>
@@ -111,7 +113,9 @@ export default async function TasksPage() {
                   </div>
                   <div className="task-history-main">
                     <h3><Link href={`/tasks/${task.id}`}>{task.projectName}</Link></h3>
-                    <p>{task.prompt}</p>
+                    <p>{task.source.type === "github-issue"
+                      ? `GitHub issue #${task.source.issueNumber}`
+                      : task.prompt}</p>
                     <small>{task.repository} / {task.id.slice(0, 8)}</small>
                   </div>
                   <div className="task-history-action">

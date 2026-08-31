@@ -70,6 +70,7 @@ import type {
   SchedulerMode,
   V0TaskLogRecord,
   V0TaskRecord,
+  V0TaskSource,
 } from "../domain.js";
 import {
   ActiveTaskConflictError,
@@ -203,9 +204,15 @@ function mapExecution(row: TimestampRow): ExecutionRecord {
 }
 
 function mapV0Task(row: TimestampRow): V0TaskRecord {
+  const source: V0TaskSource = row.source_type === "github-issue" &&
+    Number.isInteger(Number(row.github_issue_number)) &&
+    Number(row.github_issue_number) > 0
+    ? { type: "github-issue", issueNumber: Number(row.github_issue_number) }
+    : { type: "prompt", prompt: String(row.prompt) };
   return {
     id: String(row.id),
     projectId: String(row.project_id),
+    source,
     prompt: String(row.prompt),
     status: row.status as V0TaskRecord["status"],
     cancelRequested: Boolean(row.cancel_requested),
@@ -1822,11 +1829,24 @@ class PostgresV0TaskRepository implements V0TaskRepository {
     if (!prompt || prompt.length > 20_000) {
       throw new Error("Task prompt must contain between 1 and 20000 characters.");
     }
+    const source = input.source ?? { type: "prompt", prompt };
+    if (source.type === "github-issue" &&
+      (!Number.isInteger(source.issueNumber) || source.issueNumber < 1)) {
+      throw new Error("GitHub issue number must be a positive integer.");
+    }
     try {
       const result = await this.pool.query<TimestampRow>(
-        `INSERT INTO v0_tasks (id, project_id, prompt, status, created_at, updated_at)
-         VALUES ($1, $2, $3, 'PENDING', $4, $4) RETURNING *`,
-        [input.id ?? randomUUID(), input.projectId, prompt, input.createdAt],
+        `INSERT INTO v0_tasks
+           (id, project_id, prompt, source_type, github_issue_number, status, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $6) RETURNING *`,
+        [
+          input.id ?? randomUUID(),
+          input.projectId,
+          prompt,
+          source.type,
+          source.type === "github-issue" ? source.issueNumber : null,
+          input.createdAt,
+        ],
       );
       return mapV0Task(expectOne(result.rows, "Failed to create V0 task."));
     } catch (error) {

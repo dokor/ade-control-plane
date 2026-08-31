@@ -71,6 +71,14 @@ export {
   type HttpGithubWorkAdapterOptions,
 } from "./workAdapter.js";
 export {
+  GithubIssueAdapterError,
+  HttpGithubIssueAdapter,
+  normalizeGithubIssueSummary,
+  type GithubIssueReader,
+  type GithubIssueSummary,
+  type HttpGithubIssueAdapterOptions,
+} from "./issues.js";
+export {
   commentMarker,
   isControlPlaneComment,
   renderAcknowledgement,

@@ -20,6 +20,7 @@ function task(overrides: Partial<V0TaskRecord> = {}): V0TaskRecord {
   return {
     id: TASK_ID,
     projectId: project().id,
+    source: { type: "prompt", prompt: "Update the release notes." },
     prompt: "Update the release notes.",
     status: "SUCCESS",
     cancelRequested: false,

@@ -297,11 +297,15 @@ export type V0TaskStatus =
   | "SUCCESS"
   | "FAILED"
   | "CANCELLED";
+export type V0TaskSource =
+  | { type: "prompt"; prompt: string }
+  | { type: "github-issue"; issueNumber: number };
 export type V0TaskLogStream = "system" | "stdout" | "stderr";
 
 export interface V0TaskRecord {
   id: string;
   projectId: string;
+  source: V0TaskSource;
   prompt: string;
   status: V0TaskStatus;
   cancelRequested: boolean;

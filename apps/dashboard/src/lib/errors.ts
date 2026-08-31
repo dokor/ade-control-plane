@@ -13,6 +13,7 @@ export type ControlErrorCode =
   | "RETRY_NOT_SAFE"
   | "NOT_FOUND"
   | "CONFLICT"
+  | "UNAVAILABLE"
   | "INTERNAL";
 
 const HTTP_STATUS: Readonly<Record<ControlErrorCode, number>> = {
@@ -24,6 +25,7 @@ const HTTP_STATUS: Readonly<Record<ControlErrorCode, number>> = {
   RETRY_NOT_SAFE: 409,
   NOT_FOUND: 404,
   CONFLICT: 409,
+  UNAVAILABLE: 503,
   INTERNAL: 500,
 };
 

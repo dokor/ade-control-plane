@@ -104,6 +104,7 @@ export function createMemoryPersistence(
         const task: V0TaskRecord = {
           id: input.id ?? randomUUID(),
           projectId: input.projectId,
+          source: input.source ?? { type: "prompt", prompt: input.prompt },
           prompt: input.prompt,
           status: "PENDING",
           cancelRequested: false,
