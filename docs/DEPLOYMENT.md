@@ -54,6 +54,10 @@ same style as the existing Argos applications. Do not publish PostgreSQL or
 the worker. The Dashboard login is still required even when the reverse proxy
 is on a private network.
 
+The worker has a separate, non-published outbound bridge network for Codex,
+GitHub and Git-over-SSH. PostgreSQL remains on the internal control network
+only; the worker does not expose an inbound host port.
+
 The official Codex installer in the worker image selects the native image
 architecture. The worker receives the Codex API key only through a Compose
 secret and passes it only to the Codex child process; the Git process receives

@@ -133,6 +133,9 @@ services:
         condition: service_healthy
     networks:
       - control
+      # Outbound-only Docker bridge access is required for Codex and GitHub.
+      # No worker port is published and PostgreSQL remains control-only.
+      - egress
     stop_grace_period: 30s
     healthcheck:
       test: ["CMD", "node", "-e", "process.exit(require('node:fs').existsSync('/proc/1/cmdline') ? 0 : 1)"]
@@ -171,3 +174,4 @@ networks:
   edge:
   proxy:
     external: true
+  egress:
