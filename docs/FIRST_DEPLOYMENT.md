@@ -75,9 +75,10 @@ Before adding the reverse-proxy route:
 5. Dashboard health/read endpoint works locally.
 6. PostgreSQL publishes no host port.
 7. Worker publishes no host port.
-8. No application container mounts `/var/run/docker.sock`.
-9. `docker inspect` confirms intended users/mounts/networks.
-10. Restarting containers preserves PostgreSQL state.
+8. Worker can reach the required Codex and GitHub HTTPS endpoints.
+9. No application container mounts `/var/run/docker.sock`.
+10. `docker inspect` confirms intended users/mounts/networks.
+11. Restarting containers preserves PostgreSQL state.
 
 ## Reverse proxy / Dashboard
 
