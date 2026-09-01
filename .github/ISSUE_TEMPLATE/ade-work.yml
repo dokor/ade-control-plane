@@ -1,0 +1,7 @@
+name: ADE work
+description: Create an issue that can be scheduled by ADE
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the desired change and its acceptance criteria.
