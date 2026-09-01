@@ -67,6 +67,7 @@ import type {
   JsonObject,
   JsonValue,
   ProjectControlState,
+  ProjectDeletionRequestRecord,
   ProjectRecord,
   ProjectSnapshotRecord,
   ProviderQuotaSnapshotRecord,
@@ -956,6 +957,32 @@ class PostgresProjectRepository implements ProjectRepository {
     }
 
     return mapProject(row);
+  }
+
+  public async requestDeletion(projectId: string, requestedAt: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `INSERT INTO project_deletion_requests (project_id, requested_at)
+       VALUES ($1, $2)
+       ON CONFLICT (project_id) DO NOTHING`,
+      [projectId, requestedAt],
+    );
+    await this.pool.query(
+      "UPDATE projects SET state = 'disabled', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
+      [projectId],
+    );
+    return result.rowCount === 1;
+  }
+
+  public async listDeletionRequests(): Promise<readonly ProjectDeletionRequestRecord[]> {
+    const result = await this.pool.query<{ project_id: string; requested_at: Date }>(
+      "SELECT project_id, requested_at FROM project_deletion_requests ORDER BY requested_at ASC",
+    );
+    return result.rows.map((row) => ({ projectId: row.project_id, requestedAt: row.requested_at.toISOString() }));
+  }
+
+  public async delete(projectId: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM projects WHERE id = $1", [projectId]);
+    return result.rowCount === 1;
   }
 }
 

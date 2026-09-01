@@ -396,3 +396,7 @@ depends on a connected browser.
 quota thresholds as a single durable row. It defaults to `paused`: privileged
 dispatch must be an explicit, audited human decision rather than a deployment
 side effect.
+
+# Project deletion
+
+The project detail page has a destructive **Delete project** action. The operator must type the exact project name. The Dashboard queues the operation; the worker removes the verified managed checkout and its worktrees, then deletes the project and all project-owned local records. The GitHub repository is never deleted.

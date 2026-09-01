@@ -386,6 +386,26 @@ export function createMemoryPersistence(
           state: projectState,
         }));
       },
+      async requestDeletion(projectId) {
+        const project = state.projects.find(({ id }) => id === projectId);
+        if (!project) return false;
+        const pending = (state as MemoryState & { deletionRequests?: string[] }).deletionRequests ?? [];
+        (state as MemoryState & { deletionRequests?: string[] }).deletionRequests = pending;
+        if (pending.includes(projectId)) return false;
+        pending.push(projectId);
+        project.state = "disabled";
+        return true;
+      },
+      async listDeletionRequests() {
+        return ((state as MemoryState & { deletionRequests?: string[] }).deletionRequests ?? [])
+          .map((projectId) => ({ projectId, requestedAt: NOW }));
+      },
+      async delete(projectId) {
+        const index = state.projects.findIndex(({ id }) => id === projectId);
+        if (index < 0) return false;
+        state.projects.splice(index, 1);
+        return true;
+      },
     },
     projectSnapshots: {
       async append() {

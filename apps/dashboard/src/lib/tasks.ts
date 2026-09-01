@@ -45,6 +45,11 @@ export async function createTask(
   if (!project) {
     throw new ControlError("NOT_FOUND", "The selected project is not registered.");
   }
+  const deletionPending = (await persistence.projects.listDeletionRequests())
+    .some(({ projectId }) => projectId === project.id);
+  if (deletionPending) {
+    throw new ControlError("NOT_FOUND", "The selected project is being deleted.");
+  }
 
   try {
     return await persistence.v0Tasks.create({

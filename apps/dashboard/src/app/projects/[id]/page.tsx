@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ControlButton } from "../../../components/ControlButton.js";
 import { PriorityForm } from "../../../components/PriorityForm.js";
 import { ProjectInitializeButton } from "../../../components/ProjectInitializeButton.js";
+import { ProjectDeleteButton } from "../../../components/ProjectDeleteButton.js";
 import { ProjectSetupAssistant } from "../../../components/ProjectSetupAssistant.js";
 import { Shell } from "../../../components/Shell.js";
 import { StatusBadge } from "../../../components/StatusBadge.js";
@@ -159,6 +160,12 @@ export default async function ProjectPage({
             disabled={!availableActions.canReprioritize}
           />
         </div>
+      </section>
+
+      <section>
+        <h2>Danger zone</h2>
+        <p className="detail">This permanently removes the managed local checkout and all ADE Control Plane records. It never deletes the GitHub repository.</p>
+        <ProjectDeleteButton projectId={project.id} projectName={project.name} />
       </section>
 
       {detail.openDecisions.length > 0 ? (
