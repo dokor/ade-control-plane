@@ -65,6 +65,10 @@ Show:
 - relevant GitHub issue/PR links;
 - recent audit-safe timeline.
 
+Timeline entries use operator-facing titles with the event type, status,
+execution/work reference, and bounded sanitized context. Warning and error
+events remain visually distinct so the next action is easier to identify.
+
 Controls:
 
 - pause;

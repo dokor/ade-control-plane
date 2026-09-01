@@ -154,6 +154,64 @@ test("project detail exposes a sanitized timeline and gated controls", async () 
   );
 });
 
+test("timeline explains execution, audit, and command events", async () => {
+  const state = twoProjectState();
+  const executionRecord = execution({
+    status: "failed",
+    attempt: 2,
+    workRef: "github:issue:23",
+    errorCode: "ADE_TASK_FAILED",
+    errorSummary: "failed reading postgres://user:password@host/db",
+  });
+  state.executions = [executionRecord];
+  state.auditEvents = [{
+    id: "audit-timeline-1",
+    occurredAt: NOW,
+    category: "control",
+    severity: "warning",
+    actorType: "operator",
+    actorRef: "alice",
+    projectId: project().id,
+    executionId: executionRecord.id,
+    runnerId: null,
+    action: "command.rejected",
+    reason: "token=should-not-be-visible",
+    result: "rejected",
+    correlationId: "correlation-1",
+    metadata: {},
+  }];
+  state.commands = [{
+    id: "command-timeline-1",
+    source: "dashboard",
+    actorType: "operator",
+    actorRef: "alice",
+    projectId: project().id,
+    commandType: "project.pause",
+    payload: { projectId: project().id },
+    idempotencyKey: null,
+    status: "applied",
+    receivedAt: NOW,
+    appliedAt: NOW,
+    resultSummary: { summary: "Project paused." },
+  }];
+
+  const detail = await buildProjectDetail({ ...input(state), projectId: project().id });
+
+  assert.ok(detail);
+  const executionEntry = detail.timeline.find(({ kind }) => kind === "execution");
+  const auditEntry = detail.timeline.find(({ kind }) => kind === "audit");
+  const commandEntry = detail.timeline.find(({ kind }) => kind === "command");
+  assert.equal(executionEntry?.title, "Task execution failed");
+  assert.match(executionEntry?.detail ?? "", /Execution .* · attempt 2 · GitHub issue #23/);
+  assert.match(executionEntry?.detail ?? "", /ADE_TASK_FAILED/);
+  assert.doesNotMatch(executionEntry?.detail ?? "", /postgres|password/);
+  assert.equal(auditEntry?.title, "Control event: Command rejected");
+  assert.match(auditEntry?.detail ?? "", /Result: Rejected · Execution/);
+  assert.doesNotMatch(auditEntry?.detail ?? "", /token=/);
+  assert.equal(commandEntry?.title, "Control command applied: Pause project");
+  assert.match(commandEntry?.detail ?? "", /requested by alice via Dashboard/);
+});
+
 test("does not show reconciliation as a human decision when none is pending", async () => {
   const state = twoProjectState();
   state.projects = [project()];
