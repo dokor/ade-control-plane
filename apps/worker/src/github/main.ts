@@ -1,15 +1,21 @@
 import { hostname } from "node:os";
 
 import { PostgresControlPlaneStore, readDatabaseUrlFromEnvironment } from "@ade-control-plane/database";
-import { GithubAppTokenProvider, HttpGithubClient, HttpGithubWorkAdapter } from "@ade-control-plane/github";
+import { GithubAppTokenProvider, HttpGithubClient, HttpGithubIssueAdapter, HttpGithubWorkAdapter } from "@ade-control-plane/github";
+import { CodexAppServerQuotaSource, QuotaRefreshCoordinator } from "@ade-control-plane/quota";
 
 import { NodeCommandRunner } from "../v0/CommandRunner.js";
-import { loadV0WorkerRuntime } from "../v0/runtime.js";
+import { loadV0WorkerRuntime, type V0WorkerRuntimeConfig } from "../v0/runtime.js";
+import { V0TaskExecutor } from "../v0/V0TaskExecutor.js";
+import { V0TaskWorker } from "../v0/V0TaskWorker.js";
+import { ProjectDeletionProcessor } from "../v0/ProjectDeletionProcessor.js";
+import { provisionRegisteredProjects } from "../v0/ProjectProvisioner.js";
 import { GithubWorkCodexExecutor } from "../GithubWorkCodexExecutor.js";
 import { GithubWorkOrchestrator } from "../GithubWorkOrchestrator.js";
 import { GithubWorkNotifier } from "../GithubWorkNotifier.js";
 import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
 import { WorkerWakeCoordinator } from "../WorkerWakeCoordinator.js";
+import { UnifiedProductionWorker } from "../UnifiedProductionWorker.js";
 
 async function main(): Promise<void> {
   const config = await loadV0WorkerRuntime();
@@ -31,6 +37,23 @@ async function main(): Promise<void> {
     const tokens = new GithubAppTokenProvider({ credentials: config.github });
     const github = new HttpGithubClient({ tokens, installationId: config.github.installationId });
     const commands = new NodeCommandRunner();
+    const agentExecutor = config.agentProvider === "claude-code"
+      ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
+      : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment });
+    const manual = new V0TaskWorker({
+      persistence: store,
+      executor: new V0TaskExecutor({
+        persistence: store, github,
+        issueReader: new HttpGithubIssueAdapter({ tokens, installationId: config.github.installationId }),
+        commands, projectRoot: config.projectRoot, codexExecutable: config.codexExecutable,
+        agentExecutor, adeExecutable: config.adeExecutable, adeProfile: config.adeProfile,
+        adeRuntimeVersion: config.adeRuntimeVersion, codexEnvironment: config.codexEnvironment,
+        gitEnvironment: config.gitEnvironment, timeoutMs: config.taskTimeoutMs,
+      }),
+      idleDelayMs: config.idleDelayMs,
+      deletionProcessor: new ProjectDeletionProcessor({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }),
+    });
+    const quota = createQuotaCoordinator(store, config);
     const orchestrator = new GithubWorkOrchestrator({
       persistence: store,
       reader: new HttpGithubWorkAdapter({ tokens, installationId: config.github.installationId }),
@@ -40,9 +63,7 @@ async function main(): Promise<void> {
         adeExecutable: config.adeExecutable, adeRuntimeVersion: config.adeRuntimeVersion,
         adeContextProfile: config.adeProfile,
         gitEnvironment: config.gitEnvironment,
-        agentExecutor: config.agentProvider === "claude-code"
-          ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
-          : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment }),
+        agentExecutor,
       }),
       provider: config.agentProvider,
       agentUsage: store.agentUsage,
@@ -63,6 +84,16 @@ async function main(): Promise<void> {
     }, config.heartbeatIntervalMs);
     heartbeatTimer.unref?.();
     wake.wake({ reason: "startup", fullReconcile: true });
+    await provisionRegisteredProjects({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }).catch(() => undefined);
+    const provisioningTimer = setInterval(() => {
+      void provisionRegisteredProjects({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }).catch(() => undefined);
+    }, 30_000);
+    provisioningTimer.unref?.();
+    const unified = new UnifiedProductionWorker({
+      wake, manual, github: orchestrator, ...(quota ? { quota } : {}),
+      fullReconcileIntervalMs: config.fullReconcileIntervalMs,
+    });
+    await manual.recoverInterruptedTask();
     while (!stop.signal.aborted) {
       const event = await wake.wait(config.fullReconcileIntervalMs, stop.signal);
       if (stop.signal.aborted || event.reason === "shutdown") break;
@@ -70,17 +101,11 @@ async function main(): Promise<void> {
       const mode = (await store.settings.get()).schedulerMode;
       if (mode !== "running") continue;
       try {
-        const result = await orchestrator.runCycle(
-          event.fullReconcile
-            ? { reconcile: "full" }
-            : event.projectId
-              ? { reconcile: "targeted", projectId: event.projectId }
-              : { reconcile: "none" },
-        );
+        const result = await unified.runOnce(event, stop.signal);
         await recordWorkerAudit(store, "worker.cycle-succeeded", {
           wakeReason: event.reason,
           reconciliation: event.fullReconcile ? "full" : event.projectId ? "targeted" : "none",
-          outcome: result.outcome,
+          outcome: result,
           nextWakeAt: new Date(Date.now() + config.fullReconcileIntervalMs).toISOString(),
         }).catch(() => undefined);
       } catch {
@@ -90,6 +115,7 @@ async function main(): Promise<void> {
         }).catch(() => undefined);
       }
     }
+    clearInterval(provisioningTimer);
   } finally {
     if (heartbeatTimer) clearInterval(heartbeatTimer);
     await stopWakeups?.().catch(() => undefined);
@@ -117,6 +143,44 @@ async function ensureLocalRunner(store: PostgresControlPlaneStore, provider: "co
     name: "github-work-local", kind: "local-codex", state: "online",
     architecture: process.arch === "arm64" ? "arm64" : "x64",
     capabilities: { [provider]: true }, labels: ["local"], lastHeartbeatAt: now,
+  });
+}
+
+function createQuotaCoordinator(store: PostgresControlPlaneStore, config: V0WorkerRuntimeConfig) {
+  if (!config.codexAppServerUrl) return undefined;
+  return new QuotaRefreshCoordinator({
+    provider: "openai",
+    accountRef: config.quotaAccountRef,
+    source: new CodexAppServerQuotaSource({ url: config.codexAppServerUrl, accountRef: config.quotaAccountRef, freshnessMs: 300_000 }),
+    persistence: {
+      append: async ({ snapshot, policyState }) => {
+        await store.providerQuotaSnapshots.append({
+          provider: snapshot.provider, accountRef: snapshot.accountRef, policyState, usedPercent: snapshot.usedPercent, observedAt: snapshot.observedAt,
+          ...(snapshot.windowDurationMins !== undefined ? { windowDurationMins: snapshot.windowDurationMins } : {}),
+          ...(snapshot.windowStartedAt !== undefined ? { windowStartedAt: snapshot.windowStartedAt } : {}),
+          ...(snapshot.resetsAt !== undefined ? { resetsAt: snapshot.resetsAt } : {}),
+          ...(snapshot.expiresAt !== undefined ? { expiresAt: snapshot.expiresAt } : {}), metadata: { ...(snapshot.metadata ?? {}) },
+        });
+      },
+      getLatest: async (provider, accountRef) => {
+        const snapshot = await store.providerQuotaSnapshots.getLatest(provider, accountRef);
+        if (!snapshot) return null;
+        const metadata: Record<string, string> = {};
+        for (const [key, value] of Object.entries(snapshot.metadata)) if (typeof value === "string") metadata[key] = value;
+        return {
+          provider: snapshot.provider, accountRef: snapshot.accountRef, usedPercent: snapshot.usedPercent, observedAt: snapshot.observedAt, metadata,
+          ...(snapshot.windowDurationMins !== null ? { windowDurationMins: snapshot.windowDurationMins } : {}),
+          ...(snapshot.windowStartedAt !== null ? { windowStartedAt: snapshot.windowStartedAt } : {}),
+          ...(snapshot.resetsAt !== null ? { resetsAt: snapshot.resetsAt } : {}),
+          ...(snapshot.expiresAt !== null ? { expiresAt: snapshot.expiresAt } : {}),
+        };
+      },
+      deleteOlderThan: async (provider, accountRef, before) => store.providerQuotaSnapshots.deleteOlderThan?.(provider, accountRef, before),
+    },
+    policy: async () => {
+      const settings = await store.settings.get();
+      return { throttledAtPercent: settings.quotaThrottledPercent, drainingAtPercent: settings.quotaDrainingPercent, blockedAtPercent: settings.quotaBlockedPercent, staleAfterMs: settings.quotaStaleAfterMs, allowStartWhenUnknown: false };
+    },
   });
 }
 
