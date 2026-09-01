@@ -1,4 +1,5 @@
 import type { GithubRepositoryRef } from "./domain.js";
+import type { GithubIssueDetails, GithubIssueLifecycleClient } from "./issues.js";
 
 export interface GithubRepositoryContent {
   path: string;
@@ -120,7 +121,7 @@ export class GithubApiError extends Error {
   }
 }
 
-export class HttpGithubClient implements GithubClient, GithubPullRequestClient, GithubSetupClient {
+export class HttpGithubClient implements GithubClient, GithubPullRequestClient, GithubSetupClient, GithubIssueLifecycleClient {
   private readonly baseUrl: string;
   private readonly userAgent: string;
   private readonly fetchImplementation: typeof fetch;
@@ -155,6 +156,26 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient, 
       body,
       "update comment",
     );
+  }
+
+  public async getIssueDetails(repository: GithubRepositoryRef, issueNumber: number): Promise<GithubIssueDetails | null> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(`${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${issueNumber}`, { headers: this.headers(token) });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new GithubApiError(response.status, "read issue", await safeGithubErrorDetail(response));
+    return normalizeIssueDetails(await response.json().catch(() => null), repository);
+  }
+
+  public async updateIssueBody(repository: GithubRepositoryRef, issueNumber: number, body: string): Promise<GithubIssueDetails> {
+    if (new TextEncoder().encode(body).byteLength > 32 * 1024) throw new Error("GitHub issue body exceeds the ADE lifecycle limit.");
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(`${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${issueNumber}`, {
+      method: "PATCH", headers: { ...this.headers(token), "content-type": "application/json" }, body: JSON.stringify({ body }),
+    });
+    if (!response.ok) throw new GithubApiError(response.status, "update issue", await safeGithubErrorDetail(response));
+    const issue = normalizeIssueDetails(await response.json().catch(() => null), repository);
+    if (!issue) throw new Error("GitHub issue response is invalid.");
+    return issue;
   }
 
   public async createPullRequest(
@@ -412,6 +433,17 @@ function isGithubUrl(value: string): boolean {
   try { const url = new URL(value); return url.protocol === "https:" && url.hostname === "github.com"; } catch { return false; }
 }
 
+function normalizeIssueDetails(value: unknown, repository: GithubRepositoryRef): GithubIssueDetails | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const issue = value as { number?: unknown; title?: unknown; body?: unknown; labels?: unknown; state?: unknown; html_url?: unknown; updated_at?: unknown; pull_request?: unknown };
+  if (issue.pull_request !== undefined || !Number.isInteger(issue.number) || typeof issue.title !== "string" || typeof issue.body !== "string" || (issue.state !== "open" && issue.state !== "closed") || typeof issue.html_url !== "string" || typeof issue.updated_at !== "string" || !Array.isArray(issue.labels)) return null;
+  const labels = issue.labels.flatMap((label) => typeof label === "object" && label !== null && !Array.isArray(label) && typeof (label as { name?: unknown }).name === "string" ? [(label as { name: string }).name] : []);
+  if (labels.length !== issue.labels.length || new TextEncoder().encode(issue.body).byteLength > 32 * 1024) return null;
+  const expectedPrefix = `https://github.com/${repository.owner}/${repository.name}/issues/`;
+  if (!issue.html_url.startsWith(expectedPrefix) || Number.isNaN(Date.parse(issue.updated_at))) return null;
+  return { number: Number(issue.number), title: issue.title.slice(0, 500), body: issue.body, labels, state: issue.state, url: issue.html_url, updatedAt: new Date(issue.updated_at).toISOString() };
+}
+
 async function safeGithubErrorDetail(response: Response): Promise<string | null> {
   const payload: unknown = await response.json().catch(() => null);
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return null;
@@ -427,7 +459,7 @@ async function safeGithubErrorDetail(response: Response): Promise<string | null>
 
 /** Deterministic double used by tests and local runs without GitHub access. */
 export class DeterministicFakeGithubClient
-  implements GithubClient, GithubPullRequestClient, GithubSetupClient
+  implements GithubClient, GithubPullRequestClient, GithubSetupClient, GithubIssueLifecycleClient
 {
   public readonly created: { issueNumber: number; body: string }[] = [];
   public readonly updated: { commentId: string; body: string }[] = [];
@@ -442,6 +474,19 @@ export class DeterministicFakeGithubClient
   public readonly labels: GithubLabel[] = [];
   public repositoryMetadata: GithubRepositoryMetadata = { id: "123", owner: "dokor", name: "alpha", defaultBranch: "main", private: false, url: "https://github.com/dokor/alpha" };
   private readonly setupPullRequests = new Map<string, GithubPullRequest>();
+  public readonly issues = new Map<number, GithubIssueDetails>();
+
+  public async getIssueDetails(_repository: GithubRepositoryRef, issueNumber: number): Promise<GithubIssueDetails | null> {
+    return this.issues.get(issueNumber) ?? null;
+  }
+
+  public async updateIssueBody(_repository: GithubRepositoryRef, issueNumber: number, body: string): Promise<GithubIssueDetails> {
+    const issue = this.issues.get(issueNumber);
+    if (!issue) throw new Error("GitHub issue was not found.");
+    const updated = { ...issue, body, updatedAt: new Date().toISOString() };
+    this.issues.set(issueNumber, updated);
+    return updated;
+  }
 
   public async createComment(
     _repository: GithubRepositoryRef,

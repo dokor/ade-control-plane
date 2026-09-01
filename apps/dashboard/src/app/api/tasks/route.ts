@@ -4,6 +4,7 @@ import type { V0TaskSource } from "@ade-control-plane/database";
 import { ControlError } from "../../../lib/errors.js";
 import { handleDashboardApi, readJsonObject } from "../../../lib/dashboardApi.js";
 import { listGithubIssues } from "../../../lib/githubIssues.js";
+import { admitGithubIssue } from "../../../lib/githubIssueAdmission.js";
 import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { getPersistence } from "../../../lib/persistence.js";
 import { createTask } from "../../../lib/tasks.js";
@@ -38,6 +39,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (!issue) {
         throw new ControlError("NOT_FOUND", "The selected GitHub issue is no longer open or accessible.");
       }
+      if (!github.client) throw new ControlError("UNAVAILABLE", "GitHub issue admission is not configured.");
+      const admission = await admitGithubIssue(project, github.client, source.issueNumber);
+      await persistence.wakeups?.signal({ reason: "github-work-admitted", projectId: project.id, signaledAt: new Date().toISOString() });
+      return { body: { githubWork: admission }, status: 202 };
     }
     const task = await createTask(persistence, {
       projectId: String(body.projectId ?? ""),

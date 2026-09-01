@@ -10,6 +10,7 @@ import type { TaskProjectOption } from "../lib/taskReadModel.js";
 
 interface TaskResponse {
   task?: { id: string };
+  githubWork?: { issueNumber: number; stage: string };
 }
 
 export function TaskComposer({
@@ -29,6 +30,7 @@ export function TaskComposer({
   const [prompt, setPrompt] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [admission, setAdmission] = useState<string | null>(null);
   const selectedIssue = issues.find((issue) => issue.number === issueNumber) ?? null;
   const disabled = pending || activeTaskId !== null || !projectId ||
     (sourceType === "github-issue" ? selectedIssue === null : !prompt.trim());
@@ -68,6 +70,7 @@ export function TaskComposer({
     if (disabled) return;
     setPending(true);
     setError(null);
+    setAdmission(null);
     try {
       const body = await requestDashboardJson<TaskResponse>("/api/tasks", {
         method: "POST",
@@ -79,6 +82,11 @@ export function TaskComposer({
             : { type: "prompt", prompt },
         }),
       }, "The task could not be created.");
+      if (body.githubWork) {
+        setAdmission(`Issue #${body.githubWork.issueNumber}: ${body.githubWork.stage}.`);
+        void loadIssues(projectId);
+        return;
+      }
       if (!body.task?.id) {
         setError("ERROR: The task could not be created.");
         return;
@@ -198,6 +206,7 @@ export function TaskComposer({
         <p className="task-inline-note">No enabled project is available.</p>
       ) : null}
       {error ? <p className="notice error" role="alert">{error}</p> : null}
+      {admission ? <p className="notice success" role="status">{admission}</p> : null}
 
       <button type="submit" className="task-run" disabled={disabled}>
         <span>{pending ? "Submitting" : sourceType === "github-issue" ? "Run issue" : "Run task"}</span>

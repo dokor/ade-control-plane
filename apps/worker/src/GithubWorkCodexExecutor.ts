@@ -1,5 +1,5 @@
 import type { AgentUsageMetrics, ProjectRecord } from "@ade-control-plane/database";
-import type { GithubPullRequestClient } from "@ade-control-plane/github";
+import { DEFAULT_GITHUB_WORK_METADATA, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient, type GithubPullRequestClient } from "@ade-control-plane/github";
 
 import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDispatcher } from "./GithubWorkOrchestrator.js";
 import type { CommandRunner } from "./v0/CommandRunner.js";
@@ -8,7 +8,7 @@ import { AdeDeliveryError, AdeDeliveryRuntime } from "./AdeDeliveryRuntime.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
 
 export interface GithubWorkCodexExecutorOptions {
-  github: GithubPullRequestClient;
+  github: GithubPullRequestClient & GithubIssueLifecycleClient;
   commands: CommandRunner;
   projectRoot: string;
   codexExecutable?: string;
@@ -66,6 +66,29 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       await this.mustRun("git branch preparation", {
         executable: "git", args: ["switch", "--force-create", branchName, `origin/${checkout.baseBranch}`], cwd: checkout.root, env: this.gitEnvironment,
       });
+      let issue = await this.options.github.getIssueDetails(
+        { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName },
+        request.work.issueNumber,
+      );
+      if (!issue || issue.state !== "open") throw new GithubWorkExecutionError("GITHUB_ISSUE_NOT_FOUND", "The selected GitHub issue is no longer open.");
+      const lifecycle = await this.planIssueLifecycle(checkout.root, issue);
+      if (lifecycle.action === "enrich") {
+        if (!lifecycle.enrichmentPrompt) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
+        const enrichment = await this.agentExecutor.execute({ cwd: checkout.root, prompt: lifecycle.enrichmentPrompt });
+        if (enrichment.exitCode !== 0) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_FAILED", "ADE issue enrichment failed.");
+        const enrichedBody = extractAgentText(enrichment.stdout);
+        if (!enrichedBody || new TextEncoder().encode(enrichedBody).byteLength > 24 * 1024) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_INVALID", "ADE issue enrichment did not return a valid issue body.");
+        const changed = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+        if (changed.stdout.trim()) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_DIRTY", "Issue enrichment must not modify the repository.");
+        const metadata = readGithubWorkMetadata(issue.body) ?? DEFAULT_GITHUB_WORK_METADATA;
+        issue = await this.options.github.updateIssueBody(
+          { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, request.work.issueNumber,
+          upsertGithubWorkMetadata(enrichedBody, metadata),
+        );
+      } else if (lifecycle.action === "wait" || lifecycle.action === "none") {
+        return { status: "cancelled", provider: this.agentExecutor.provider, errorCode: "ISSUE_LIFECYCLE_WAIT", errorSummary: lifecycle.reason };
+      }
+      await this.updateLifecycle(issue.body, request, { state: "running", executionRef: request.executionId, branchName });
       const work = {
         project: request.project,
         source: "github-issue" as const,
@@ -118,6 +141,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           base: checkout.baseBranch,
         },
       );
+      await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName, pullRequestNumber: pullRequest.number });
       return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, ...AdeDeliveryRuntime.provenanceSummary(review.provenance) } };
     } catch (error) {
       const failure = classifyFailure(error);
@@ -140,6 +164,22 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       throw new GithubWorkExecutionError(`${label.toUpperCase().replace(/[^A-Z0-9]+/gu, "_")}_FAILED`, `${label} failed.`);
     }
     return result;
+  }
+
+  private async planIssueLifecycle(cwd: string, issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string }) {
+    const result = await this.options.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue }) });
+    if (result.exitCode !== 0) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_FAILED", "ADE could not resolve the issue lifecycle.");
+    const parsed: unknown = JSON.parse(result.stdout);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE returned an invalid issue lifecycle plan.");
+    const plan = parsed as { action?: unknown; reason?: unknown; enrichmentPrompt?: unknown };
+    if ((plan.action !== "enrich" && plan.action !== "develop" && plan.action !== "wait" && plan.action !== "none") || typeof plan.reason !== "string") throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE returned an invalid issue lifecycle plan.");
+    if (plan.action === "enrich" && (typeof plan.enrichmentPrompt !== "string" || plan.enrichmentPrompt.length === 0 || plan.enrichmentPrompt.length > 30_000)) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
+    return { action: plan.action, reason: plan.reason, enrichmentPrompt: plan.enrichmentPrompt as string | undefined };
+  }
+
+  private async updateLifecycle(body: string, request: GithubWorkDispatchRequest, change: Partial<import("@ade-control-plane/github").GithubWorkMetadata>): Promise<void> {
+    const metadata = { ...(readGithubWorkMetadata(body) ?? DEFAULT_GITHUB_WORK_METADATA), ...change };
+    await this.options.github.updateIssueBody({ id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
   }
 }
 
@@ -166,4 +206,18 @@ export function buildGithubWorkPrompt(request: GithubWorkDispatchRequest): strin
     "",
     "The issue URL is the authoritative task reference. Do not infer work from labels, branch names or unrelated issue prose.",
   ].join("\n");
+}
+
+function extractAgentText(stdout: string): string | null {
+  for (const line of stdout.split(/\r?\n/u).toReversed()) {
+    try {
+      const value: unknown = JSON.parse(line);
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        const record = value as { result?: unknown; text?: unknown; item?: { text?: unknown; content?: unknown } };
+        const candidate = typeof record.result === "string" ? record.result : typeof record.text === "string" ? record.text : typeof record.item?.text === "string" ? record.item.text : typeof record.item?.content === "string" ? record.item.content : null;
+        if (candidate) return candidate.trim();
+      }
+    } catch { /* provider may emit non-JSON progress lines */ }
+  }
+  return null;
 }
