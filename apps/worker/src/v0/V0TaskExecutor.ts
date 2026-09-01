@@ -11,7 +11,7 @@ import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, t
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPreparation, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
-import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.js";
+import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./ProjectCheckout.js";
 
 interface V0Persistence {
   projects: Pick<ProjectRepository, "getById">;
@@ -502,6 +502,9 @@ function classifyFailure(
     return { code: "WORKER_SHUTDOWN", summary: "Worker stopped during task execution." };
   }
   if (error instanceof AdeDeliveryError) {
+    return { code: error.code, summary: error.safeSummary };
+  }
+  if (error instanceof ProjectCheckoutError) {
     return { code: error.code, summary: error.safeSummary };
   }
   if (error instanceof V0ExecutionError) {
