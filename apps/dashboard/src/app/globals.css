@@ -139,6 +139,59 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
   --badge-color: var(--muted);
 }
 
+.setup-refresh-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 70%, var(--surface));
+}
+
+.setup-refresh-summary p { margin: 3px 0 0; }
+.setup-requirement { align-items: flex-start; padding: 9px 0; }
+.setup-requirement-copy { display: grid; gap: 2px; min-width: 0; }
+.setup-requirement-label { display: inline-flex; align-items: center; gap: 7px; }
+.setup-help-button {
+  width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 12px;
+}
+.setup-help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: color-mix(in srgb, #000 55%, transparent);
+}
+.setup-help-modal {
+  width: min(620px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 20px 60px color-mix(in srgb, #000 30%, transparent);
+}
+.setup-help-modal h3 { margin: 0; font-size: 22px; }
+.setup-help-modal ol { padding-left: 22px; }
+.setup-help-modal li + li { margin-top: 8px; }
+.setup-help-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+
+@media (max-width: 560px) {
+  .setup-refresh-summary { display: grid; }
+  .setup-refresh-summary button { width: 100%; }
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;

@@ -56,7 +56,7 @@ export default async function ProjectPage({
         <Link href="/">← Overview</Link>
       </p>
 
-      <ProjectSetupAssistant projectId={project.id} readiness={setupReadiness} />
+      <ProjectSetupAssistant projectId={project.id} readiness={setupReadiness} refreshIntervalMs={config.refreshIntervalMs} />
 
       <div className="cards">
         <article className="card">
