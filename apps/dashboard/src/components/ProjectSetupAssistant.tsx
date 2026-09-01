@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
 import type { ProjectSetupReadiness } from "../lib/projectSetup.js";
 
 export function ProjectSetupAssistant({
@@ -21,25 +22,22 @@ export function ProjectSetupAssistant({
     setPending(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/projects/${projectId}/setup`, {
+      const body = await requestDashboardJson<{
+        result?: { labelsCreated?: readonly string[]; pullRequestUrl?: string | null };
+      }>(`/api/projects/${projectId}/setup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        credentials: "same-origin",
         body: JSON.stringify({ action: "prepare" }),
-      });
-      const body = (await response.json().catch(() => ({}))) as {
-        result?: { labelsCreated?: readonly string[]; pullRequestUrl?: string | null };
-        summary?: string;
-      };
-      if (!response.ok || !body.result) {
-        setMessage(body.summary ?? "Setup could not be prepared.");
+      }, "Setup could not be prepared.");
+      if (!body.result) {
+        setMessage("ERROR: Setup could not be prepared.");
         return;
       }
       const labels = body.result.labelsCreated?.length ? `Created labels: ${body.result.labelsCreated.join(", ")}. ` : "";
       setMessage(`${labels}${body.result.pullRequestUrl ? "Setup PR opened; merge it, then refresh readiness." : "Setup is up to date."}`);
       router.refresh();
-    } catch {
-      setMessage("The Dashboard could not reach the setup API.");
+    } catch (reason) {
+      setMessage(dashboardErrorMessage(reason, "The Dashboard could not reach the setup API."));
     } finally {
       setPending(false);
     }

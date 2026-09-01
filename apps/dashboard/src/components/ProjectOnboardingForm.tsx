@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
+
 export function ProjectOnboardingForm() {
   const router = useRouter();
   const [repositoryUrl, setRepositoryUrl] = useState("");
@@ -17,24 +19,21 @@ export function ProjectOnboardingForm() {
     setError(null);
     setPlan(null);
     try {
-      const response = await fetch("/api/projects", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ repositoryUrl, name: name || undefined, slug: slug || undefined }),
-      });
-      const body = (await response.json().catch(() => ({}))) as {
+      const body = await requestDashboardJson<{
         project?: { id?: string };
         plan?: { repository?: { url?: string }; defaultBranch?: string };
-        summary?: string;
-      };
-      if (!response.ok || !body.project?.id || !body.plan?.repository?.url) {
-        setError(body.summary ?? "The project could not be added.");
+      }>("/api/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repositoryUrl, name: name || undefined, slug: slug || undefined }),
+      }, "The project could not be added.");
+      if (!body.project?.id || !body.plan?.repository?.url) {
+        setError("ERROR: The project could not be added.");
         return;
       }
       setPlan({ projectId: body.project.id, repository: body.plan.repository.url, branch: body.plan.defaultBranch ?? "main" });
-    } catch {
-      setError("The Dashboard could not reach the project onboarding API.");
+    } catch (reason) {
+      setError(dashboardErrorMessage(reason, "The Dashboard could not reach the project onboarding API."));
     } finally {
       setPending(false);
     }

@@ -4,14 +4,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useState, type FormEvent } from "react";
 
+import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
 import type { TaskGithubIssue } from "../lib/githubIssues.js";
 import type { TaskProjectOption } from "../lib/taskReadModel.js";
 
 interface TaskResponse {
   task?: { id: string };
-  code?: string;
-  summary?: string;
-  correlationId?: string;
 }
 
 export function TaskComposer({
@@ -42,24 +40,19 @@ export function TaskComposer({
     setIssuesError(null);
     setIssues([]);
     setIssueNumber("");
-    fetch(`/api/github/issues?projectId=${encodeURIComponent(projectId)}`, {
-      credentials: "same-origin",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        const body = (await response.json().catch(() => ({}))) as {
-          issues?: readonly TaskGithubIssue[];
-          summary?: string;
-        };
-        if (!response.ok || !Array.isArray(body.issues)) {
-          throw new Error(body.summary ?? "GitHub issues could not be loaded.");
-        }
+    requestDashboardJson<{ issues?: readonly TaskGithubIssue[] }>(
+      `/api/github/issues?projectId=${encodeURIComponent(projectId)}`,
+      { signal: controller.signal },
+      "GitHub issues could not be loaded.",
+    )
+      .then((body) => {
+        if (!Array.isArray(body.issues)) throw new Error("GitHub issues could not be loaded.");
         setIssues(body.issues);
         setIssueNumber(body.issues[0]?.number ?? "");
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) {
-          setIssuesError(error instanceof Error ? error.message : "GitHub issues could not be loaded.");
+          setIssuesError(dashboardErrorMessage(error, "GitHub issues could not be loaded."));
         }
       })
       .finally(() => {
@@ -74,29 +67,25 @@ export function TaskComposer({
     setPending(true);
     setError(null);
     try {
-      const response = await fetch("/api/tasks", {
+      const body = await requestDashboardJson<TaskResponse>("/api/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        credentials: "same-origin",
         body: JSON.stringify({
           projectId,
           source: sourceType === "github-issue"
             ? { type: "github-issue", issueNumber: issueNumber as number }
             : { type: "prompt", prompt },
         }),
-      });
-      const body = (await response.json()) as TaskResponse;
-      if (!response.ok || !body.task?.id) {
-        setError(
-          `${body.code ?? "ERROR"}: ${body.summary ?? "The task could not be created."}`,
-        );
+      }, "The task could not be created.");
+      if (!body.task?.id) {
+        setError("ERROR: The task could not be created.");
         return;
       }
       const taskId = body.task.id;
       setPrompt("");
       startTransition(() => router.push(`/tasks/${taskId}`));
-    } catch {
-      setError("The Dashboard could not reach the task API.");
+    } catch (reason) {
+      setError(dashboardErrorMessage(reason, "The Dashboard could not reach the task API."));
     } finally {
       setPending(false);
     }

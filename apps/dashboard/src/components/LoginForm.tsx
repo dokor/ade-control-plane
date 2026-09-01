@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
+
 export function LoginForm({ next }: { next: string }) {
   const router = useRouter();
   const [password, setPassword] = useState("");
@@ -14,21 +16,20 @@ export function LoginForm({ next }: { next: string }) {
     setPending(true);
     setError(null);
 
-    const response = await fetch("/api/session", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({ password }),
-    });
-
-    setPending(false);
-    if (response.ok) {
+    try {
+      await requestDashboardJson("/api/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password }),
+      }, "Sign-in was refused.");
       setPassword("");
       router.replace(next);
       router.refresh();
-      return;
+    } catch (reason) {
+      setError(dashboardErrorMessage(reason, "Sign-in was refused."));
+    } finally {
+      setPending(false);
     }
-    setError("Sign-in was refused.");
   }
 
   return (

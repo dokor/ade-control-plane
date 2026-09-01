@@ -1,13 +1,11 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import type { V0TaskSource } from "@ade-control-plane/database";
 
-import { ControlError, httpStatusForCode } from "../../../lib/errors.js";
+import { ControlError } from "../../../lib/errors.js";
+import { handleDashboardApi, readJsonObject } from "../../../lib/dashboardApi.js";
 import { listReadyGithubIssues } from "../../../lib/githubIssues.js";
 import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { getPersistence } from "../../../lib/persistence.js";
-import { sanitizeError } from "../../../lib/sanitize.js";
-import { authorizeTaskRequest } from "../../../lib/taskRequest.js";
 import { createTask } from "../../../lib/tasks.js";
 import { sanitizeTaskRecord } from "../../../lib/taskReadModel.js";
 
@@ -15,22 +13,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const correlationId = randomUUID();
-  try {
-    await authorizeTaskRequest(request, false);
+  return handleDashboardApi(request, "read", async () => {
     const tasks = (await (await getPersistence()).v0Tasks.list(100)).map(sanitizeTaskRecord);
-    return NextResponse.json({ tasks, correlationId });
-  } catch (error) {
-    const safe = sanitizeError(error, correlationId);
-    return NextResponse.json(safe, { status: httpStatusForCode(safe.code) });
-  }
+    return { body: { tasks } };
+  });
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const correlationId = randomUUID();
-  try {
-    await authorizeTaskRequest(request, true);
-    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  return handleDashboardApi(request, "mutation", async () => {
+    const body = await readJsonObject(request);
     const source = body.source;
     const persistence = await getPersistence();
     if (isGithubIssueSource(source)) {
@@ -55,11 +46,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         : { prompt: typeof body.prompt === "string" ? body.prompt : "" }),
     });
     await persistence.wakeups?.signal({ reason: "manual-task", projectId: task.projectId, signaledAt: new Date().toISOString() });
-    return NextResponse.json({ task: sanitizeTaskRecord(task), correlationId }, { status: 201 });
-  } catch (error) {
-    const safe = sanitizeError(error, correlationId);
-    return NextResponse.json(safe, { status: httpStatusForCode(safe.code) });
-  }
+    return { body: { task: sanitizeTaskRecord(task) }, status: 201 };
+  });
 }
 
 function isGithubIssueSource(value: unknown): value is { type: "github-issue"; issueNumber: number } {

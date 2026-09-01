@@ -117,13 +117,21 @@ export function authorizeBrowserMutation(
       "Identity is not allowed to mutate control-plane state.",
     );
   }
+  authorizeSameOrigin(requestOrigin, expectedOrigin);
+  return identity;
+}
+
+/** Same-origin guard for public session mutations such as sign-out. */
+export function authorizeSameOrigin(
+  requestOrigin: string | null | undefined,
+  expectedOrigin: string,
+): void {
   if (!isSameOrigin(requestOrigin, expectedOrigin)) {
     throw new ControlError(
       "CSRF_REJECTED",
       "The request origin does not match the Dashboard origin.",
     );
   }
-  return identity;
 }
 
 function isSameOrigin(

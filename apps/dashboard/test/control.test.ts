@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   authorizeMutation,
   authorizeRead,
+  authorizeSameOrigin,
   isSensitiveCommand,
   validateCommand,
 } from "../src/lib/control.js";
@@ -39,6 +40,14 @@ test("accepts a same-origin mutation from an authorized operator", () => {
   assert.equal(
     authorizeMutation(operator, "https://cp", "https://cp/", "global.pause").actorRef,
     "dokor",
+  );
+});
+
+test("compares complete origins for public session mutations", () => {
+  authorizeSameOrigin("https://cp.example:443", "https://cp.example/");
+  assert.throws(
+    () => authorizeSameOrigin("https://cp.example.evil", "https://cp.example"),
+    /CSRF_REJECTED/,
   );
 });
 

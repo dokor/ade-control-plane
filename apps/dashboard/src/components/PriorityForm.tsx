@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
+
 export function PriorityForm({
   projectId,
   priority,
@@ -21,20 +23,23 @@ export function PriorityForm({
     event.preventDefault();
     setPending(true);
     setMessage(null);
-    const response = await fetch("/api/control", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        type: "project.reprioritize",
-        payload: { projectId, priority: Number(value) },
-        idempotencyKey: crypto.randomUUID(),
-      }),
-    });
-    const body = (await response.json()) as { summary?: string; code?: string };
-    setMessage(response.ok ? (body.summary ?? "Applied.") : (body.code ?? "ERROR"));
-    setPending(false);
-    if (response.ok) router.refresh();
+    try {
+      const body = await requestDashboardJson<{ summary?: string }>("/api/control", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "project.reprioritize",
+          payload: { projectId, priority: Number(value) },
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      }, "Priority could not be updated.");
+      setMessage(body.summary ?? "Applied.");
+      router.refresh();
+    } catch (reason) {
+      setMessage(dashboardErrorMessage(reason, "Priority could not be updated."));
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
