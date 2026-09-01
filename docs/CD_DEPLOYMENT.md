@@ -57,13 +57,21 @@ CI success on main
 → acquire deployment concurrency lock
 → verify requested SHA belongs to trusted main history
 → prepare checkout/image for exact SHA
+→ select changed application scope
 → backup/check migration safety as required
-→ run migrations
-→ update Compose services
-→ wait for healthchecks
+→ run migrations when required
+→ update affected Compose services
+→ wait for affected healthchecks
 → record deployed SHA
 → finish success
 ```
+
+The deployment wrapper compares the requested SHA with
+`/var/lib/ade-control-plane/deployed-sha`. Dashboard-only and worker-only
+changes rebuild and restart only that service. Shared packages, dependency,
+Docker, Compose or migration changes use the complete deployment path.
+Documentation-only changes are recorded as a successful no-op. Missing or
+non-linear deployment history falls back to a complete deployment.
 
 If healthcheck fails, workflow fails visibly. Automatic database rollback is not required and must not be attempted blindly after a potentially destructive migration.
 
