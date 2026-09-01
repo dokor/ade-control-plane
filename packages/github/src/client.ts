@@ -1,5 +1,24 @@
 import type { GithubRepositoryRef } from "./domain.js";
 
+export interface GithubRepositoryContent {
+  path: string;
+  sha: string;
+  content: string;
+}
+
+export interface GithubLabel {
+  name: string;
+  color?: string;
+  description?: string;
+}
+
+export interface GithubSetupPullRequestInput {
+  files: Readonly<Record<string, string>>;
+  title: string;
+  body: string;
+  baseBranch?: string;
+}
+
 export interface GithubComment {
   id: string;
   body: string;
@@ -51,6 +70,21 @@ export interface GithubClient {
   ): Promise<GithubComment>;
 }
 
+/** Explicit, repository-scoped setup operations used by the Dashboard. */
+export interface GithubSetupClient {
+  getRepositoryContent(
+    repository: GithubRepositoryRef,
+    path: string,
+  ): Promise<GithubRepositoryContent | null>;
+  listLabels(repository: GithubRepositoryRef): Promise<readonly GithubLabel[]>;
+  createLabel(repository: GithubRepositoryRef, label: GithubLabel): Promise<GithubLabel>;
+  findOpenSetupPullRequest(repository: GithubRepositoryRef, title: string): Promise<GithubPullRequest | null>;
+  createSetupPullRequest(
+    repository: GithubRepositoryRef,
+    input: GithubSetupPullRequestInput,
+  ): Promise<GithubPullRequest>;
+}
+
 export interface InstallationTokenProvider {
   getToken(installationId: string): Promise<string>;
 }
@@ -76,7 +110,7 @@ export class GithubApiError extends Error {
   }
 }
 
-export class HttpGithubClient implements GithubClient, GithubPullRequestClient {
+export class HttpGithubClient implements GithubClient, GithubPullRequestClient, GithubSetupClient {
   private readonly baseUrl: string;
   private readonly userAgent: string;
   private readonly fetchImplementation: typeof fetch;
@@ -179,6 +213,130 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient {
     return null;
   }
 
+  public async getRepositoryContent(
+    repository: GithubRepositoryRef,
+    path: string,
+  ): Promise<GithubRepositoryContent | null> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${path.split("/").map(encodeURIComponent).join("/")}`,
+      { headers: this.headers(token) },
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) throw new GithubApiError(response.status, "read repository content", await safeGithubErrorDetail(response));
+    const parsed = (await response.json().catch(() => null)) as { type?: unknown; path?: unknown; sha?: unknown; content?: unknown } | null;
+    if (!parsed || parsed.type !== "file" || typeof parsed.path !== "string" || typeof parsed.sha !== "string" || typeof parsed.content !== "string") {
+      throw new Error("GitHub repository content response is invalid.");
+    }
+    return { path: parsed.path, sha: parsed.sha, content: parsed.content };
+  }
+
+  public async listLabels(repository: GithubRepositoryRef): Promise<readonly GithubLabel[]> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/labels?per_page=100`,
+      { headers: this.headers(token) },
+    );
+    if (!response.ok) throw new GithubApiError(response.status, "list repository labels", await safeGithubErrorDetail(response));
+    const parsed: unknown = await response.json().catch(() => null);
+    if (!Array.isArray(parsed)) throw new Error("GitHub labels response is invalid.");
+    return parsed.flatMap((value) => {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return [];
+      const label = value as { name?: unknown; color?: unknown; description?: unknown };
+      return typeof label.name === "string" && label.name.length > 0
+        ? [{ name: label.name, ...(typeof label.color === "string" ? { color: label.color } : {}), ...(typeof label.description === "string" ? { description: label.description } : {}) }]
+        : [];
+    });
+  }
+
+  public async createLabel(repository: GithubRepositoryRef, label: GithubLabel): Promise<GithubLabel> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/labels`,
+      {
+        method: "POST",
+        headers: { ...this.headers(token), "content-type": "application/json" },
+        body: JSON.stringify({ name: label.name, color: label.color ?? "1d76db", description: label.description ?? "ADE workflow label" }),
+      },
+    );
+    if (!response.ok) throw new GithubApiError(response.status, "create repository label", await safeGithubErrorDetail(response));
+    const parsed = (await response.json().catch(() => null)) as { name?: unknown; color?: unknown; description?: unknown } | null;
+    if (!parsed || typeof parsed.name !== "string") throw new Error("GitHub label response is invalid.");
+    return { name: parsed.name, ...(typeof parsed.color === "string" ? { color: parsed.color } : {}), ...(typeof parsed.description === "string" ? { description: parsed.description } : {}) };
+  }
+
+  public async createSetupPullRequest(
+    repository: GithubRepositoryRef,
+    input: GithubSetupPullRequestInput,
+  ): Promise<GithubPullRequest> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const repositoryUrl = `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}`;
+    const repositoryResponse = await this.fetchImplementation(repositoryUrl, { headers: this.headers(token) });
+    if (!repositoryResponse.ok) throw new GithubApiError(repositoryResponse.status, "read repository", await safeGithubErrorDetail(repositoryResponse));
+    const repositoryPayload = (await repositoryResponse.json().catch(() => null)) as { default_branch?: unknown } | null;
+    const base = typeof repositoryPayload?.default_branch === "string" ? repositoryPayload.default_branch : input.baseBranch ?? "main";
+    const refResponse = await this.fetchImplementation(`${repositoryUrl}/git/ref/heads/${encodeURIComponent(base)}`, { headers: this.headers(token) });
+    if (!refResponse.ok) throw new GithubApiError(refResponse.status, "read repository branch", await safeGithubErrorDetail(refResponse));
+    const refPayload = (await refResponse.json().catch(() => null)) as { object?: { sha?: unknown } } | null;
+    const baseSha = typeof refPayload?.object?.sha === "string" ? refPayload.object.sha : null;
+    if (!baseSha) throw new Error("GitHub branch response is invalid.");
+
+    const blobs = [] as { path: string; sha: string }[];
+    for (const [path, content] of Object.entries(input.files)) {
+      if (!/^\.?[A-Za-z0-9_./-]+$/u.test(path) || path.startsWith("/") || path.includes("..")) throw new Error("Setup file path is invalid.");
+      const blobResponse = await this.fetchImplementation(`${repositoryUrl}/git/blobs`, {
+        method: "POST", headers: { ...this.headers(token), "content-type": "application/json" },
+        body: JSON.stringify({ content, encoding: "utf-8" }),
+      });
+      if (!blobResponse.ok) throw new GithubApiError(blobResponse.status, "create setup file blob", await safeGithubErrorDetail(blobResponse));
+      const blobPayload = (await blobResponse.json().catch(() => null)) as { sha?: unknown } | null;
+      if (typeof blobPayload?.sha !== "string") throw new Error("GitHub blob response is invalid.");
+      blobs.push({ path, sha: blobPayload.sha });
+    }
+
+    const treeResponse = await this.fetchImplementation(`${repositoryUrl}/git/trees`, {
+      method: "POST", headers: { ...this.headers(token), "content-type": "application/json" },
+      body: JSON.stringify({ base_tree: baseSha, tree: blobs.map(({ path, sha }) => ({ path, mode: "100644", type: "blob", sha })) }),
+    });
+    if (!treeResponse.ok) throw new GithubApiError(treeResponse.status, "create setup tree", await safeGithubErrorDetail(treeResponse));
+    const treePayload = (await treeResponse.json().catch(() => null)) as { sha?: unknown } | null;
+    if (typeof treePayload?.sha !== "string") throw new Error("GitHub tree response is invalid.");
+
+    const commitResponse = await this.fetchImplementation(`${repositoryUrl}/git/commits`, {
+      method: "POST", headers: { ...this.headers(token), "content-type": "application/json" },
+      body: JSON.stringify({ message: input.title, tree: treePayload.sha, parents: [baseSha] }),
+    });
+    if (!commitResponse.ok) throw new GithubApiError(commitResponse.status, "create setup commit", await safeGithubErrorDetail(commitResponse));
+    const commitPayload = (await commitResponse.json().catch(() => null)) as { sha?: unknown } | null;
+    if (typeof commitPayload?.sha !== "string") throw new Error("GitHub commit response is invalid.");
+    const branch = `ade/setup/${Date.now().toString(36)}`;
+    const refCreateResponse = await this.fetchImplementation(`${repositoryUrl}/git/refs`, {
+      method: "POST", headers: { ...this.headers(token), "content-type": "application/json" },
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitPayload.sha }),
+    });
+    if (!refCreateResponse.ok) throw new GithubApiError(refCreateResponse.status, "create setup branch", await safeGithubErrorDetail(refCreateResponse));
+    return this.createPullRequest(repository, { title: input.title, body: input.body, head: branch, base });
+  }
+
+  public async findOpenSetupPullRequest(repository: GithubRepositoryRef, title: string): Promise<GithubPullRequest | null> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/pulls?state=open&per_page=100`,
+      { headers: this.headers(token) },
+    );
+    if (!response.ok) throw new GithubApiError(response.status, "find setup pull request", await safeGithubErrorDetail(response));
+    const parsed: unknown = await response.json().catch(() => null);
+    if (!Array.isArray(parsed)) throw new Error("GitHub pull request list response is invalid.");
+    for (const value of parsed) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) continue;
+      const candidate = value as { title?: unknown; number?: unknown; html_url?: unknown; head?: { ref?: unknown }; base?: { ref?: unknown } };
+      if (candidate.title === title && Number.isInteger(candidate.number) && typeof candidate.html_url === "string" && typeof candidate.head?.ref === "string" && typeof candidate.base?.ref === "string") {
+        return { number: Number(candidate.number), url: candidate.html_url, head: candidate.head.ref, base: candidate.base.ref };
+      }
+    }
+    return null;
+  }
+
   private async request(
     method: "POST" | "PATCH",
     path: string,
@@ -245,7 +403,7 @@ async function safeGithubErrorDetail(response: Response): Promise<string | null>
 
 /** Deterministic double used by tests and local runs without GitHub access. */
 export class DeterministicFakeGithubClient
-  implements GithubClient, GithubPullRequestClient
+  implements GithubClient, GithubPullRequestClient, GithubSetupClient
 {
   public readonly created: { issueNumber: number; body: string }[] = [];
   public readonly updated: { commentId: string; body: string }[] = [];
@@ -255,6 +413,10 @@ export class DeterministicFakeGithubClient
   }[] = [];
 
   private nextId = 1;
+
+  public readonly contents = new Map<string, GithubRepositoryContent>();
+  public readonly labels: GithubLabel[] = [];
+  private readonly setupPullRequests = new Map<string, GithubPullRequest>();
 
   public async createComment(
     _repository: GithubRepositoryRef,
@@ -285,5 +447,28 @@ export class DeterministicFakeGithubClient
       head: input.head,
       base: input.base,
     };
+  }
+
+  public async getRepositoryContent(_repository: GithubRepositoryRef, path: string): Promise<GithubRepositoryContent | null> {
+    return this.contents.get(path) ?? null;
+  }
+
+  public async listLabels(_repository: GithubRepositoryRef): Promise<readonly GithubLabel[]> {
+    return [...this.labels];
+  }
+
+  public async createLabel(_repository: GithubRepositoryRef, label: GithubLabel): Promise<GithubLabel> {
+    this.labels.push(label);
+    return label;
+  }
+
+  public async createSetupPullRequest(repository: GithubRepositoryRef, input: GithubSetupPullRequestInput): Promise<GithubPullRequest> {
+    const pullRequest = await this.createPullRequest(repository, { title: input.title, body: input.body, head: "ade/setup/fake", base: input.baseBranch ?? "main" });
+    this.setupPullRequests.set(input.title, pullRequest);
+    return pullRequest;
+  }
+
+  public async findOpenSetupPullRequest(_repository: GithubRepositoryRef, title: string): Promise<GithubPullRequest | null> {
+    return this.setupPullRequests.get(title) ?? null;
   }
 }
