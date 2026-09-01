@@ -16,7 +16,7 @@
     "@ade-control-plane/database": "workspace:*",
     "@ade-control-plane/github": "workspace:*",
     "@ade-control-plane/quota": "workspace:*",
-    "next": "15.5.2",
+    "next": "15.5.24",
     "react": "19.1.1",
     "react-dom": "19.1.1"
   },
