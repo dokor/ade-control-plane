@@ -1,0 +1,9 @@
+{
+  "version": "ade.github-work-profile/v1",
+  "capabilities": [
+    "github-work-items"
+  ],
+  "skillPaths": [
+    ".agents/skills"
+  ]
+}
