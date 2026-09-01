@@ -10,11 +10,16 @@ interface V0Persistence {
   >;
 }
 
+interface ProjectDeletionProcessor {
+  processPending(): Promise<boolean>;
+}
+
 export interface V0TaskWorkerOptions {
   persistence: V0Persistence;
   executor: Pick<V0TaskExecutor, "execute"> & { retryPullRequest?(task: import("@ade-control-plane/database").V0TaskRecord): Promise<void> };
   idleDelayMs?: number;
   quota?: Pick<QuotaRefreshCoordinator, "refresh">;
+  deletionProcessor?: ProjectDeletionProcessor;
   now?(): Date;
   sleep?(milliseconds: number, signal: AbortSignal): Promise<void>;
 }
@@ -59,6 +64,9 @@ export class V0TaskWorker {
   }
 
   public async runOnce(signal?: AbortSignal): Promise<boolean> {
+    if (this.options.deletionProcessor && await this.options.deletionProcessor.processPending()) {
+      return true;
+    }
     const prRetry = (await this.options.persistence.v0Tasks.list(100)).find(
       ({ status, prRetryRequested }) => status === "FAILED" && prRetryRequested === true,
     );

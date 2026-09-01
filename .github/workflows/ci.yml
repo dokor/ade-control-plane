@@ -78,3 +78,8 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Build and smoke-test Dashboard runtime
+        run: |
+          pnpm --filter @ade-control-plane/dashboard build
+          pnpm --filter @ade-control-plane/dashboard smoke:standalone
