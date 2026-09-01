@@ -27,6 +27,11 @@ export interface GithubRuntime {
   issueReader: GithubIssueReader | undefined;
 }
 
+interface GithubAppAccess {
+  installationId: string;
+  tokens: GithubAppTokenProvider;
+}
+
 let cached: Promise<GithubRuntime | null> | null = null;
 
 /**
@@ -45,9 +50,10 @@ export function loadGithubRuntime(
 async function build(env: NodeJS.ProcessEnv): Promise<GithubRuntime | null> {
   const webhookSecret = await readSecret(env, "GITHUB_WEBHOOK_SECRET");
   const config = await loadDashboardConfig(env);
-  const client = await buildClient(env);
-  const workReader = await buildWorkReader(env);
-  const issueReader = await buildIssueReader(env);
+  const appAccess = await buildAppAccess(env);
+  const client = buildClient(appAccess);
+  const workReader = buildWorkReader(appAccess);
+  const issueReader = buildIssueReader(appAccess);
   if (!webhookSecret && !client && !workReader && !issueReader) return null;
   const policy: GithubAuthorizationPolicy = {
     allowedActorIds: parseActorIdList(env.GITHUB_ALLOWED_ACTOR_IDS),
@@ -66,40 +72,40 @@ async function build(env: NodeJS.ProcessEnv): Promise<GithubRuntime | null> {
   };
 }
 
-async function buildIssueReader(env: NodeJS.ProcessEnv): Promise<GithubIssueReader | undefined> {
-  const appId = env.GITHUB_APP_ID?.trim();
-  const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim();
-  const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
-  if (!appId || !installationId || !privateKey) return undefined;
+function buildIssueReader(access: GithubAppAccess | undefined): GithubIssueReader | undefined {
+  if (!access) return undefined;
   return new HttpGithubIssueAdapter({
-    tokens: new GithubAppTokenProvider({ credentials: { appId, privateKey } }),
-    installationId,
+    tokens: access.tokens,
+    installationId: access.installationId,
   });
 }
 
-async function buildWorkReader(env: NodeJS.ProcessEnv): Promise<GithubWorkReader | undefined> {
-  const appId = env.GITHUB_APP_ID?.trim();
-  const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim();
-  const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
-  if (!appId || !installationId || !privateKey) return undefined;
+function buildWorkReader(access: GithubAppAccess | undefined): GithubWorkReader | undefined {
+  if (!access) return undefined;
   return new HttpGithubWorkAdapter({
-    tokens: new GithubAppTokenProvider({ credentials: { appId, privateKey } }),
-    installationId,
+    tokens: access.tokens,
+    installationId: access.installationId,
   });
 }
 
-async function buildClient(
-  env: NodeJS.ProcessEnv,
-): Promise<GithubClient | undefined> {
-  const appId = env.GITHUB_APP_ID?.trim();
-  const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim();
-  const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
-  if (!appId || !installationId || !privateKey) return undefined;
+function buildClient(access: GithubAppAccess | undefined): GithubClient | undefined {
+  if (!access) return undefined;
 
   return new HttpGithubClient({
-    tokens: new GithubAppTokenProvider({ credentials: { appId, privateKey } }),
-    installationId,
+    tokens: access.tokens,
+    installationId: access.installationId,
   });
+}
+
+async function buildAppAccess(env: NodeJS.ProcessEnv): Promise<GithubAppAccess | undefined> {
+  const appId = env.GITHUB_APP_ID?.trim();
+  const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim();
+  const privateKey = await readSecret(env, "GITHUB_APP_PRIVATE_KEY");
+  if (!appId || !installationId || !privateKey) return undefined;
+  return {
+    installationId,
+    tokens: new GithubAppTokenProvider({ credentials: { appId, privateKey } }),
+  };
 }
 
 /** Prefers `*_FILE` so container secrets stay out of the environment dump. */

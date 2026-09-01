@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { startTransition, useEffect, useState, type FormEvent } from "react";
+import { startTransition, useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
 import type { TaskGithubIssue } from "../lib/githubIssues.js";
@@ -33,33 +33,35 @@ export function TaskComposer({
   const disabled = pending || activeTaskId !== null || !projectId ||
     (sourceType === "github-issue" ? selectedIssue === null : !prompt.trim());
 
-  useEffect(() => {
-    if (sourceType !== "github-issue" || !projectId) return;
-    const controller = new AbortController();
+  const loadIssues = useCallback(async (selectedProjectId: string, signal?: AbortSignal) => {
     setIssuesLoading(true);
     setIssuesError(null);
     setIssues([]);
     setIssueNumber("");
-    requestDashboardJson<{ issues?: readonly TaskGithubIssue[] }>(
-      `/api/github/issues?projectId=${encodeURIComponent(projectId)}`,
-      { signal: controller.signal },
-      "GitHub issues could not be loaded.",
-    )
-      .then((body) => {
-        if (!Array.isArray(body.issues)) throw new Error("GitHub issues could not be loaded.");
-        setIssues(body.issues);
-        setIssueNumber(body.issues[0]?.number ?? "");
-      })
-      .catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          setIssuesError(dashboardErrorMessage(error, "GitHub issues could not be loaded."));
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIssuesLoading(false);
-      });
+    try {
+      const body = await requestDashboardJson<{ issues?: readonly TaskGithubIssue[] }>(
+        `/api/github/issues?projectId=${encodeURIComponent(selectedProjectId)}`,
+        signal ? { signal } : {},
+        "GitHub issues could not be loaded.",
+      );
+      if (!Array.isArray(body.issues)) throw new Error("GitHub issues could not be loaded.");
+      setIssues(body.issues);
+      setIssueNumber(body.issues[0]?.number ?? "");
+    } catch (error: unknown) {
+      if (!signal?.aborted) {
+        setIssuesError(dashboardErrorMessage(error, "GitHub issues could not be loaded."));
+      }
+    } finally {
+      if (!signal?.aborted) setIssuesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (sourceType !== "github-issue" || !projectId) return;
+    const controller = new AbortController();
+    void loadIssues(projectId, controller.signal);
     return () => controller.abort();
-  }, [projectId, sourceType]);
+  }, [loadIssues, projectId, sourceType]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -156,6 +158,14 @@ export function TaskComposer({
             </small>
           ) : null}
           {issuesError ? <p className="task-inline-note error">{issuesError}</p> : null}
+          <button
+            type="button"
+            className="button"
+            onClick={() => void loadIssues(projectId)}
+            disabled={pending || activeTaskId !== null || issuesLoading || !projectId}
+          >
+            {issuesLoading ? "Loading issues..." : "Reload issues"}
+          </button>
         </div>
       ) : (
         <div className="field-group">

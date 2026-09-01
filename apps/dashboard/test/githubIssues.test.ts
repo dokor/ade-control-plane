@@ -7,11 +7,10 @@ import { NOW, project } from "./helpers/fixtures.js";
 test("returns only open ADE-managed ready issues", async () => {
   const result = await listReadyGithubIssues(project(), {
     issueReader: {
-      listIssues: async () => [
-        { number: 23, title: "Ready issue", state: "open", url: "https://github.com/dokor/argos/issues/23", updatedAt: NOW },
-        { number: 24, title: "Closed issue", state: "closed", url: "https://github.com/dokor/argos/issues/24", updatedAt: NOW },
-      ],
-      getIssue: async () => null,
+      listIssues: async () => { throw new Error("The full issue list must not be requested."); },
+      getIssue: async (_repository, issueNumber) => issueNumber === 23
+        ? { number: 23, title: "Ready issue", state: "open", url: "https://github.com/dokor/argos/issues/23", updatedAt: NOW }
+        : { number: 24, title: "Closed issue", state: "closed", url: "https://github.com/dokor/argos/issues/24", updatedAt: NOW },
     },
     workReader: {
       detectRepository: async () => { throw new Error("unused"); },
