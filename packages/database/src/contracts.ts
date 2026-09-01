@@ -331,6 +331,7 @@ export interface V0TaskTransitionInput {
   headSha?: string | null;
   pullRequestNumber?: number | null;
   pullRequestUrl?: string | null;
+  adeProvenance?: JsonObject | null;
   errorCode?: string | null;
   errorSummary?: string | null;
 }
@@ -475,6 +476,17 @@ export interface AuditEventRepository {
   listRecent(limit: number): Promise<readonly AuditEventRecord[]>;
 }
 
+export interface WorkerWakeup {
+  reason: string;
+  projectId: string | null;
+  signaledAt: string;
+}
+
+export interface WorkerWakeupRepository {
+  signal(input: WorkerWakeup): Promise<void>;
+  listen(handler: (wakeup: WorkerWakeup) => void): Promise<() => Promise<void>>;
+}
+
 export interface ControlPlanePersistence {
   readonly v0Tasks: V0TaskRepository;
   readonly adeDecisions: AdeDecisionRepository;
@@ -490,6 +502,7 @@ export interface ControlPlanePersistence {
   readonly providerQuotaSnapshots: ProviderQuotaSnapshotRepository;
   readonly controlCommands: ControlCommandRepository;
   readonly auditEvents: AuditEventRepository;
+  readonly wakeups?: WorkerWakeupRepository;
   readonly agentUsage?: AgentUsageRepository;
   close(): Promise<void>;
   migrate(): Promise<readonly string[]>;

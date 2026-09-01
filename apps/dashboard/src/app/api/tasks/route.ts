@@ -54,6 +54,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         ? { source: source as V0TaskSource }
         : { prompt: typeof body.prompt === "string" ? body.prompt : "" }),
     });
+    await persistence.wakeups?.signal({ reason: "manual-task", projectId: task.projectId, signaledAt: new Date().toISOString() });
     return NextResponse.json({ task: sanitizeTaskRecord(task), correlationId }, { status: 201 });
   } catch (error) {
     const safe = sanitizeError(error, correlationId);

@@ -366,6 +366,7 @@ export interface V0TaskRecord {
   branchName: string | null;
   headSha?: string | null;
   prRetryRequested?: boolean;
+  adeProvenance?: JsonObject | null;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
   errorCode: string | null;

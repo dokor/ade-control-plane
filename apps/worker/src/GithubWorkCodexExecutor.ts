@@ -4,6 +4,7 @@ import type { GithubPullRequestClient } from "@ade-control-plane/github";
 import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDispatcher } from "./GithubWorkOrchestrator.js";
 import type { CommandRunner } from "./v0/CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "./AgentExecutor.js";
+import { AdeDeliveryError, AdeDeliveryRuntime } from "./AdeDeliveryRuntime.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
 
 export interface GithubWorkCodexExecutorOptions {
@@ -12,6 +13,10 @@ export interface GithubWorkCodexExecutorOptions {
   projectRoot: string;
   codexExecutable?: string;
   agentExecutor?: AgentExecutor;
+  deliveryRuntime?: AdeDeliveryRuntime;
+  adeExecutable?: string;
+  adeRuntimeVersion?: string;
+  adeContextProfile?: string;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
 }
@@ -24,6 +29,7 @@ export interface GithubWorkCodexExecutorOptions {
 export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
   private readonly codexExecutable: string;
   private readonly agentExecutor: AgentExecutor;
+  private readonly deliveryRuntime: AdeDeliveryRuntime;
 
   public constructor(private readonly options: GithubWorkCodexExecutorOptions) {
     this.codexExecutable = options.codexExecutable ?? "codex";
@@ -31,6 +37,12 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       commands: options.commands,
       executable: this.codexExecutable,
       environment: options.codexEnvironment ?? {},
+    });
+    this.deliveryRuntime = options.deliveryRuntime ?? new AdeDeliveryRuntime({
+      commands: options.commands,
+      ...(options.adeExecutable ? { executable: options.adeExecutable } : {}),
+      ...(options.adeRuntimeVersion ? { expectedVersion: options.adeRuntimeVersion } : {}),
+      ...(options.gitEnvironment ? { environment: options.gitEnvironment } : {}),
     });
   }
 
@@ -54,6 +66,17 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       await this.mustRun("git branch preparation", {
         executable: "git", args: ["switch", "--force-create", branchName, `origin/${checkout.baseBranch}`], cwd: checkout.root, env: this.gitEnvironment,
       });
+      const work = {
+        project: request.project,
+        source: "github-issue" as const,
+        prompt: `Implement GitHub issue #${request.work.issueNumber}.`,
+        issueNumber: request.work.issueNumber,
+      };
+      const prepared = await this.deliveryRuntime.prepare({
+        cwd: checkout.root,
+        work,
+        ...(this.options.adeContextProfile ? { contextProfile: this.options.adeContextProfile } : {}),
+      });
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
         prompt: buildGithubWorkPrompt(request),
@@ -66,7 +89,12 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       if (!finalStatus.stdout.trim()) {
         throw new GithubWorkExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");
       }
-      await this.mustRun("git add", { executable: "git", args: ["add", "--all"], cwd: checkout.root, env: this.gitEnvironment });
+      const review = await this.deliveryRuntime.runPostAgentGates({
+        cwd: checkout.root,
+        work,
+        agentExecutor: this.agentExecutor,
+        prepared,
+      });
       await this.mustRun("git commit", {
         executable: "git",
         args: ["-c", "user.name=ADE Control Plane", "-c", "user.email=ade-control-plane@localhost", "-c", "core.hooksPath=/dev/null", "commit", "-m", `feat: implement GitHub issue #${request.work.issueNumber}`],
@@ -81,13 +109,16 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
             `Automated implementation for GitHub issue #${request.work.issueNumber}.`,
             `Source issue: ${request.work.issueUrl}`,
             "",
+            "## ADE runtime",
+            ...Object.entries(AdeDeliveryRuntime.provenanceSummary(review.provenance)).map(([key, value]) => `- ${key}: ${value}`),
+            "",
             "Review and merge remain explicit human actions.",
           ].join("\n"),
           head: branchName,
           base: checkout.baseBranch,
         },
       );
-      return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url } };
+      return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, ...AdeDeliveryRuntime.provenanceSummary(review.provenance) } };
     } catch (error) {
       const failure = classifyFailure(error);
       return { status: "failed", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), errorCode: failure.code, errorSummary: failure.summary, ...(branchName ? { resultSummary: { branchName } } : {}) };
@@ -117,6 +148,7 @@ class GithubWorkExecutionError extends Error {
 }
 
 function classifyFailure(error: unknown): { code: string; summary: string } {
+  if (error instanceof AdeDeliveryError) return { code: error.code, summary: error.safeSummary };
   if (error instanceof GithubWorkExecutionError) return { code: error.code, summary: error.safeSummary };
   return { code: "EXECUTION_FAILED", summary: "GitHub work execution failed." };
 }
