@@ -29,6 +29,45 @@ wait_healthy() {
   die "$service did not become healthy"
 }
 
+record_deployed_sha() {
+  install -d -o root -g root -m 0755 "$(dirname "$DEPLOYED_SHA_FILE")"
+  install -o root -g root -m 0644 <(printf '%s\n' "$requested_sha") "$DEPLOYED_SHA_FILE"
+}
+
+deployment_scope="full"
+dashboard_changed=false
+worker_changed=false
+shared_changed=false
+migration_changed=false
+
+classify_change() {
+  local changed_file="$1"
+  case "$changed_file" in
+    apps/dashboard/*)
+      dashboard_changed=true
+      ;;
+    packages/database/migrations/*|packages/database/src/postgres/migrations.ts)
+      shared_changed=true
+      migration_changed=true
+      ;;
+    apps/worker/src/v0/migrate.ts)
+      worker_changed=true
+      migration_changed=true
+      ;;
+    apps/worker/*|deploy/bin/worker-entrypoint)
+      worker_changed=true
+      ;;
+    packages/*|deploy/*|compose.yaml|Dockerfile|.dockerignore|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig*.json)
+      shared_changed=true
+      ;;
+    docs/*|.github/*|README.md|AGENTS.md|LICENSE*)
+      ;;
+    *)
+      shared_changed=true
+      ;;
+  esac
+}
+
 [[ "$(id -u)" -eq 0 ]] || die "must run as root"
 [[ "$#" -eq 1 ]] || die "usage: deploy <40-character commit SHA>"
 
@@ -36,6 +75,11 @@ readonly requested_sha="$1"
 [[ "$requested_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die "commit SHA is invalid"
 [[ -d "$APP_DIR/.git" && -f "$COMPOSE_FILE" ]] || die "deployment checkout is incomplete"
 [[ -f "$ENV_FILE" ]] || die "production environment file is missing"
+
+previous_sha=""
+if [[ -f "$DEPLOYED_SHA_FILE" ]]; then
+  previous_sha="$(tr -d '[:space:]' < "$DEPLOYED_SHA_FILE")"
+fi
 
 cd "$APP_DIR"
 
@@ -48,22 +92,77 @@ esac
 
 git fetch --quiet --no-tags origin "$requested_sha" || die "could not fetch requested commit"
 git cat-file -e "${requested_sha}^{commit}" || die "requested object is not a commit"
+
+if [[ "$previous_sha" =~ ^[0-9a-fA-F]{40}$ ]] \
+  && git cat-file -e "${previous_sha}^{commit}" 2>/dev/null \
+  && git merge-base --is-ancestor "$previous_sha" "$requested_sha" 2>/dev/null; then
+  deployment_scope="none"
+  dashboard_changed=false
+  worker_changed=false
+  shared_changed=false
+
+  changed_files="$(git diff --name-only "$previous_sha" "$requested_sha")" \
+    || deployment_scope="full"
+  if [[ "$deployment_scope" != "full" ]]; then
+    while IFS= read -r changed_file; do
+      [[ -n "$changed_file" ]] || continue
+      classify_change "$changed_file"
+    done <<< "$changed_files"
+
+    if [[ "$shared_changed" == true || ("$dashboard_changed" == true && "$worker_changed" == true) ]]; then
+      deployment_scope="full"
+    elif [[ "$dashboard_changed" == true ]]; then
+      deployment_scope="dashboard"
+    elif [[ "$worker_changed" == true ]]; then
+      deployment_scope="worker"
+    fi
+  fi
+fi
+
 git checkout --detach --force "$requested_sha" >/dev/null || die "could not select requested commit"
+
+printf 'deployment scope: %s\n' "$deployment_scope"
+
+if [[ "$deployment_scope" == "none" ]]; then
+  record_deployed_sha
+  printf 'no application changes; recorded %s\n' "$requested_sha"
+  exit 0
+fi
 
 compose=(docker compose --env-file "$ENV_FILE" --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
 "${compose[@]}" config --quiet || die "Compose configuration is invalid"
-"${compose[@]}" build --pull || die "container build failed"
 "${compose[@]}" up -d postgres || die "PostgreSQL could not start"
 wait_healthy postgres
 
-# The V0 worker also migrates on startup. Running the migration command first
-# makes the CD order explicit and fails before application containers switch.
-"${compose[@]}" run --rm --no-deps worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts \
-  >/dev/null || die "database migration failed"
-"${compose[@]}" up -d dashboard worker || die "application containers could not start"
-wait_healthy dashboard
-wait_healthy worker
+case "$deployment_scope" in
+  full)
+    "${compose[@]}" build --pull || die "container build failed"
+    # The V0 worker also migrates on startup. Running the migration command
+    # first makes the CD order explicit and fails before containers switch.
+    "${compose[@]}" run --rm --no-deps worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts \
+      >/dev/null || die "database migration failed"
+    "${compose[@]}" up -d dashboard worker || die "application containers could not start"
+    wait_healthy dashboard
+    wait_healthy worker
+    ;;
+  dashboard)
+    "${compose[@]}" build --pull dashboard || die "dashboard build failed"
+    "${compose[@]}" up -d dashboard || die "dashboard could not start"
+    wait_healthy dashboard
+    ;;
+  worker)
+    "${compose[@]}" build --pull worker || die "worker build failed"
+    if [[ "$migration_changed" == true ]]; then
+      "${compose[@]}" run --rm --no-deps worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts \
+        >/dev/null || die "database migration failed"
+    fi
+    "${compose[@]}" up -d worker || die "worker could not start"
+    wait_healthy worker
+    ;;
+  *)
+    die "unknown deployment scope: $deployment_scope"
+    ;;
+esac
 
-install -d -o root -g root -m 0755 "$(dirname "$DEPLOYED_SHA_FILE")"
-install -o root -g root -m 0644 <(printf '%s\n' "$requested_sha") "$DEPLOYED_SHA_FILE"
+record_deployed_sha
 printf 'deployed %s\n' "$requested_sha"

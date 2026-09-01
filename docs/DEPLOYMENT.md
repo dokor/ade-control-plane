@@ -139,11 +139,20 @@ invoke only `/usr/local/sbin/ade-control-plane-deploy`; it cannot invoke generic
 `sudo` commands or `sudo docker` through its ADE sudo policy. If the shared
 `github-runner` account already belongs to the Docker group for another
 application, that is pre-existing host-wide authority and should be reviewed
-separately. The wrapper accepts one validated commit SHA,
-requires the allow-listed repository and clean checkout, builds the selected
-version, starts PostgreSQL, runs the migration command, starts the application,
-waits for all Compose healthchecks and records the deployed SHA in
+separately. The wrapper accepts one validated commit SHA, requires the
+allow-listed repository and clean checkout, selects the changed application
+scope, starts PostgreSQL when an application update is needed, waits for the
+relevant Compose healthchecks and records the deployed SHA in
 `/var/lib/ade-control-plane/deployed-sha`. It never prints secrets.
+
+For a commit that only changes `apps/dashboard`, it rebuilds and restarts only
+`dashboard`. A commit limited to `apps/worker` rebuilds and restarts only
+`worker`; database migrations are run when migration code changes. Changes to
+shared packages, Docker/Compose files, dependencies or migration packages use
+the full deployment path. Documentation-only commits are recorded without
+restarting containers. If the previous deployed SHA is unavailable, invalid,
+or not an ancestor of the requested SHA, the wrapper conservatively uses the
+full deployment path.
 
 The wrapper itself must be reviewed and reinstalled from an approved `main`
 commit when it changes. Production runtime secrets remain in the protected
