@@ -6,6 +6,7 @@ import { PriorityForm } from "../../../components/PriorityForm.js";
 import { ProjectInitializeButton } from "../../../components/ProjectInitializeButton.js";
 import { ProjectSetupAssistant } from "../../../components/ProjectSetupAssistant.js";
 import { Shell } from "../../../components/Shell.js";
+import { StatusBadge } from "../../../components/StatusBadge.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
 import { formatAge, formatInstant } from "../../../lib/format.js";
 import { getPersistence } from "../../../lib/persistence.js";
@@ -56,13 +57,13 @@ export default async function ProjectPage({
         <Link href="/">← Overview</Link>
       </p>
 
-      <ProjectSetupAssistant projectId={project.id} readiness={setupReadiness} />
+      <ProjectSetupAssistant projectId={project.id} readiness={setupReadiness} refreshIntervalMs={config.refreshIntervalMs} />
 
       <div className="cards">
         <article className="card">
           <h2>Control state</h2>
           <p className="value">
-            <span className={`badge ${project.status}`}>{project.status}</span>
+            <StatusBadge status={project.status} />
           </p>
           <p className="detail">
             {project.controlState} · priority {project.priority}
@@ -76,7 +77,7 @@ export default async function ProjectPage({
 
         <article className="card">
           <h2>ADE compatibility</h2>
-          <p className="value"><span className={`badge ${project.adeStatus}`}>{project.adeStatus}</span></p>
+          <p className="value"><StatusBadge status={project.adeStatus} /></p>
           <p className="detail">Runtime {project.adeRuntimeVersion}</p>
           <p className="detail">Config {project.adeConfigVersion ?? "missing or not validated"}</p>
           <p className="detail">Profiles {project.resolvedProfiles.join(", ") || "—"}</p>
@@ -88,7 +89,11 @@ export default async function ProjectPage({
 
         <article className="card">
           <h2>ADE snapshot</h2>
-          <p className="value">{project.snapshotFresh ? "fresh" : "stale"}</p>
+          <p className="value">
+            <StatusBadge status={project.snapshotFresh ? "fresh" : "stale"}>
+              {project.snapshotFresh ? "fresh" : "stale"}
+            </StatusBadge>
+          </p>
           <p className="detail">
             Observed {formatAge(project.snapshotAgeMs)} ({formatInstant(project.snapshotObservedAt)})
           </p>
@@ -208,9 +213,7 @@ export default async function ProjectPage({
               <article key={execution.id} className="panel">
                 <div className="row">
                   <span>
-                    <span className={`badge ${execution.status === "failed" ? "failed" : execution.status}`}>
-                      {execution.status}
-                    </span>{" "}
+                    <StatusBadge status={execution.status} />{" "}
                     attempt {execution.attempt} · {execution.capability}
                   </span>
                   <span className="muted">{formatInstant(execution.requestedAt)}</span>
