@@ -87,6 +87,19 @@ execution safeguards: task creation still verifies that the issue has a valid
 ADE work contract in the `ready` state. Issue loading failures are shown inline
 and can be retried from the composer without reloading the page.
 
+The task history and `/tasks/{id}` detail view are task-centric and diagnostic:
+
+- the list shows the outcome and PR/failure summary without opening every task;
+- the detail view presents a chronological execution timeline with explicit
+  pending, running, passed, warning, failed and cancelled states;
+- setup, Codex, command, checks, Git, GitHub and error events are visually
+  distinct;
+- the first failure and final delivery result are called out;
+- bounded sanitized stdout/stderr remains available as collapsed raw output;
+- polling remains sufficient for refresh; no realtime transport is required;
+- internal model reasoning, secrets, full environments and sensitive host paths
+  are never rendered.
+
 ### `/runners`
 
 Show safe runner metadata:

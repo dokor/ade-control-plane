@@ -121,6 +121,15 @@ export default async function TasksPage() {
                     <p>{task.source.type === "github-issue"
                       ? `GitHub issue #${task.source.issueNumber}`
                       : task.source.type === "ade-initialize" ? "Initialisation ADE" : "Prompt libre"}</p>
+                    <p className={`task-history-result ${task.status.toLowerCase()}`}>
+                      {task.status === "SUCCESS"
+                        ? task.pullRequestNumber ? `Completed successfully · PR #${task.pullRequestNumber}` : "Completed successfully"
+                        : task.status === "FAILED"
+                          ? `${task.errorCode ?? "Execution failed"}: ${task.errorSummary ?? "Review task details for the failure point."}`
+                          : task.status === "CANCELLED"
+                            ? "Cancelled before successful delivery"
+                            : task.status === "RUNNING" ? "Execution in progress" : "Waiting for the worker"}
+                    </p>
                     <small>{task.repository} / {task.id.slice(0, 8)}</small>
                   </div>
                   <div className="task-history-action">

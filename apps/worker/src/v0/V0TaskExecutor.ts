@@ -187,8 +187,10 @@ export class V0TaskExecutor {
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });
       if (agentResult.exitCode !== 0) {
+        await this.log(task.id, `${this.agentExecutor.provider} execution failed.`);
         throw new V0ExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
+      await this.log(task.id, `${this.agentExecutor.provider} execution passed.`);
       usage = agentResult.usage;
       await this.assertNotCancelled(task.id);
 
@@ -443,11 +445,13 @@ export class V0TaskExecutor {
     await this.log(taskId, `${label} started.`);
     const result = await this.options.commands.run(input);
     if (result.exitCode !== 0) {
+      await this.log(taskId, `${label} failed.`);
       throw new V0ExecutionError(
         `${label.toUpperCase().replace(/[^A-Z0-9]+/gu, "_")}_FAILED`,
         `${label} failed.`,
       );
     }
+    await this.log(taskId, `${label} passed.`);
     return result;
   }
 

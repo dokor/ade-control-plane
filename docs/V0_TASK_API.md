@@ -68,7 +68,7 @@ setup check and delivery gates before creating the human-reviewed pull request.
 
 Issue titles are read-only Dashboard metadata. Issue bodies and comments are not copied into task persistence or returned by the issue API.
 
-Each `/tasks/{id}` detail page shows the durable lifecycle state, branch, safe GitHub pull-request link, sanitized error summary and up to 2,000 sanitized log entries. `PENDING` tasks can be cancelled and `RUNNING` tasks can be stopped from either page. Pull-request links are rendered only when they use HTTPS on `github.com`; external task content is always rendered as text.
+Each `/tasks/{id}` detail page shows the durable lifecycle state, branch, safe GitHub pull-request link, execution duration, a structured chronological history and up to 2,000 sanitized log entries. The history highlights setup, Codex, command, checks, Git, GitHub and error events, including whether each step is pending, running, passed, failed or cancelled. The first recorded failure and the final delivery outcome are surfaced above the timeline; raw stdout/stderr remains available in a collapsed diagnostic panel. `PENDING` tasks can be cancelled and `RUNNING` tasks can be stopped from either page. Pull-request links are rendered only when they use HTTPS on `github.com`; external task content is always rendered as text.
 
 ## Recovery
 

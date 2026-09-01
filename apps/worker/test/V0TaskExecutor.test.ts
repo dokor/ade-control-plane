@@ -65,6 +65,9 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
     );
     assert.match(github.createdPullRequests[0]?.input.body ?? "", /@dokor/);
     assert.match(github.createdPullRequests[0]?.input.body ?? "", /ADE deterministic staged review passed/);
+    assert.ok(context.logs.some(({ message }) => message === "git fetch passed."));
+    assert.ok(context.logs.some(({ message }) => message === "git commit passed."));
+    assert.ok(context.logs.some(({ message }) => message === "codex execution passed."));
   } finally {
     await context.close();
   }
@@ -343,6 +346,7 @@ async function setup() {
   return {
     projectRoot,
     task,
+    logs,
     persistence,
     close: () => rm(projectRoot, { recursive: true, force: true }),
   };
