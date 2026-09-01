@@ -49,6 +49,7 @@ export {
   type GithubPullRequestInput,
   type GithubLabel,
   type GithubRepositoryContent,
+  type GithubRepositoryMetadata,
   type GithubSetupClient,
   type GithubSetupPullRequestInput,
   type HttpGithubClientOptions,

@@ -150,7 +150,7 @@ export default async function OverviewPage() {
       </section>
 
       <section>
-        <h2>Projects</h2>
+        <div className="row"><h2>Projects</h2><Link className="button primary" href="/projects/new">Add project</Link></div>
         {overview.projects.length === 0 ? (
           <p className="muted">No project is registered yet.</p>
         ) : (
