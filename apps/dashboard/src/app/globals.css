@@ -256,10 +256,13 @@ textarea { resize: vertical; min-height: 150px; }
 form.stack { display: grid; gap: 10px; max-width: 340px; }
 
 .timeline { display: grid; gap: 8px; }
-.timeline .entry { border-left: 3px solid var(--border); padding-left: 10px; }
+.timeline .entry { display: grid; gap: 4px; border-left: 3px solid var(--border); padding-left: 10px; }
 .timeline .entry.warning { border-left-color: var(--warn); }
 .timeline .entry.error { border-left-color: var(--danger); }
 .timeline time { color: var(--muted); font-size: 12px; }
+.timeline-entry-heading { display: flex; flex-wrap: wrap; gap: 7px; align-items: baseline; }
+.timeline-kind { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.timeline .muted { overflow-wrap: anywhere; }
 
 .notice {
   border: 1px solid var(--warn);

@@ -240,7 +240,12 @@ export default async function ProjectPage({
               <div key={entry.id} className={`entry ${entry.severity}`}>
                 <time>{formatInstant(entry.occurredAt)}</time>
                 <div>
-                  <strong>{entry.title}</strong>
+                  <div className="timeline-entry-heading">
+                    <span className={`timeline-kind ${entry.kind}`}>
+                      {entry.kind === "execution" ? "Execution" : entry.kind === "audit" ? "System event" : "Control"}
+                    </span>
+                    <strong>{entry.title}</strong>
+                  </div>
                   {entry.detail ? <span className="muted"> — {entry.detail}</span> : null}
                 </div>
               </div>

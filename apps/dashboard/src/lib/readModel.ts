@@ -751,10 +751,15 @@ function buildTimeline(
       id: `execution:${execution.id}`,
       occurredAt: execution.finishedAt ?? execution.startedAt ?? execution.requestedAt,
       kind: "execution" as const,
-      title: `Execution ${execution.status} (attempt ${execution.attempt})`,
-      detail: execution.errorCode
-        ? `${execution.errorCode}: ${execution.errorSummary ?? "no further detail"}`
-        : execution.workRef,
+      title: `Task execution ${executionStatusLabel(execution.status)}`,
+      detail: [
+        `Execution ${shortReference(execution.id)}`,
+        `attempt ${execution.attempt}`,
+        workReferenceLabel(execution.workRef),
+        execution.errorCode
+          ? `Error ${sanitizeText(execution.errorCode, 80)}: ${execution.errorSummary ?? "no further detail"}`
+          : null,
+      ].filter((value): value is string => value !== null).join(" · "),
       severity:
         execution.status === "failed"
           ? ("error" as const)
@@ -766,16 +771,25 @@ function buildTimeline(
       id: `audit:${event.id}`,
       occurredAt: event.occurredAt,
       kind: "audit" as const,
-      title: `${event.category}: ${event.action}`,
-      detail: event.reason ? sanitizeText(event.reason) : null,
+      title: `${timelineCategoryLabel(event.category)} event: ${timelineActionLabel(event.action)}`,
+      detail: [
+        event.result ? `Result: ${humanizeIdentifier(event.result)}` : null,
+        event.executionId ? `Execution ${shortReference(event.executionId)}` : null,
+        event.runnerId ? `Runner ${shortReference(event.runnerId)}` : null,
+        event.reason ? sanitizeText(event.reason) : null,
+      ].filter((value): value is string => value !== null).join(" · ") || null,
       severity: normalizeSeverity(event.severity),
     })),
     ...commands.map((command) => ({
       id: `command:${command.id}`,
       occurredAt: command.receivedAt,
       kind: "command" as const,
-      title: `${command.commandType} (${command.status})`,
-      detail: `Requested by ${command.actorRef} via ${command.source}.`,
+      title: `Control command ${commandStatusLabel(command.status)}: ${commandLabel(command.commandType)}`,
+      detail: [
+        `Command ${shortReference(command.id)}`,
+        `requested by ${sanitizeText(command.actorRef)} via ${humanizeIdentifier(command.source)}`,
+        command.resultSummary ? resultSummary(command.resultSummary) : null,
+      ].filter((value): value is string => value !== null).join(" · "),
       severity:
         command.status === "rejected" || command.status === "failed"
           ? ("warning" as const)
@@ -786,6 +800,112 @@ function buildTimeline(
   return entries.sort(
     (left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
   );
+}
+
+const TIMELINE_CATEGORY_LABELS: Readonly<Record<string, string>> = {
+  control: "Control",
+  execution: "Execution",
+  github: "GitHub",
+  "github-work": "GitHub work",
+  project: "Project",
+  quota: "Quota",
+  security: "Security",
+  session: "Session",
+  worker: "Worker",
+};
+
+const TIMELINE_ACTION_LABELS: Readonly<Record<string, string>> = {
+  "command.applied": "Command applied",
+  "command.denied": "Command denied",
+  "command.failed": "Command failed",
+  "command.rejected": "Command rejected",
+  "github.status": "Status reported to GitHub",
+  "github-work.completed": "GitHub work completed",
+  "github-work.dispatch-failed": "GitHub work dispatch failed",
+  "github-work.reconciliation-failed": "GitHub work reconciliation failed",
+  "project.checkout.failed": "Project checkout failed",
+  "project.checkout.ready": "Project checkout ready",
+  "project.onboarding.registered": "Project registered",
+  "project.setup.prepare": "Project setup prepared",
+  "quota-policy-transition": "Quota policy changed",
+  "session.denied": "Operator session denied",
+  "session.granted": "Operator session granted",
+  "worker.cycle-failed": "Worker cycle failed",
+  "worker.cycle-succeeded": "Worker cycle completed",
+  "worker.started": "Worker started",
+};
+
+const COMMAND_LABELS: Readonly<Record<string, string>> = {
+  "ade.decide": "Resolve ADE decision",
+  "execution.safe-retry": "Request safe retry",
+  "global.pause": "Pause global scheduling",
+  "global.resume": "Resume global scheduling",
+  "global.safe-mode": "Enable safe mode",
+  "project.pause": "Pause project",
+  "project.reprioritize": "Update project priority",
+  "project.resume": "Resume project",
+  "runner.disable": "Disable runner",
+  "runner.drain": "Drain runner",
+  "runner.enable": "Enable runner",
+};
+
+const EXECUTION_STATUS_LABELS: Readonly<Record<ExecutionRecord["status"], string>> = {
+  queued: "queued",
+  leased: "leased",
+  dispatched: "dispatched",
+  running: "running",
+  succeeded: "succeeded",
+  failed: "failed",
+  cancelled: "cancelled",
+  unknown: "needs reconciliation",
+};
+
+const COMMAND_STATUS_LABELS: Readonly<Record<ControlCommandRecord["status"], string>> = {
+  received: "received",
+  authorized: "authorized",
+  rejected: "rejected",
+  applied: "applied",
+  failed: "failed",
+};
+
+function executionStatusLabel(status: ExecutionView["status"]): string {
+  return EXECUTION_STATUS_LABELS[status];
+}
+
+function commandStatusLabel(status: ControlCommandRecord["status"]): string {
+  return COMMAND_STATUS_LABELS[status];
+}
+
+function timelineCategoryLabel(category: string): string {
+  return TIMELINE_CATEGORY_LABELS[category] ?? humanizeIdentifier(category);
+}
+
+function timelineActionLabel(action: string): string {
+  return TIMELINE_ACTION_LABELS[action] ?? humanizeIdentifier(action);
+}
+
+function commandLabel(commandType: string): string {
+  return COMMAND_LABELS[commandType] ?? humanizeIdentifier(commandType);
+}
+
+function workReferenceLabel(workRef: string | null): string | null {
+  if (!workRef) return null;
+  const githubIssue = /^github:issue:(\d+)$/u.exec(workRef);
+  return githubIssue ? `GitHub issue #${githubIssue[1]}` : `Work ${sanitizeText(workRef, 120)}`;
+}
+
+function resultSummary(summary: ControlCommandRecord["resultSummary"]): string | null {
+  const value = summary?.summary;
+  return typeof value === "string" ? sanitizeText(value) : null;
+}
+
+function shortReference(value: string): string {
+  return sanitizeText(value, 12);
+}
+
+function humanizeIdentifier(value: string): string {
+  const words = value.replace(/[._-]+/gu, " ").trim().toLowerCase().split(/\s+/u);
+  return words.filter(Boolean).map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`).join(" ") || "Unknown";
 }
 
 function normalizeSeverity(severity: string): "info" | "warning" | "error" {
