@@ -85,6 +85,7 @@ export function TaskComposer({
       if (body.githubWork) {
         setAdmission(`Issue #${body.githubWork.issueNumber}: ${body.githubWork.stage}.`);
         void loadIssues(projectId);
+        router.refresh();
         return;
       }
       if (!body.task?.id) {

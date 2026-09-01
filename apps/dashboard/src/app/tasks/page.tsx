@@ -31,10 +31,10 @@ export default async function TasksPage() {
             logs and pull request from here.
           </p>
         </div>
-        <div className={`task-slot ${dashboard.activeTask ? "busy" : "available"}`}>
+        <div className={`task-slot ${dashboard.activeTask || dashboard.activeGithubWork ? "busy" : "available"}`}>
           <span className="task-slot-dot" aria-hidden="true" />
-          <strong>{dashboard.activeTask ? "Execution slot busy" : "Execution slot ready"}</strong>
-          <small>{dashboard.activeTask ? dashboard.activeTask.projectName : "One task at a time"}</small>
+          <strong>{dashboard.activeTask || dashboard.activeGithubWork ? "Execution slot busy" : "Execution slot ready"}</strong>
+          <small>{dashboard.activeTask?.projectName ?? dashboard.activeGithubWork?.projectName ?? "One task at a time"}</small>
         </div>
       </section>
 
@@ -86,6 +86,19 @@ export default async function TasksPage() {
                 />
               </div>
             </div>
+          ) : dashboard.activeGithubWork ? (
+            <div className="task-active-body">
+              <span className="badge running">{dashboard.activeGithubWork.stage}</span>
+              <h3>{dashboard.activeGithubWork.projectName}</h3>
+              <p>GitHub issue #{dashboard.activeGithubWork.issueNumber}</p>
+              <dl className="task-meta">
+                <div><dt>Repository</dt><dd>{dashboard.activeGithubWork.repository}</dd></div>
+                <div><dt>Execution</dt><dd>{dashboard.activeGithubWork.executionStatus ?? "reconciling"}</dd></div>
+              </dl>
+              <div className="actions">
+                <a className="button task-open" href={dashboard.activeGithubWork.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a>
+              </div>
+            </div>
           ) : (
             <div className="task-empty-slot">
               <span>Ready</span>
@@ -94,6 +107,32 @@ export default async function TasksPage() {
           )}
         </aside>
       </div>
+
+      {dashboard.githubWork.length > 0 ? (
+        <section className="task-history-section">
+          <div className="task-history-heading">
+            <div>
+              <p className="task-kicker">ADE GitHub lifecycle</p>
+              <h2>Issue lifecycle</h2>
+            </div>
+            <span>{dashboard.githubWork.length} shown</span>
+          </div>
+          <div className="task-history">
+            {dashboard.githubWork.map((work) => (
+              <article key={work.id} className="task-history-row">
+                <div className="task-history-status"><span className={`badge ${work.state}`}>{work.stage}</span></div>
+                <div className="task-history-main">
+                  <span className="badge badge-neutral task-history-project">{work.projectName}</span>
+                  <h3>GitHub issue #{work.issueNumber}</h3>
+                  <p>{work.executionStatus ? `Execution ${work.executionStatus}` : "Awaiting worker reconciliation"}</p>
+                  {work.executionError ? <p className="task-history-result failed">{work.executionError}</p> : null}
+                </div>
+                <div className="task-history-action"><a href={work.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a></div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="task-history-section">
         <div className="task-history-heading">

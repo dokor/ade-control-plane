@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { V0TaskRecord } from "@ade-control-plane/database";
+import type { ExecutionRecord, GithubWorkItemRecord, V0TaskRecord } from "@ade-control-plane/database";
 
 import {
   buildTaskDashboard,
@@ -56,6 +56,28 @@ test("builds the task runway with enabled projects and the active slot", async (
   assert.equal(dashboard.activeTask?.id, TASK_ID);
   assert.equal(dashboard.activeTask?.repository, "dokor/argos");
   assert.equal(dashboard.tasks.length, 2);
+});
+
+test("shows a persisted GitHub work execution in the Task runway", async () => {
+  const githubWork: GithubWorkItemRecord = {
+    id: "github-work-1", projectId: project().id, repositoryGithubId: "argos", contractVersion: "ade.github-work/v1",
+    issueNumber: 136, issueUrl: "https://github.com/dokor/argos/issues/136", state: "running", priority: 50,
+    dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: "execution-1",
+    branchName: "ade/issue-136", pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T11:00:00.000Z", present: true,
+  };
+  const execution: ExecutionRecord = {
+    id: "execution-1", projectId: project().id, runnerId: "runner-1", adeExecutionRef: null, workRef: "github:issue:136",
+    capability: "github-work.codex", status: "running", attempt: 1, requestedAt: NOW, startedAt: NOW, finishedAt: null,
+    resultSummary: null, errorCode: null, errorSummary: null, createdAt: NOW, updatedAt: NOW,
+  };
+  const dashboard = await buildTaskDashboard(createMemoryPersistence(createMemoryState({
+    projects: [project()], githubWorkItems: [githubWork], executions: [execution],
+  })));
+
+  assert.equal(dashboard.activeTask, null);
+  assert.equal(dashboard.activeGithubWork?.issueNumber, 136);
+  assert.equal(dashboard.activeGithubWork?.stage, "Developing");
+  assert.equal(dashboard.githubWork[0]?.executionStatus, "running");
 });
 
 test("uses the GitHub issue title for task list items when available", async () => {
