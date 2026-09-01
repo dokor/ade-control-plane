@@ -236,6 +236,12 @@ export interface GithubWorkProfileRecord {
   contextStatus?: "fresh" | "stale" | "missing" | "unknown";
 }
 
+/** A requested local cleanup, handled by the worker that owns V0_PROJECT_ROOT. */
+export interface ProjectDeletionRequestRecord {
+  projectId: string;
+  requestedAt: string;
+}
+
 export interface GithubWorkItemRecord {
   id: string;
   projectId: string;

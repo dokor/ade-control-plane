@@ -24,6 +24,7 @@ import type {
   JsonObject,
   JsonValue,
   ProjectControlState,
+  ProjectDeletionRequestRecord,
   ProjectRecord,
   ProjectSnapshotRecord,
   ProviderQuotaPolicyState,
@@ -397,6 +398,11 @@ export interface ProjectRepository {
   register(input: ProjectRegistrationInput): Promise<ProjectRecord>;
   updatePriority(projectId: string, priority: number): Promise<ProjectRecord>;
   updateState(projectId: string, state: ProjectControlState): Promise<ProjectRecord>;
+  /** Queues a destructive cleanup; false means it was already queued. */
+  requestDeletion(projectId: string, requestedAt: string): Promise<boolean>;
+  listDeletionRequests(): Promise<readonly ProjectDeletionRequestRecord[]>;
+  /** Deletes the project and every project-owned row through database cascades. */
+  delete(projectId: string): Promise<boolean>;
 }
 
 export interface ProjectSnapshotRepository {

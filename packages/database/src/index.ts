@@ -70,6 +70,7 @@ export type {
   JsonPrimitive,
   JsonValue,
   ProjectControlState,
+  ProjectDeletionRequestRecord,
   ProjectRecord,
   ProjectSnapshotRecord,
   ProviderQuotaPolicyState,
