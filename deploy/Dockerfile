@@ -43,7 +43,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 COPY --from=dashboard-build /workspace/apps/dashboard/.next/standalone ./
-COPY --from=dashboard-build /workspace/apps/dashboard/.next/static ./.next/static
+COPY --from=dashboard-build /workspace/apps/dashboard/.next/static ./apps/dashboard/.next/static
+WORKDIR /workspace/apps/dashboard
 USER ade-dashboard
 EXPOSE 3000
 CMD ["node", "server.js"]

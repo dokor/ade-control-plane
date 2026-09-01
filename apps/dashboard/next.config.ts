@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 /**
@@ -22,7 +24,10 @@ const CONTENT_SECURITY_POLICY = [
 
 const config: NextConfig = {
   output: "standalone",
-  outputFileTracingRoot: process.cwd(),
+  // pnpm keeps workspace dependencies at the repository root. Trace from that
+  // root so the standalone image contains real package targets instead of
+  // symlinks that point outside the copied runtime tree.
+  outputFileTracingRoot: path.resolve(process.cwd(), "../.."),
   poweredByHeader: false,
   reactStrictMode: true,
   webpack(webpackConfig) {
