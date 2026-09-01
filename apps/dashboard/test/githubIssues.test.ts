@@ -20,6 +20,16 @@ test("lists open repository issues without requiring ADE metadata", async () => 
   assert.equal(result[0]?.priority, null);
 });
 
+test("keeps ordinary open issues admissible while readiness stays a separate projection", async () => {
+  const result = await listGithubIssues(project(), {
+    issueReader: {
+      listIssues: async () => [{ number: 29, title: "Needs ADE preparation", state: "open", url: "https://github.com/dokor/argos/issues/29", updatedAt: NOW }],
+      getIssue: async () => null,
+    },
+  });
+  assert.deepEqual(result, [{ number: 29, title: "Needs ADE preparation", state: "open", url: "https://github.com/dokor/argos/issues/29", updatedAt: NOW, adeState: null, priority: null }]);
+});
+
 test("returns only open ADE-managed ready issues", async () => {
   const result = await listReadyGithubIssues(project(), {
     issueReader: {
