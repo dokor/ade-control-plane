@@ -143,7 +143,7 @@ export function TaskComposer({
             disabled={pending || activeTaskId !== null || issuesLoading || issues.length === 0}
           >
             {issues.length === 0 ? (
-              <option value="">{issuesLoading ? "Loading issues..." : "No ready issue available"}</option>
+              <option value="">{issuesLoading ? "Loading issues..." : "No open issue available"}</option>
             ) : null}
             {issues.map((issue) => (
               <option key={issue.number} value={issue.number}>
@@ -153,7 +153,9 @@ export function TaskComposer({
           </select>
           {selectedIssue ? (
             <small className="task-issue-meta">
-              ADE managed · {selectedIssue.adeState} · priority {selectedIssue.priority} ·{" "}
+              {selectedIssue.adeState === "ready"
+                ? `ADE managed · ready · priority ${selectedIssue.priority} · `
+                : "Not validated for ADE execution · "}
               <a href={selectedIssue.url} target="_blank" rel="noreferrer noopener">View on GitHub ↗</a>
             </small>
           ) : null}

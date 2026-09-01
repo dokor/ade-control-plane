@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { ControlError } from "../../../../lib/errors.js";
 import { handleDashboardApi } from "../../../../lib/dashboardApi.js";
-import { listReadyGithubIssues } from "../../../../lib/githubIssues.js";
+import { listGithubIssues } from "../../../../lib/githubIssues.js";
 import { loadGithubRuntime } from "../../../../lib/githubRuntime.js";
 import { getPersistence } from "../../../../lib/persistence.js";
 
@@ -25,7 +25,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     if (!github) {
       throw new ControlError("UNAVAILABLE", "GitHub issue selection is not configured.");
     }
-    const issues = await listReadyGithubIssues(project, github);
+    const issues = await listGithubIssues(project, github);
     return { body: { issues } };
   });
 }
