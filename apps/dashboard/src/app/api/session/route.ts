@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { NextResponse } from "next/server";
 
-import { loadDashboardConfig } from "../../../lib/config.js";
+import { authorizeSameOrigin } from "../../../lib/control.js";
+import { readJsonObject } from "../../../lib/dashboardApi.js";
+import { httpStatusForCode } from "../../../lib/errors.js";
 import { getPersistence } from "../../../lib/persistence.js";
+import { readDashboardRequest } from "../../../lib/requestAuth.js";
 import { sanitizeError } from "../../../lib/sanitize.js";
 import {
   clearedSessionCookie,
@@ -21,19 +24,11 @@ export async function POST(request: Request): Promise<NextResponse> {
   const now = new Date().toISOString();
 
   try {
-    const config = await loadDashboardConfig();
-    if (request.headers.get("origin") !== config.publicOrigin) {
-      return NextResponse.json(
-        { code: "CSRF_REJECTED", summary: "Unexpected request origin.", correlationId },
-        { status: 403 },
-      );
-    }
+    const { config } = await readDashboardRequest();
+    authorizeSameOrigin(request.headers.get("origin"), config.publicOrigin);
 
-    const body: unknown = await request.json().catch(() => null);
-    const password =
-      typeof body === "object" && body !== null
-        ? (body as Record<string, unknown>).password
-        : undefined;
+    const body = await readJsonObject(request);
+    const password = body.password;
     const accepted =
       typeof password === "string" &&
       verifyOperatorPassword(password, config.operatorPasswordHash);
@@ -55,7 +50,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       { actorRef: config.operatorRef, canRead: true, canMutate: true },
       { secret: config.sessionSecret, ttlMs: config.sessionTtlMs },
     );
-    const response = NextResponse.json({ status: "authenticated" });
+    const response = NextResponse.json({ status: "authenticated", correlationId });
     response.headers.set(
       "set-cookie",
       serializeSessionCookie(token, {
@@ -66,16 +61,23 @@ export async function POST(request: Request): Promise<NextResponse> {
     return response;
   } catch (error) {
     const sanitized = sanitizeError(error, correlationId);
-    return NextResponse.json(sanitized, { status: 500 });
+    return NextResponse.json(sanitized, { status: httpStatusForCode(sanitized.code) });
   }
 }
 
 /** Sign-out clears the cookie unconditionally. */
-export async function DELETE(): Promise<NextResponse> {
-  const config = await loadDashboardConfig();
-  const response = NextResponse.json({ status: "signed-out" });
-  response.headers.set("set-cookie", clearedSessionCookie(config.cookieSecure));
-  return response;
+export async function DELETE(request: Request): Promise<NextResponse> {
+  const correlationId = randomUUID();
+  try {
+    const { config } = await readDashboardRequest();
+    authorizeSameOrigin(request.headers.get("origin"), config.publicOrigin);
+    const response = NextResponse.json({ status: "signed-out", correlationId });
+    response.headers.set("set-cookie", clearedSessionCookie(config.cookieSecure));
+    return response;
+  } catch (error) {
+    const sanitized = sanitizeError(error, correlationId);
+    return NextResponse.json(sanitized, { status: httpStatusForCode(sanitized.code) });
+  }
 }
 
 async function auditSignIn(

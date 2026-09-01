@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
+
 export interface ControlButtonProps {
   type: string;
   payload?: Record<string, unknown>;
@@ -16,8 +18,6 @@ export interface ControlButtonProps {
 
 interface ControlResponse {
   summary?: string;
-  code?: string;
-  correlationId?: string;
 }
 
 export function ControlButton({
@@ -39,21 +39,15 @@ export function ControlButton({
     setPending(true);
     setMessage(null);
     try {
-      const response = await fetch("/api/control", {
+      const body = await requestDashboardJson<ControlResponse>("/api/control", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        credentials: "same-origin",
         body: JSON.stringify({ type, payload, idempotencyKey: crypto.randomUUID() }),
-      });
-      const body = (await response.json()) as ControlResponse;
-      setMessage(
-        response.ok
-          ? (body.summary ?? "Command applied.")
-          : `${body.code ?? "ERROR"} — ${body.correlationId ?? ""}`,
-      );
-      if (response.ok) router.refresh();
-    } catch {
-      setMessage("The command could not be sent.");
+      }, "The command could not be sent.");
+      setMessage(body.summary ?? "Command applied.");
+      router.refresh();
+    } catch (reason) {
+      setMessage(dashboardErrorMessage(reason, "The command could not be sent."));
     } finally {
       setPending(false);
     }
