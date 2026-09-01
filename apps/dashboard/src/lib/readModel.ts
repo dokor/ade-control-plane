@@ -361,7 +361,7 @@ export async function buildProjectDetail(
     executions: executionViews,
     timeline: buildTimeline(executionViews, auditEvents, commands),
     humanDecisions: overview.attention.filter(
-      (item) => item.projectId === project.id,
+      (item) => item.projectId === project.id && item.key.startsWith("human:"),
     ),
     openDecisions: decisions.map(toDecisionView),
     availableActions: {

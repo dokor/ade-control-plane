@@ -153,6 +153,31 @@ test("project detail exposes a sanitized timeline and gated controls", async () 
   );
 });
 
+test("does not show reconciliation as a human decision when none is pending", async () => {
+  const state = twoProjectState();
+  state.projects = [project()];
+  state.githubWorkProfiles = [];
+  state.githubWorkItems = [];
+
+  const detail = await buildProjectDetail({ ...input(state), projectId: project().id });
+
+  assert.ok(detail);
+  assert.equal(detail.openDecisions.length, 0);
+  assert.equal(detail.humanDecisions.length, 0);
+  assert.ok(detail.project.status === "unknown");
+});
+
+test("keeps a real waiting-human work item visible", async () => {
+  const detail = await buildProjectDetail({
+    ...input(twoProjectState()),
+    projectId: SECOND_PROJECT_ID,
+  });
+
+  assert.ok(detail);
+  assert.equal(detail.humanDecisions.length, 1);
+  assert.match(detail.humanDecisions[0]?.title ?? "", /human decision/i);
+});
+
 test("returns null for an unknown project", async () => {
   const detail = await buildProjectDetail({
     ...input(twoProjectState()),
