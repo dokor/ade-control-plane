@@ -246,7 +246,9 @@ function mapAgentUsage(row: TimestampRow): AgentUsageRecord {
 }
 
 function mapV0Task(row: TimestampRow): V0TaskRecord {
-  const source: V0TaskSource = row.source_type === "github-issue" &&
+  const source: V0TaskSource = row.source_type === "ade-initialize"
+    ? { type: "ade-initialize" }
+    : row.source_type === "github-issue" &&
     Number.isInteger(Number(row.github_issue_number)) &&
     Number(row.github_issue_number) > 0
     ? { type: "github-issue", issueNumber: Number(row.github_issue_number) }

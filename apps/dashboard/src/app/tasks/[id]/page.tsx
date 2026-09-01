@@ -61,7 +61,7 @@ export default async function TaskDetailPage({
       <dl className="task-detail-meta">
         <div><dt>Source</dt><dd>{task.source.type === "github-issue"
           ? <a href={`https://github.com/${project.repositoryOwner}/${project.repositoryName}/issues/${task.source.issueNumber}`} target="_blank" rel="noreferrer noopener">GitHub issue #{task.source.issueNumber}</a>
-          : "Prompt libre"}</dd></div>
+          : task.source.type === "ade-initialize" ? "Initialisation ADE" : "Prompt libre"}</dd></div>
         <div><dt>Created</dt><dd>{formatInstant(task.createdAt)}</dd></div>
         <div><dt>Started</dt><dd>{formatInstant(task.startedAt)}</dd></div>
         <div><dt>Finished</dt><dd>{formatInstant(task.finishedAt)}</dd></div>

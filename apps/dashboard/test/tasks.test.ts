@@ -55,6 +55,16 @@ test("persists a GitHub issue source without copying issue content into the task
   assert.equal(task.prompt, "Implement GitHub issue #23");
 });
 
+test("creates an explicit ADE initialization task", async () => {
+  const { persistence } = context();
+  const task = await createTask(
+    persistence,
+    { projectId, source: { type: "ade-initialize" } },
+  );
+  assert.deepEqual(task.source, { type: "ade-initialize" });
+  assert.match(task.prompt, /^Initialize ADE for this repository/);
+});
+
 test("rejects malformed GitHub issue sources at the API boundary", async () => {
   const { persistence } = context();
   await assert.rejects(

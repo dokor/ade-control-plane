@@ -69,7 +69,9 @@ export default async function TasksPage() {
               <h3>{dashboard.activeTask.projectName}</h3>
               <p>{dashboard.activeTask.source.type === "github-issue"
                 ? `GitHub issue #${dashboard.activeTask.source.issueNumber}`
-                : dashboard.activeTask.prompt}</p>
+                : dashboard.activeTask.source.type === "ade-initialize"
+                  ? "Initialisation de la configuration ADE"
+                  : dashboard.activeTask.prompt}</p>
               <dl className="task-meta">
                 <div><dt>Created</dt><dd>{formatInstant(dashboard.activeTask.createdAt)}</dd></div>
                 <div><dt>Repository</dt><dd>{dashboard.activeTask.repository}</dd></div>
@@ -118,7 +120,7 @@ export default async function TasksPage() {
                     <h3><Link href={`/tasks/${task.id}`}>{task.title}</Link></h3>
                     <p>{task.source.type === "github-issue"
                       ? `GitHub issue #${task.source.issueNumber}`
-                      : "Prompt libre"}</p>
+                      : task.source.type === "ade-initialize" ? "Initialisation ADE" : "Prompt libre"}</p>
                     <small>{task.repository} / {task.id.slice(0, 8)}</small>
                   </div>
                   <div className="task-history-action">

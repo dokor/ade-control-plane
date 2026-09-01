@@ -16,6 +16,9 @@ export interface CreateTaskInput {
   prompt?: string;
 }
 
+export const ADE_INITIALIZATION_PROMPT =
+  "Initialize ADE for this repository. Inspect the project, generate only the required ADE configuration files, validate them, and leave the changes ready for the worker to publish as a human-reviewed PR.";
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function createTask(
@@ -47,7 +50,9 @@ export async function createTask(
       projectId: input.projectId,
       prompt: source.type === "prompt"
         ? source.prompt
-        : `Implement GitHub issue #${source.issueNumber}`,
+        : source.type === "ade-initialize"
+          ? ADE_INITIALIZATION_PROMPT
+          : `Implement GitHub issue #${source.issueNumber}`,
       source,
       createdAt: now,
     });
@@ -86,6 +91,9 @@ function normalizeTaskSource(
     candidate.issueNumber > 0
   ) {
     return { type: "github-issue", issueNumber: candidate.issueNumber };
+  }
+  if ("type" in candidate && candidate.type === "ade-initialize") {
+    return { type: "ade-initialize" };
   }
   return null;
 }

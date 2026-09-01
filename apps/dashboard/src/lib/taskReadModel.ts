@@ -118,6 +118,7 @@ async function taskTitle(
   issueReader?: Pick<GithubIssueReader, "getIssue">,
 ): Promise<string> {
   if (task.source.type === "prompt") return sanitizeText(task.prompt, 240);
+  if (task.source.type === "ade-initialize") return "Initialize ADE configuration";
   const fallback = `GitHub issue #${task.source.issueNumber}`;
   if (!project || !issueReader) return fallback;
 
