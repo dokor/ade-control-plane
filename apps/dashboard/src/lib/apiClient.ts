@@ -1,3 +1,9 @@
+import {
+  createDashboardRequestId,
+  logDashboardFrontend,
+  safeDashboardEndpoint,
+} from "./observability.js";
+
 export interface DashboardErrorPayload {
   code?: string;
   summary?: string;
@@ -22,17 +28,64 @@ export async function requestDashboardJson<T>(
   init: RequestInit = {},
   fallback = "The Dashboard request failed.",
 ): Promise<T> {
-  const response = await fetch(input, {
-    ...init,
-    credentials: init.credentials ?? "same-origin",
+  const startedAt = Date.now();
+  const endpoint = safeDashboardEndpoint(input);
+  const clientRequestId = createDashboardRequestId();
+  const headers = new Headers(init.headers);
+  headers.set("x-dashboard-request-id", clientRequestId);
+  logDashboardFrontend("api.request.started", {
+    clientRequestId,
+    method: (init.method ?? "GET").toUpperCase().slice(0, 16),
+    endpoint,
   });
+
+  let response: Response;
+  try {
+    response = await fetch(input, {
+      ...init,
+      headers,
+      credentials: init.credentials ?? "same-origin",
+    });
+  } catch (error) {
+    logDashboardFrontend("api.request.failed", {
+      clientRequestId,
+      method: (init.method ?? "GET").toUpperCase().slice(0, 16),
+      endpoint,
+      durationMs: Date.now() - startedAt,
+      errorCategory: "transport",
+      errorCode: "NETWORK_ERROR",
+    });
+    throw error;
+  }
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new DashboardApiError(
+    const error = new DashboardApiError(
       isDashboardErrorPayload(body) ? body : {},
       fallback,
     );
+    logDashboardFrontend("api.request.failed", {
+      clientRequestId,
+      ...(error.correlationId ? { correlationId: error.correlationId } : {}),
+      method: (init.method ?? "GET").toUpperCase().slice(0, 16),
+      endpoint,
+      durationMs: Date.now() - startedAt,
+      httpStatus: response.status,
+      errorCategory: "control",
+      errorCode: error.code,
+    });
+    throw error;
   }
+  logDashboardFrontend("api.request.completed", {
+    clientRequestId,
+    ...(isDashboardErrorPayload(body) && typeof body.correlationId === "string"
+      ? { correlationId: body.correlationId }
+      : {}),
+    method: (init.method ?? "GET").toUpperCase().slice(0, 16),
+    endpoint,
+    durationMs: Date.now() - startedAt,
+    httpStatus: response.status,
+    outcome: "success",
+  });
   return body as T;
 }
 
