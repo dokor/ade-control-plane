@@ -18,10 +18,10 @@ export async function provisionRegisteredProjects(input: {
   const now = input.now ?? (() => new Date());
   const root = await realpath(input.projectRoot);
   for (const project of await input.persistence.projects.list()) {
-    await provisionProject({ ...input, root, project, now }).catch(async () => {
+    await provisionProject({ ...input, root, project, now }).catch(async (error: unknown) => {
       await input.persistence.auditEvents.append({
         occurredAt: now().toISOString(), category: "project-onboarding", severity: "warning", actorType: "system", actorRef: "v0-worker", projectId: project.id,
-        action: "project.checkout.failed", result: "deferred", metadata: { checkout: readCheckout(project) ?? "invalid" },
+        action: "project.checkout.failed", result: "deferred", metadata: { checkout: readCheckout(project) ?? "invalid", reason: provisioningFailureCode(error) },
       }).catch(() => undefined);
     });
   }
@@ -38,26 +38,34 @@ async function provisionProject(input: {
 }): Promise<void> {
   const checkout = readCheckout(input.project);
   const baseBranch = readBaseBranch(input.project);
-  if (!checkout || !baseBranch) throw new Error("Project checkout configuration is invalid.");
+  if (!checkout || !baseBranch) throw new ProjectProvisioningError("CHECKOUT_CONFIGURATION_INVALID");
   const target = resolve(input.root, checkout);
   const containment = relative(input.root, target);
-  if (isAbsolute(containment) || containment.startsWith("..") || containment === "") throw new Error("Project checkout escapes the configured root.");
+  if (isAbsolute(containment) || containment.startsWith("..") || containment === "") throw new ProjectProvisioningError("CHECKOUT_CONFIGURATION_INVALID");
   await mkdir(dirname(target), { recursive: true });
   const existing = await lstat(target).catch(() => null);
   if (existing) {
-    if (!existing.isDirectory()) throw new Error("Project checkout path is not a directory.");
+    if (!existing.isDirectory()) throw new ProjectProvisioningError("CHECKOUT_PATH_INVALID");
     const remote = await input.commands.run({ executable: "git", args: ["-C", target, "remote", "get-url", "origin"], cwd: input.projectRoot, env: input.gitEnvironment });
-    if (remote.exitCode !== 0 || !matchesGithubRemote(remote.stdout, input.project.repositoryOwner, input.project.repositoryName)) throw new Error("Existing project checkout remote does not match the registered repository.");
+    if (remote.exitCode !== 0 || !matchesGithubRemote(remote.stdout, input.project.repositoryOwner, input.project.repositoryName)) throw new ProjectProvisioningError("CHECKOUT_REMOTE_MISMATCH");
   } else {
     const clone = await input.commands.run({ executable: "git", args: ["clone", "--branch", baseBranch, "--single-branch", `git@github.com:${input.project.repositoryOwner}/${input.project.repositoryName}.git`, target], cwd: input.projectRoot, env: input.gitEnvironment });
-    if (clone.exitCode !== 0) throw new Error("Git clone failed.");
+    if (clone.exitCode !== 0) throw new ProjectProvisioningError("GIT_CLONE_FAILED");
     const remote = await input.commands.run({ executable: "git", args: ["-C", target, "remote", "get-url", "origin"], cwd: input.projectRoot, env: input.gitEnvironment });
-    if (remote.exitCode !== 0 || !matchesGithubRemote(remote.stdout, input.project.repositoryOwner, input.project.repositoryName)) throw new Error("Cloned project remote does not match the registered repository.");
+    if (remote.exitCode !== 0 || !matchesGithubRemote(remote.stdout, input.project.repositoryOwner, input.project.repositoryName)) throw new ProjectProvisioningError("CHECKOUT_REMOTE_MISMATCH");
   }
   await input.persistence.auditEvents.append({
     occurredAt: input.now().toISOString(), category: "project-onboarding", severity: "info", actorType: "system", actorRef: "v0-worker", projectId: input.project.id,
     action: "project.checkout.ready", result: "observed", metadata: { checkout, baseBranch },
   });
+}
+
+class ProjectProvisioningError extends Error {
+  public constructor(public readonly code: string) { super(code); }
+}
+
+function provisioningFailureCode(error: unknown): string {
+  return error instanceof ProjectProvisioningError ? error.code : "CHECKOUT_PROVISION_FAILED";
 }
 
 function readCheckout(project: ProjectRecord): string | null {

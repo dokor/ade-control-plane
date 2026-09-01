@@ -49,3 +49,13 @@ test("does not accept a checkout with a different remote", async () => {
   });
   assert.deepEqual(audits, ["project.checkout.failed"]);
 });
+
+test("records a safe clone failure reason without persisting Git output", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ade-provision-"));
+  const events: AuditEventRecord[] = [];
+  await provisionRegisteredProjects({
+    persistence: { projects: { list: async () => [project] }, auditEvents: { append: async (event) => { events.push(event as AuditEventRecord); return { ...event, id: "audit-1" } as AuditEventRecord; } } },
+    commands: { run: async () => ({ exitCode: 1, signal: null, stdout: "", stderr: "private failure" }) }, projectRoot: root, gitEnvironment: {},
+  });
+  assert.equal(events[0]?.metadata.reason, "GIT_CLONE_FAILED");
+});

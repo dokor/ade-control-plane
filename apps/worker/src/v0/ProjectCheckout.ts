@@ -10,6 +10,16 @@ export interface V0ProjectCheckout {
 
 const GIT_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/;
 
+export class ProjectCheckoutError extends Error {
+  public constructor(
+    public readonly code: "CHECKOUT_NOT_FOUND" | "CHECKOUT_UNAVAILABLE" | "CHECKOUT_CONFIGURATION_INVALID",
+    public readonly safeSummary: string,
+  ) {
+    super(safeSummary);
+    this.name = "ProjectCheckoutError";
+  }
+}
+
 export async function resolveProjectCheckout(
   projectRoot: string,
   project: ProjectRecord,
@@ -23,17 +33,31 @@ export async function resolveProjectCheckout(
     isAbsolute(checkout) ||
     checkout.split(/[\\/]/u).some((part) => part === "..")
   ) {
-    throw new Error("Project V0 checkout must be a relative allow-listed path.");
+    throw new ProjectCheckoutError("CHECKOUT_CONFIGURATION_INVALID", "The registered project checkout path is invalid.");
   }
   if (typeof baseBranch !== "string" || !GIT_REF.test(baseBranch)) {
-    throw new Error("Project V0 base branch is invalid.");
+    throw new ProjectCheckoutError("CHECKOUT_CONFIGURATION_INVALID", "The registered project base branch is invalid.");
   }
 
-  const canonicalRoot = await realpath(projectRoot);
-  const canonicalCheckout = await realpath(resolve(canonicalRoot, checkout));
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await realpath(projectRoot);
+  } catch {
+    throw new ProjectCheckoutError("CHECKOUT_UNAVAILABLE", "The worker checkout root is unavailable.");
+  }
+  let canonicalCheckout: string;
+  try {
+    canonicalCheckout = await realpath(resolve(canonicalRoot, checkout));
+  } catch (error: unknown) {
+    const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : undefined;
+    if (code === "ENOENT") {
+      throw new ProjectCheckoutError("CHECKOUT_NOT_FOUND", "The registered project checkout has not been provisioned yet.");
+    }
+    throw new ProjectCheckoutError("CHECKOUT_UNAVAILABLE", "The registered project checkout cannot be accessed by the worker.");
+  }
   const contained = relative(canonicalRoot, canonicalCheckout);
   if (contained.startsWith("..") || isAbsolute(contained) || contained === "") {
-    throw new Error("Project V0 checkout escapes or equals the allow-listed root.");
+    throw new ProjectCheckoutError("CHECKOUT_CONFIGURATION_INVALID", "The registered project checkout is outside the allow-listed root.");
   }
   return { root: canonicalCheckout, baseBranch };
 }

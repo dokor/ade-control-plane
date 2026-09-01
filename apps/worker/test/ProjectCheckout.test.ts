@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { matchesGithubRemote, resolveProjectCheckout } from "../src/v0/ProjectCheckout.js";
+import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "../src/v0/ProjectCheckout.js";
 import type { ProjectRecord } from "@ade-control-plane/database";
 
 const project: ProjectRecord = {
@@ -23,7 +23,15 @@ const project: ProjectRecord = {
 test("rejects traversal before resolving a project checkout", async () => {
   await assert.rejects(
     () => resolveProjectCheckout("/srv/projects", project),
-    /relative allow-listed path/,
+    (error: unknown) => error instanceof ProjectCheckoutError && error.code === "CHECKOUT_CONFIGURATION_INVALID",
+  );
+});
+
+test("makes an unprovisioned checkout actionable", async () => {
+  const missing = { ...project, configuration: { v0: { checkout: "missing", baseBranch: "main" } } };
+  await assert.rejects(
+    () => resolveProjectCheckout(process.cwd(), missing),
+    (error: unknown) => error instanceof ProjectCheckoutError && error.code === "CHECKOUT_NOT_FOUND",
   );
 });
 
