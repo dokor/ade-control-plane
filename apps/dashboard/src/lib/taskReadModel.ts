@@ -1,5 +1,7 @@
 import type {
   ControlPlanePersistence,
+  ExecutionRecord,
+  GithubWorkItemRecord,
   ProjectRecord,
   V0TaskLogRecord,
   V0TaskRecord,
@@ -8,7 +10,7 @@ import type { GithubIssueReader } from "@ade-control-plane/github";
 
 import { sanitizeText } from "./sanitize.js";
 
-type TaskPersistence = Pick<ControlPlanePersistence, "projects" | "v0Tasks">;
+type TaskPersistence = Pick<ControlPlanePersistence, "projects" | "v0Tasks" | "githubWork" | "executions">;
 
 export interface TaskProjectOption {
   id: string;
@@ -26,6 +28,22 @@ export interface TaskDashboardModel {
   projects: readonly TaskProjectOption[];
   activeTask: TaskListItem | null;
   tasks: readonly TaskListItem[];
+  githubWork: readonly GithubWorkListItem[];
+  activeGithubWork: GithubWorkListItem | null;
+}
+
+export interface GithubWorkListItem {
+  id: string;
+  projectId: string;
+  projectName: string;
+  repository: string;
+  issueNumber: number;
+  issueUrl: string;
+  state: GithubWorkItemRecord["state"];
+  stage: string;
+  executionStatus: ExecutionRecord["status"] | null;
+  executionError: string | null;
+  pullRequestNumber: number | null;
 }
 
 export interface TaskDetailModel {
@@ -81,10 +99,22 @@ export async function buildTaskDashboard(
     persistence.projects.list(),
     persistence.v0Tasks.list(30),
   ]);
+  const [workItems, executionGroups] = await Promise.all([
+    persistence.githubWork.listForProjects(projects.map(({ id }) => id)),
+    Promise.all(projects.map((project) => persistence.executions.listByProjectId(project.id, 30))),
+  ]);
   const projectById = new Map(projects.map((project) => [project.id, project]));
+  const executions = executionGroups.flat();
   const items = await Promise.all(tasks.map((task) =>
     taskListItem(task, projectById.get(task.projectId), issueReader),
   ));
+  const githubWork = workItems
+    .filter(({ present }) => present)
+    .map((work) => githubWorkListItem(work, projectById.get(work.projectId), executions))
+    .sort((left, right) => githubWorkRank(left) - githubWorkRank(right) || right.issueNumber - left.issueNumber);
+  const activeGithubWork = githubWork.find(({ executionStatus, state }) =>
+    executionStatus === "queued" || executionStatus === "leased" || executionStatus === "dispatched" || executionStatus === "running" || state === "running",
+  ) ?? null;
   return {
     projects: projects
       .filter(({ state }) => state === "enabled")
@@ -97,7 +127,53 @@ export async function buildTaskDashboard(
     activeTask:
       items.find(({ status }) => status === "PENDING" || status === "RUNNING") ?? null,
     tasks: items,
+    githubWork,
+    activeGithubWork,
   };
+}
+
+function githubWorkListItem(
+  work: GithubWorkItemRecord,
+  project: ProjectRecord | undefined,
+  executions: readonly ExecutionRecord[],
+): GithubWorkListItem {
+  const execution = work.executionRef
+    ? executions.find(({ id }) => id === work.executionRef)
+    : executions.find(({ workRef }) => workRef === `github:issue:${work.issueNumber}` && workRef !== null);
+  return {
+    id: work.id,
+    projectId: work.projectId,
+    projectName: project?.name ?? "Unknown project",
+    repository: project ? `${project.repositoryOwner}/${project.repositoryName}` : "repository unavailable",
+    issueNumber: work.issueNumber,
+    issueUrl: work.issueUrl,
+    state: work.state,
+    stage: githubWorkStage(work.state, execution?.status ?? null),
+    executionStatus: execution?.status ?? null,
+    executionError: execution?.errorSummary ? sanitizeText(execution.errorSummary) : null,
+    pullRequestNumber: work.pullRequestNumber,
+  };
+}
+
+function githubWorkRank(work: GithubWorkListItem): number {
+  if (work.executionStatus === "running" || work.executionStatus === "dispatched" || work.executionStatus === "leased" || work.executionStatus === "queued") return 0;
+  if (work.state === "running") return 1;
+  if (work.state === "ready") return 2;
+  if (work.state === "waiting-human") return 3;
+  return 4;
+}
+
+export function githubWorkStage(
+  state: GithubWorkItemRecord["state"],
+  executionStatus: ExecutionRecord["status"] | null,
+): string {
+  if (executionStatus === "queued" || executionStatus === "leased" || executionStatus === "dispatched") return "Preparing issue";
+  if (executionStatus === "running" || state === "running") return "Developing";
+  if (state === "ready") return "Ready for development";
+  if (state === "waiting-human") return "Waiting for human";
+  if (state === "completed") return "Completed";
+  if (state === "failed") return "Failed";
+  return "Blocked";
 }
 
 export async function buildTaskDetail(

@@ -1,5 +1,6 @@
 import type { ProjectRecord } from "@ade-control-plane/database";
 import { DEFAULT_GITHUB_WORK_METADATA, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient } from "@ade-control-plane/github";
+import { githubWorkStage } from "./taskReadModel.js";
 import { ControlError } from "./errors.js";
 
 export async function admitGithubIssue(project: ProjectRecord, client: GithubIssueLifecycleClient, issueNumber: number) {
@@ -8,5 +9,5 @@ export async function admitGithubIssue(project: ProjectRecord, client: GithubIss
   if (!issue || issue.state !== "open") throw new ControlError("NOT_FOUND", "The selected GitHub issue is no longer open or accessible.");
   const metadata = readGithubWorkMetadata(issue.body) ?? DEFAULT_GITHUB_WORK_METADATA;
   if (!readGithubWorkMetadata(issue.body)) await client.updateIssueBody(repository, issue.number, upsertGithubWorkMetadata(issue.body, metadata));
-  return { issueNumber: issue.number, stage: metadata.state === "waiting-human" ? "Waiting for human" : metadata.state === "completed" ? "Completed" : metadata.state === "running" ? "Developing" : "Preparing issue" };
+  return { issueNumber: issue.number, stage: githubWorkStage(metadata.state, null) };
 }
