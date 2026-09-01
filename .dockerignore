@@ -1,5 +1,8 @@
 .git
 .gitignore
+.github
+.idea
+.corepack
 .env
 .env.*
 !.env.example
@@ -14,3 +17,6 @@ coverage
 *.log
 data
 secrets
+docs
+**/test
+**/tests

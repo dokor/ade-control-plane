@@ -18,6 +18,7 @@
     "@ade-control-plane/database": "workspace:*",
     "@ade-control-plane/github": "workspace:*",
     "@ade-control-plane/quota": "workspace:*",
-    "@ade-control-plane/runner-protocol": "workspace:*"
+    "@ade-control-plane/runner-protocol": "workspace:*",
+    "tsx": "^4.20.5"
   }
 }
