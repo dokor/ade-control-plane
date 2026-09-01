@@ -3,6 +3,7 @@
 import { useEffect, useId, useState } from "react";
 
 import type { ProjectSetupRequirement } from "../lib/projectSetup.js";
+import { StatusBadge } from "./StatusBadge.js";
 
 interface SetupHelpContent {
   title: string;
@@ -97,7 +98,7 @@ export function ProjectSetupRequirementHelp({ requirement }: { requirement: Proj
           <section className="setup-help-modal" role="dialog" aria-modal="true" aria-labelledby={titleId} onMouseDown={(event) => event.stopPropagation()}>
             <div className="setup-help-heading">
               <div><p className="task-kicker">Setup guide</p><h3 id={titleId}>{content.title}</h3></div>
-              <span className={`badge ${requirement.state}`}>{requirement.state}</span>
+              <StatusBadge status={requirement.state} />
             </div>
             <p>{content.explanation}</p>
             <ol>{content.steps.map((step) => <li key={step}>{step}</li>)}</ol>

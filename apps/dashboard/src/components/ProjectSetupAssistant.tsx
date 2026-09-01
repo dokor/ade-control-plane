@@ -6,6 +6,7 @@ import { useState, useTransition } from "react";
 import type { ProjectSetupReadiness } from "../lib/projectSetup.js";
 import { formatInstant } from "../lib/format.js";
 import { ProjectSetupRequirementHelp } from "./ProjectSetupRequirementHelp.js";
+import { StatusBadge } from "./StatusBadge.js";
 
 export function ProjectSetupAssistant({
   projectId,
@@ -62,7 +63,9 @@ export function ProjectSetupAssistant({
           <h2>ADE setup</h2>
           <p className="detail">Server-side checks for project files, ADE compatibility and GitHub workflow setup.</p>
         </div>
-        <span className={`badge ${readiness.ready ? "ok" : "warn"}`}>{readiness.ready ? "ready" : "setup required"}</span>
+        <StatusBadge status={readiness.ready ? "ready" : "setup-required"}>
+          {readiness.ready ? "ready" : "setup required"}
+        </StatusBadge>
       </div>
       <div className="setup-refresh-summary">
         <div>
@@ -84,7 +87,7 @@ export function ProjectSetupAssistant({
               </span>
               <span className="muted">{requirement.detail}</span>
             </span>
-            <span className={`badge ${requirement.state}`}>{requirement.state}</span>
+            <StatusBadge status={requirement.state} />
           </div>
         ))}
       </div>
