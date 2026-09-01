@@ -21,6 +21,8 @@ const CONTENT_SECURITY_POLICY = [
 ].join("; ");
 
 const config: NextConfig = {
+  output: "standalone",
+  outputFileTracingRoot: process.cwd(),
   poweredByHeader: false,
   reactStrictMode: true,
   webpack(webpackConfig) {

@@ -73,6 +73,9 @@ importers:
       '@ade-control-plane/runner-protocol':
         specifier: workspace:*
         version: link:../../packages/runner-protocol
+      tsx:
+        specifier: ^4.20.5
+        version: 4.23.12
 
   packages/ade-client: {}
 
