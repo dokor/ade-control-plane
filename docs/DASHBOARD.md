@@ -356,9 +356,10 @@ client-supplied `retryability` can only be ignored, never trusted: only
 
 ### Live updates
 
-Server reads plus controlled polling (`DASHBOARD_REFRESH_SECONDS`, default 15s)
-via `router.refresh()`, paused while the tab is hidden. No SSE or WebSocket, and
-the scheduler never depends on a connected browser.
+Server reads plus controlled polling (`DASHBOARD_REFRESH_SECONDS`, default 5m)
+via `router.refresh()`, paused while the tab is hidden. Operators can also
+refresh the current page manually. No SSE or WebSocket, and the scheduler never
+depends on a connected browser.
 
 ### Global state
 
