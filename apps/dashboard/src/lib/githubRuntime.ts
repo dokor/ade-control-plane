@@ -8,6 +8,7 @@ import {
   parseActorIdList,
   type GithubAuthorizationPolicy,
   type GithubClient,
+  type GithubIssueLifecycleClient,
   type GithubIssueReader,
   type GithubWorkReader,
 } from "@ade-control-plane/github";
@@ -21,7 +22,7 @@ export interface GithubRuntime {
   quotaProvider: string;
   quotaAccountRef: string;
   /** Undefined when no App credential is configured: the bot then stays silent. */
-  client: GithubClient | undefined;
+  client: (GithubClient & GithubIssueLifecycleClient) | undefined;
   /** Repository-scoped reader used only after a verified GitHub delivery. */
   workReader: GithubWorkReader | undefined;
   issueReader: GithubIssueReader | undefined;
@@ -88,7 +89,7 @@ function buildWorkReader(access: GithubAppAccess | undefined): GithubWorkReader 
   });
 }
 
-function buildClient(access: GithubAppAccess | undefined): GithubClient | undefined {
+function buildClient(access: GithubAppAccess | undefined): (GithubClient & GithubIssueLifecycleClient) | undefined {
   if (!access) return undefined;
 
   return new HttpGithubClient({

@@ -75,11 +75,14 @@ export {
   type GithubWorkState,
   type HttpGithubWorkAdapterOptions,
 } from "./workAdapter.js";
+export { DEFAULT_GITHUB_WORK_METADATA, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubWorkMetadata } from "./workMetadata.js";
 export {
   GithubIssueAdapterError,
   HttpGithubIssueAdapter,
   normalizeGithubIssueSummary,
   type GithubIssueReader,
+  type GithubIssueDetails,
+  type GithubIssueLifecycleClient,
   type GithubIssueSummary,
   type HttpGithubIssueAdapterOptions,
 } from "./issues.js";

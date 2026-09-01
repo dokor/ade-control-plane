@@ -17,6 +17,16 @@ export interface GithubIssueReader {
   getIssue(repository: GithubRepositoryRef, issueNumber: number): Promise<GithubIssueSummary | null>;
 }
 
+export interface GithubIssueDetails extends GithubIssueSummary {
+  body: string;
+  labels: readonly string[];
+}
+
+export interface GithubIssueLifecycleClient {
+  getIssueDetails(repository: GithubRepositoryRef, issueNumber: number): Promise<GithubIssueDetails | null>;
+  updateIssueBody(repository: GithubRepositoryRef, issueNumber: number, body: string): Promise<GithubIssueDetails>;
+}
+
 export interface HttpGithubIssueAdapterOptions {
   tokens: InstallationTokenProvider;
   installationId: string;
