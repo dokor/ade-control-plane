@@ -47,6 +47,10 @@ export {
   type GithubPullRequest,
   type GithubPullRequestClient,
   type GithubPullRequestInput,
+  type GithubLabel,
+  type GithubRepositoryContent,
+  type GithubSetupClient,
+  type GithubSetupPullRequestInput,
   type HttpGithubClientOptions,
   type InstallationTokenProvider,
 } from "./client.js";

@@ -4,10 +4,13 @@ import { notFound } from "next/navigation";
 import { ControlButton } from "../../../components/ControlButton.js";
 import { PriorityForm } from "../../../components/PriorityForm.js";
 import { ProjectInitializeButton } from "../../../components/ProjectInitializeButton.js";
+import { ProjectSetupAssistant } from "../../../components/ProjectSetupAssistant.js";
 import { Shell } from "../../../components/Shell.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
 import { formatAge, formatInstant } from "../../../lib/format.js";
 import { getPersistence } from "../../../lib/persistence.js";
+import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
+import { inspectProjectSetup } from "../../../lib/projectSetup.js";
 import { buildProjectDetail } from "../../../lib/readModel.js";
 import { retryabilityExplanation } from "../../../lib/retry.js";
 
@@ -20,15 +23,22 @@ export default async function ProjectPage({
 }) {
   const { id } = await params;
   const { session, config } = await requireAuthenticatedContext(`/projects/${id}`);
+  const persistence = await getPersistence();
+  const projectRecord = await persistence.projects.getById(id);
   const detail = await buildProjectDetail({
-    persistence: await getPersistence(),
+    persistence,
     quotaProvider: config.quotaProvider,
     quotaAccountRef: config.quotaAccountRef,
     projectId: id,
     adeRuntimeVersion: config.adeRuntimeVersion,
   });
 
-  if (!detail) notFound();
+  if (!detail || !projectRecord) notFound();
+
+  const setupReadiness = await inspectProjectSetup(
+    projectRecord,
+    await loadGithubRuntime(),
+  );
 
   const { project, availableActions } = detail;
   const safeRetry = detail.executions.find(
@@ -45,6 +55,8 @@ export default async function ProjectPage({
       <p className="muted">
         <Link href="/">← Overview</Link>
       </p>
+
+      <ProjectSetupAssistant projectId={project.id} readiness={setupReadiness} />
 
       <div className="cards">
         <article className="card">
