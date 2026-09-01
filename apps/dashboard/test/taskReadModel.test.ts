@@ -6,6 +6,7 @@ import type { V0TaskRecord } from "@ade-control-plane/database";
 import {
   buildTaskDashboard,
   buildTaskDetail,
+  buildTaskTimeline,
   safePullRequestUrl,
 } from "../src/lib/taskReadModel.js";
 import { NOW, project } from "./helpers/fixtures.js";
@@ -127,6 +128,35 @@ test("sanitizes persisted task output before rendering detail", async () => {
   assert.doesNotMatch(detail.task.prompt, /github_pat_/);
   assert.doesNotMatch(detail.task.errorSummary ?? "", /Users/);
   assert.doesNotMatch(detail.logs[0]?.message ?? "", /secret-value/);
+  assert.equal(detail.summary.status, "failed");
+  assert.equal(detail.summary.firstFailure?.status, "failed");
+});
+
+test("turns system logs into a chronological execution history", () => {
+  const failedTask = task({
+    status: "FAILED",
+    finishedAt: "2026-08-27T10:00:06.000Z",
+    errorCode: "TESTS_FAILED",
+    errorSummary: "A test command failed.",
+  });
+  const timeline = buildTaskTimeline(failedTask, [
+    { id: "1", taskId: TASK_ID, occurredAt: "2026-08-27T10:00:01.000Z", stream: "system", message: "git fetch started." },
+    { id: "2", taskId: TASK_ID, occurredAt: "2026-08-27T10:00:02.000Z", stream: "stdout", message: "Already up to date." },
+    { id: "3", taskId: TASK_ID, occurredAt: "2026-08-27T10:00:03.000Z", stream: "system", message: "git fetch passed." },
+    { id: "4", taskId: TASK_ID, occurredAt: "2026-08-27T10:00:04.000Z", stream: "system", message: "Task failed: A test command failed." },
+  ]);
+
+  assert.deepEqual(
+    timeline.map(({ title, status }) => ({ title, status })),
+    [
+      { title: "Execution started", status: "running" },
+      { title: "Fetch base branch", status: "running" },
+      { title: "Fetch base branch", status: "success" },
+      { title: "Execution stopped with an error", status: "failed" },
+      { title: "Task failed", status: "failed" },
+    ],
+  );
+  assert.equal(timeline.filter(({ status }) => status === "failed").length, 2);
 });
 
 test("renders pull request links only for HTTPS GitHub URLs", () => {

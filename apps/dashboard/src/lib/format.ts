@@ -15,6 +15,24 @@ export function formatInstant(value: string | null): string {
   return Number.isNaN(parsed) ? "unknown" : new Date(parsed).toISOString().replace("T", " ").slice(0, 19) + "Z";
 }
 
+export function formatDuration(
+  startedAt: string | null,
+  finishedAt: string | null,
+  now = Date.now(),
+): string {
+  if (!startedAt) return "not started";
+  const started = Date.parse(startedAt);
+  const finished = finishedAt ? Date.parse(finishedAt) : now;
+  if (Number.isNaN(started) || Number.isNaN(finished)) return "unknown";
+  const seconds = Math.max(0, Math.floor((finished - started) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
 export function formatHistoryDate(value: string | null, now = Date.now()): string {
   if (!value) return "never";
   const parsed = Date.parse(value);

@@ -9,6 +9,7 @@ import {
 
 import { ControlError } from "./errors.js";
 import { sanitizeText } from "./sanitize.js";
+import { sanitizeTaskRecord } from "./taskReadModel.js";
 
 export interface CreateTaskInput {
   projectId: string;
@@ -106,7 +107,14 @@ export async function taskDetail(persistence: ControlPlanePersistence, taskId: s
   if (!task) {
     throw new ControlError("NOT_FOUND", "Task was not found.");
   }
-  return { task, logs: await persistence.v0Tasks.listLogs(taskId, 2000) };
+  const logs = await persistence.v0Tasks.listLogs(taskId, 2000);
+  return {
+    task: sanitizeTaskRecord(task),
+    logs: logs.map((log) => ({
+      ...log,
+      message: sanitizeText(log.message, 4_096),
+    })),
+  };
 }
 
 export async function cancelTask(
