@@ -30,7 +30,7 @@ export function ProjectSetupAssistant({
     setMessage(null);
     try {
       const body = await requestDashboardJson<{
-        result?: { labelsCreated?: readonly string[]; pullRequestUrl?: string | null };
+        result?: { labelsCreated?: readonly string[]; pullRequestUrl?: string | null; initializationTask?: { id: string } | null };
       }>(`/api/projects/${projectId}/setup`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -41,6 +41,10 @@ export function ProjectSetupAssistant({
         return;
       }
       const labels = body.result.labelsCreated?.length ? `Created labels: ${body.result.labelsCreated.join(", ")}. ` : "";
+      if (body.result.initializationTask?.id) {
+        router.push(`/tasks/${body.result.initializationTask.id}`);
+        return;
+      }
       setMessage(`${labels}${body.result.pullRequestUrl ? "Setup PR opened; merge it, then refresh readiness. The page will also check automatically while it is open." : "Setup is up to date."}`);
       router.refresh();
     } catch (reason) {
@@ -89,11 +93,14 @@ export function ProjectSetupAssistant({
           </div>
         ))}
       </div>
+      <div className="actions">
+        <button className="button primary" type="button" onClick={prepare} disabled={pending}>
+          {pending ? "Preparing..." : readiness.ready ? "Prepare ADE" : "Prepare repository setup"}
+        </button>
+        <span className="muted">Repository changes remain reviewable; when the repository is ready, this action starts ADE initialization.</span>
+      </div>
       {repairable ? (
         <div className="actions">
-          <button className="button primary" type="button" onClick={prepare} disabled={pending}>
-            {pending ? "Preparing..." : readiness.ready ? "Prepare optional setup" : "Prepare setup"}
-          </button>
           <span className="muted">Missing labels are created directly; repository files are proposed in a reviewable PR.</span>
         </div>
       ) : null}

@@ -4,7 +4,8 @@ import { ControlError } from "../../../../../lib/errors.js";
 import { handleDashboardApi, readJsonObject } from "../../../../../lib/dashboardApi.js";
 import { loadGithubRuntime } from "../../../../../lib/githubRuntime.js";
 import { getPersistence } from "../../../../../lib/persistence.js";
-import { inspectProjectSetup, prepareProjectSetup } from "../../../../../lib/projectSetup.js";
+import { inspectProjectSetup } from "../../../../../lib/projectSetup.js";
+import { prepareProjectActivation } from "../../../../../lib/projectActivation.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export async function POST(
     const persistence = await getPersistence();
     const project = await persistence.projects.getById(id);
     if (!project) throw new ControlError("NOT_FOUND", "Project was not found.");
-    const result = await prepareProjectSetup(project, await loadGithubRuntime());
+    const result = await prepareProjectActivation(persistence, project, await loadGithubRuntime());
     await persistence.auditEvents.append({
       occurredAt: new Date().toISOString(),
       category: "project-setup",
@@ -49,8 +50,9 @@ export async function POST(
         labelsCreated: result.labelsCreated.length,
         pullRequestNumber: result.pullRequestNumber,
         pullRequestUrl: result.pullRequestUrl,
+        initializationTaskId: result.initializationTask?.id ?? null,
       },
     });
-    return { body: { result } };
+    return { body: { result: { ...result, initializationTask: result.initializationTask } } };
   });
 }

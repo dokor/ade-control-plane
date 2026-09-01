@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 
 import { ControlButton } from "../../../components/ControlButton.js";
 import { PriorityForm } from "../../../components/PriorityForm.js";
-import { ProjectInitializeButton } from "../../../components/ProjectInitializeButton.js";
 import { ProjectSetupAssistant } from "../../../components/ProjectSetupAssistant.js";
 import { Shell } from "../../../components/Shell.js";
 import { StatusBadge } from "../../../components/StatusBadge.js";
@@ -82,9 +81,6 @@ export default async function ProjectPage({
           <p className="detail">Config {project.adeConfigVersion ?? "missing or not validated"}</p>
           <p className="detail">Profiles {project.resolvedProfiles.join(", ") || "—"}</p>
           <p className="detail">Rules {project.resolvedRules.join(", ") || "—"}</p>
-          {project.adeStatus === "setup-required" ? (
-            <div className="actions"><ProjectInitializeButton projectId={project.id} /></div>
-          ) : null}
         </article>
 
         <article className="card">
