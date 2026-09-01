@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
+import { ProjectPriorityHelp } from "./ProjectPriorityHelp.js";
 
 export function PriorityForm({
   projectId,
@@ -15,6 +16,7 @@ export function PriorityForm({
   disabled: boolean;
 }) {
   const router = useRouter();
+  const helpId = `priority-help-${projectId}`;
   const [value, setValue] = useState(String(priority));
   const [message, setMessage] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -45,8 +47,10 @@ export function PriorityForm({
   return (
     <form className="stack" onSubmit={onSubmit}>
       <label htmlFor={`priority-${projectId}`}>Priority (0–100)</label>
+      <ProjectPriorityHelp id={helpId} />
       <input
         id={`priority-${projectId}`}
+        aria-describedby={helpId}
         type="number"
         min={0}
         max={100}
