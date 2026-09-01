@@ -33,7 +33,9 @@ FROM workspace AS dashboard-build
 RUN pnpm --filter @ade-control-plane/dashboard build
 
 FROM node:22-bookworm-slim AS dashboard-runtime
+ARG ADE_VERSION
 ENV NODE_ENV=production
+ENV ADE_RUNTIME_VERSION=${ADE_VERSION}
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 RUN groupadd --system --gid 10001 ade-dashboard \
@@ -55,6 +57,7 @@ RUN pnpm --filter @ade-control-plane/worker deploy --prod --legacy /worker-deplo
 FROM node:22-bookworm-slim AS worker-runtime
 ARG ADE_VERSION
 ENV NODE_ENV=production
+ENV ADE_RUNTIME_VERSION=${ADE_VERSION}
 ENV HOME=/home/ade-worker
 ENV CODEX_HOME=/home/ade-worker/.codex
 ENV V0_GIT_HOME=/home/ade-git
