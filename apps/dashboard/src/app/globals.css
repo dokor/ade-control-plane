@@ -139,6 +139,12 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
   --badge-color: var(--muted);
 }
 
+.badge-success { --badge-color: var(--ok); }
+.badge-info { --badge-color: var(--accent); }
+.badge-warning { --badge-color: var(--warn); }
+.badge-danger { --badge-color: var(--danger); }
+.badge-neutral { --badge-color: var(--muted); }
+
 .setup-refresh-summary {
   display: flex;
   align-items: flex-start;
