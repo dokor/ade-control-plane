@@ -147,6 +147,8 @@ input, select, textarea {
   width: 100%;
 }
 
+.field { display: grid; gap: 6px; margin-top: 12px; font-weight: 650; }
+
 textarea { resize: vertical; min-height: 150px; }
 
 form.stack { display: grid; gap: 10px; max-width: 340px; }

@@ -6,6 +6,15 @@ export interface GithubRepositoryContent {
   content: string;
 }
 
+export interface GithubRepositoryMetadata {
+  id: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+  private: boolean;
+  url: string;
+}
+
 export interface GithubLabel {
   name: string;
   color?: string;
@@ -72,6 +81,7 @@ export interface GithubClient {
 
 /** Explicit, repository-scoped setup operations used by the Dashboard. */
 export interface GithubSetupClient {
+  getRepositoryMetadata(repository: GithubRepositoryRef): Promise<GithubRepositoryMetadata>;
   getRepositoryContent(
     repository: GithubRepositoryRef,
     path: string,
@@ -229,6 +239,20 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient, 
       throw new Error("GitHub repository content response is invalid.");
     }
     return { path: parsed.path, sha: parsed.sha, content: parsed.content };
+  }
+
+  public async getRepositoryMetadata(repository: GithubRepositoryRef): Promise<GithubRepositoryMetadata> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}`,
+      { headers: this.headers(token) },
+    );
+    if (!response.ok) throw new GithubApiError(response.status, "read repository metadata", await safeGithubErrorDetail(response));
+    const parsed = (await response.json().catch(() => null)) as { id?: unknown; owner?: { login?: unknown }; name?: unknown; default_branch?: unknown; private?: unknown; html_url?: unknown } | null;
+    if (!parsed || (typeof parsed.id !== "number" && typeof parsed.id !== "string") || typeof parsed.owner?.login !== "string" || typeof parsed.name !== "string" || typeof parsed.default_branch !== "string" || typeof parsed.private !== "boolean" || typeof parsed.html_url !== "string") {
+      throw new Error("GitHub repository metadata response is invalid.");
+    }
+    return { id: String(parsed.id), owner: parsed.owner.login, name: parsed.name, defaultBranch: parsed.default_branch, private: parsed.private, url: parsed.html_url };
   }
 
   public async listLabels(repository: GithubRepositoryRef): Promise<readonly GithubLabel[]> {
@@ -416,6 +440,7 @@ export class DeterministicFakeGithubClient
 
   public readonly contents = new Map<string, GithubRepositoryContent>();
   public readonly labels: GithubLabel[] = [];
+  public repositoryMetadata: GithubRepositoryMetadata = { id: "123", owner: "dokor", name: "alpha", defaultBranch: "main", private: false, url: "https://github.com/dokor/alpha" };
   private readonly setupPullRequests = new Map<string, GithubPullRequest>();
 
   public async createComment(
@@ -451,6 +476,10 @@ export class DeterministicFakeGithubClient
 
   public async getRepositoryContent(_repository: GithubRepositoryRef, path: string): Promise<GithubRepositoryContent | null> {
     return this.contents.get(path) ?? null;
+  }
+
+  public async getRepositoryMetadata(_repository: GithubRepositoryRef): Promise<GithubRepositoryMetadata> {
+    return this.repositoryMetadata;
   }
 
   public async listLabels(_repository: GithubRepositoryRef): Promise<readonly GithubLabel[]> {

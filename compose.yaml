@@ -47,10 +47,14 @@ services:
       DASHBOARD_REFRESH_SECONDS: ${DASHBOARD_REFRESH_SECONDS:-15}
       QUOTA_PROVIDER: ${QUOTA_PROVIDER:-openai}
       CODEX_CREDENTIAL_REF: ${CODEX_CREDENTIAL_REF:-codex-account-main}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?Set GITHUB_APP_ID in the production environment file}
+      GITHUB_APP_INSTALLATION_ID: ${GITHUB_APP_INSTALLATION_ID:?Set GITHUB_APP_INSTALLATION_ID in the production environment file}
+      GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github_app_private_key
     secrets:
       - database_url
       - dashboard_session_secret
       - dashboard_password_hash
+      - github_app_private_key
     # Docker Compose bind-mounts file-backed secrets with host ownership. Give
     # this non-root process only the dedicated read group, not root access.
     group_add:

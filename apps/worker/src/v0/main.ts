@@ -17,6 +17,7 @@ import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js
 import { V0TaskExecutor } from "./V0TaskExecutor.js";
 import { V0TaskWorker } from "./V0TaskWorker.js";
 import { loadV0WorkerRuntime } from "./runtime.js";
+import { provisionRegisteredProjects } from "./ProjectProvisioner.js";
 
 async function main(): Promise<void> {
   const config = await loadV0WorkerRuntime();
@@ -154,7 +155,16 @@ async function main(): Promise<void> {
       ...(quota ? { quota } : {}),
       idleDelayMs: config.idleDelayMs,
     });
-    await worker.run(stop.signal);
+    await provisionRegisteredProjects({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }).catch(() => undefined);
+    const provisioningTimer = setInterval(() => {
+      void provisionRegisteredProjects({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }).catch(() => undefined);
+    }, 30_000);
+    provisioningTimer.unref?.();
+    try {
+      await worker.run(stop.signal);
+    } finally {
+      clearInterval(provisioningTimer);
+    }
   } finally {
     process.off("SIGTERM", requestStop);
     process.off("SIGINT", requestStop);

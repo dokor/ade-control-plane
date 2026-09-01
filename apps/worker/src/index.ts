@@ -140,6 +140,7 @@ export {
 } from "./v0/ProjectCheckout.js";
 export { V0TaskExecutor, type V0TaskExecutorOptions } from "./v0/V0TaskExecutor.js";
 export { V0TaskWorker, type V0TaskWorkerOptions } from "./v0/V0TaskWorker.js";
+export { provisionRegisteredProjects } from "./v0/ProjectProvisioner.js";
 export {
   GithubWorkOrchestrator,
   type GithubWorkCycleResult,
