@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { listReadyGithubIssues } from "../src/lib/githubIssues.js";
+import { listGithubIssues, listReadyGithubIssues } from "../src/lib/githubIssues.js";
 import { NOW, project } from "./helpers/fixtures.js";
+
+test("lists open repository issues without requiring ADE metadata", async () => {
+  const result = await listGithubIssues(project(), {
+    issueReader: {
+      listIssues: async () => [
+        { number: 25, title: "Ordinary issue", state: "open", url: "https://github.com/dokor/argos/issues/25", updatedAt: NOW },
+        { number: 26, title: "Closed issue", state: "closed", url: "https://github.com/dokor/argos/issues/26", updatedAt: NOW },
+      ],
+      getIssue: async () => null,
+    },
+  });
+
+  assert.deepEqual(result.map(({ number }) => number), [25]);
+  assert.equal(result[0]?.adeState, null);
+  assert.equal(result[0]?.priority, null);
+});
 
 test("returns only open ADE-managed ready issues", async () => {
   const result = await listReadyGithubIssues(project(), {

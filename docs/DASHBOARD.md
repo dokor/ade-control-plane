@@ -81,9 +81,11 @@ Do not show controls unsupported by the current project/ADE capabilities.
 
 ### `/tasks` — Task runway
 
-The task composer lists only open GitHub issues whose ADE work contract is
-`ready`. Issue loading failures are shown inline and can be retried from the
-composer without reloading the page.
+The task composer lists open GitHub issues that the configured GitHub App can
+read, independently of ADE compatibility. Selecting an issue does not bypass
+execution safeguards: task creation still verifies that the issue has a valid
+ADE work contract in the `ready` state. Issue loading failures are shown inline
+and can be retried from the composer without reloading the page.
 
 ### `/runners`
 

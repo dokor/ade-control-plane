@@ -36,7 +36,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       const issue = (await listReadyGithubIssues(project, github))
         .find(({ number }) => number === source.issueNumber);
       if (!issue) {
-        throw new ControlError("NOT_FOUND", "The selected GitHub issue is no longer ready.");
+        throw new ControlError("NOT_FOUND", "The selected GitHub issue is not eligible for ADE execution.");
       }
     }
     const task = await createTask(persistence, {
