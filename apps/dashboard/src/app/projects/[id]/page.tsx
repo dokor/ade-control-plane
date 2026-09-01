@@ -88,7 +88,11 @@ export default async function ProjectPage({
 
         <article className="card">
           <h2>ADE snapshot</h2>
-          <p className="value">{project.snapshotFresh ? "fresh" : "stale"}</p>
+          <p className="value">
+            <span className={`badge ${project.snapshotFresh ? "fresh" : "stale"}`}>
+              {project.snapshotFresh ? "fresh" : "stale"}
+            </span>
+          </p>
           <p className="detail">
             Observed {formatAge(project.snapshotAgeMs)} ({formatInstant(project.snapshotObservedAt)})
           </p>
