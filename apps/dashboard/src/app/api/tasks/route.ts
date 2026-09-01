@@ -3,7 +3,7 @@ import type { V0TaskSource } from "@ade-control-plane/database";
 
 import { ControlError } from "../../../lib/errors.js";
 import { handleDashboardApi, readJsonObject } from "../../../lib/dashboardApi.js";
-import { listReadyGithubIssues } from "../../../lib/githubIssues.js";
+import { listGithubIssues } from "../../../lib/githubIssues.js";
 import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { getPersistence } from "../../../lib/persistence.js";
 import { createTask } from "../../../lib/tasks.js";
@@ -33,10 +33,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       if (!github) {
         throw new ControlError("UNAVAILABLE", "GitHub issue selection is not configured.");
       }
-      const issue = (await listReadyGithubIssues(project, github))
+      const issue = (await listGithubIssues(project, github))
         .find(({ number }) => number === source.issueNumber);
       if (!issue) {
-        throw new ControlError("NOT_FOUND", "The selected GitHub issue is not eligible for ADE execution.");
+        throw new ControlError("NOT_FOUND", "The selected GitHub issue is no longer open or accessible.");
       }
     }
     const task = await createTask(persistence, {

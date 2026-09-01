@@ -155,7 +155,7 @@ export function TaskComposer({
             <small className="task-issue-meta">
               {selectedIssue.adeState === "ready"
                 ? `ADE managed · ready · priority ${selectedIssue.priority} · `
-                : "Not validated for ADE execution · "}
+                : "ADE will prepare this issue before development · "}
               <a href={selectedIssue.url} target="_blank" rel="noreferrer noopener">View on GitHub ↗</a>
             </small>
           ) : null}
