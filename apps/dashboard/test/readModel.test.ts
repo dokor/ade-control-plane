@@ -59,6 +59,7 @@ test("shows two projects with distinct, explained states", async () => {
   const argos = overview.projects.find(({ slug }) => slug === "argos");
   const dvv = overview.projects.find(({ slug }) => slug === "dvv");
   assert.equal(argos?.status, "ready");
+  assert.equal(argos?.priority, 80);
   assert.equal(dvv?.status, "waiting-human");
   assert.ok(dvv?.waitingReason);
   // The attention queue must surface the human decision first.

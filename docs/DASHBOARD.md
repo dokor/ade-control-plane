@@ -46,6 +46,10 @@ Project table/cards:
 
 The overview should explain why no work is running when the system is idle.
 
+Project priority is a 0–100 scheduling preference: a higher value gives an
+eligible project precedence when several projects can run. It never bypasses
+project state, ADE readiness, quota, runner compatibility, or safety gates.
+
 ### `/projects/[id]` — Project detail
 
 Show:
