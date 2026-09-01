@@ -30,6 +30,16 @@ All endpoints require the signed Dashboard session. Mutations additionally requi
 
 Task prompts are limited to 20,000 characters. Each log message is redacted and limited to 4 KiB, with a durable 1 MiB aggregate limit per task. Responses expose stable error codes and correlation IDs instead of raw exceptions.
 
+## GitHub troubleshooting logs
+
+The BFF emits structured `[dashboard-bff]` request lifecycle logs and the browser
+emits matching `[dashboard-frontend]` API lifecycle logs. GitHub issue requests
+include a client request ID (`x-dashboard-request-id`) and the BFF correlation ID;
+use both IDs to follow a request across the browser and server logs. Entries include
+only the endpoint path, status, duration and classified error metadata. Query
+strings, request bodies, credentials, issue content and raw GitHub error payloads
+are intentionally excluded.
+
 ## Dashboard workflow
 
 The authenticated `/tasks` page is the V0 task runway. It lists enabled projects and lets the operator choose an open ADE-managed `ready` GitHub issue, with a focused free-form prompt as a secondary source. Status and history refresh through the Dashboard polling interval; no long-lived browser connection is required.
