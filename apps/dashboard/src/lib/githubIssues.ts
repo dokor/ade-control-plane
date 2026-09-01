@@ -33,16 +33,20 @@ export async function listReadyGithubIssues(
     owner: project.repositoryOwner,
     name: project.repositoryName,
   };
-  const [issues, workItems] = await Promise.all([
-    readers.issueReader.listIssues(repository),
-    readers.workReader.listWorkItems(repository),
-  ]);
-  const issueByNumber = new Map(issues.map((issue) => [issue.number, issue]));
+  // Work metadata is the authoritative filter. Fetch display metadata only
+  // for ready candidates so the Task page does not issue two full, concurrent
+  // GitHub issue-list requests for the same repository.
+  const workItems = await readers.workReader.listWorkItems(repository);
+  const readyItems = workItems.filter((item) => item.state === "ready");
+  const issues = await Promise.all(
+    readyItems.map(async (item) => ({
+      item,
+      issue: await readers.issueReader!.getIssue(repository, item.issueNumber),
+    })),
+  );
 
-  return workItems
-    .filter((item) => item.state === "ready")
-    .flatMap((item) => {
-      const issue = issueByNumber.get(item.issueNumber);
+  return issues
+    .flatMap(({ item, issue }) => {
       if (!issue || issue.state !== "open") return [];
       return [{
         number: issue.number,

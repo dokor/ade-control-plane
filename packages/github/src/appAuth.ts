@@ -33,6 +33,7 @@ const JWT_LIFETIME_SECONDS = 540;
  */
 export class GithubAppTokenProvider implements InstallationTokenProvider {
   private readonly cache = new Map<string, CachedToken>();
+  private readonly pending = new Map<string, Promise<string>>();
   private readonly baseUrl: string;
   private readonly fetchImplementation: typeof fetch;
   private readonly now: () => number;
@@ -49,6 +50,17 @@ export class GithubAppTokenProvider implements InstallationTokenProvider {
       return cached.token;
     }
 
+    const pending = this.pending.get(installationId);
+    if (pending) return pending;
+
+    const request = this.mintToken(installationId).finally(() => {
+      this.pending.delete(installationId);
+    });
+    this.pending.set(installationId, request);
+    return request;
+  }
+
+  private async mintToken(installationId: string): Promise<string> {
     const response = await this.fetchImplementation(
       `${this.baseUrl}/app/installations/${installationId}/access_tokens`,
       {
