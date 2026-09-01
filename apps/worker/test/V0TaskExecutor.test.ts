@@ -128,6 +128,40 @@ test("passes the selected GitHub issue through the existing Task pipeline", asyn
   }
 });
 
+test("runs ADE initialization before validating the newly created configuration", async () => {
+  const context = await setup();
+  try {
+    context.task.source = { type: "ade-initialize" };
+    context.task.prompt = "Initialize ADE for this repository";
+    const commands = new SuccessfulCommands(context.task);
+    commands.adeConfigMissingUntilCodex = true;
+    const github = new DeterministicFakeGithubClient();
+
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github,
+      commands,
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "SUCCESS");
+    const codexIndex = commands.calls.findIndex(({ executable }) => executable === "codex");
+    const firstConfigValidationIndex = commands.calls.findIndex(({ executable, args }) =>
+      executable === "ade" && args[0] === "config" && args[1] === "validate",
+    );
+    assert.ok(codexIndex >= 0);
+    assert.ok(firstConfigValidationIndex > codexIndex);
+    assert.match(
+      commands.calls[codexIndex]?.stdin ?? "",
+      /may not have ADE configuration yet/,
+    );
+    assert.equal(github.createdPullRequests.length, 1);
+  } finally {
+    await context.close();
+  }
+});
+
 test("refuses ADE artifacts that are not ignored before Codex starts", async () => {
   const context = await setup();
   try {
@@ -204,6 +238,8 @@ class SuccessfulCommands implements CommandRunner {
   public remote = "git@github.com:dokor/alpha.git";
   public adeReviewExitCode = 0;
   public adeArtifactsDirty = false;
+  public adeConfigMissingUntilCodex = false;
+  private codexStarted = false;
   private statusCalls = 0;
 
   public constructor(
@@ -218,13 +254,20 @@ class SuccessfulCommands implements CommandRunner {
     if (input.args.includes("--porcelain=v1")) {
       const statusCall = this.statusCalls++;
       if (statusCall === 0) return result("");
-      if (statusCall === 1) return result(this.adeArtifactsDirty ? "?? outputs/context/context-pack.md" : "");
+      if (statusCall === 1) {
+        if (this.task.source.type === "ade-initialize") return result(" M ade.config.yaml");
+        return result(this.adeArtifactsDirty ? "?? outputs/context/context-pack.md" : "");
+      }
       return result(" M src/index.ts");
     }
     if (input.executable === "ade" && input.args[0] === "--version") return result("ade 0.7.0\n");
+    if (input.executable === "ade" && input.args[0] === "config" && this.adeConfigMissingUntilCodex && !this.codexStarted) {
+      return result("ADE configuration is missing", 1);
+    }
     if (input.executable === "ade" && input.args[0] === "review") return result("", this.adeReviewExitCode);
     if (input.executable === "ade" && input.args[0] === "setup") return result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"ready","missingRequiredIds":[]}');
     if (input.executable === "codex") {
+      this.codexStarted = true;
       await input.onOutput?.({ stream: "stdout", message: "implementation completed" });
       if (this.cancelAfterCodex) this.task.cancelRequested = true;
     }

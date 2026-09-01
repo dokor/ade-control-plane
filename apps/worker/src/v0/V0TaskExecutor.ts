@@ -10,7 +10,7 @@ import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, t
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
-import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
+import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPreparation, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
 import { matchesGithubRemote, resolveProjectCheckout } from "./ProjectCheckout.js";
 
 interface V0Persistence {
@@ -156,26 +156,33 @@ export class V0TaskExecutor {
 
       const work = {
         project,
-        source: task.source.type,
+        source: task.source.type === "ade-initialize" ? "prompt" : task.source.type,
         prompt: task.prompt,
         ...(task.source.type === "github-issue" ? { issueNumber: task.source.issueNumber } : {}),
         ...(issue?.title ? { issueTitle: issue.title } : {}),
       } as const;
-      const prepared = await this.deliveryRuntime.prepare({
-        cwd: checkout.root,
-        work,
-        contextProfile: this.adeProfile,
-        signal: controller.signal,
-        onOutput: (output) => this.logCommandOutput(task.id, output),
-      });
-      await this.assertCheckoutStillClean(checkout.root);
-
-      await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; provider ${this.agentExecutor.provider}; delivery source ${task.source.type}.`);
+      const initialization = task.source.type === "ade-initialize";
+      let prepared: AdeDeliveryPreparation | undefined;
+      if (!initialization) {
+        prepared = await this.deliveryRuntime.prepare({
+          cwd: checkout.root,
+          work,
+          contextProfile: this.adeProfile,
+          signal: controller.signal,
+          onOutput: (output) => this.logCommandOutput(task.id, output),
+        });
+        await this.assertCheckoutStillClean(checkout.root);
+        await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; provider ${this.agentExecutor.provider}; delivery source ${task.source.type}.`);
+      } else {
+        await this.log(task.id, "ADE is not configured yet; starting the initialization prompt before ADE validation.");
+      }
       if (issue) await this.log(task.id, `GitHub issue #${issue.number}: ${issue.title}`);
-      await this.log(task.id, "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
+      await this.log(task.id, initialization
+        ? "Starting ADE initialization in the workspace-write sandbox."
+        : "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
-        prompt: buildCodexPrompt(task.prompt, this.adeProfile, issue),
+        prompt: buildCodexPrompt(task.prompt, this.adeProfile, issue, initialization),
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });
@@ -192,6 +199,17 @@ export class V0TaskExecutor {
       ]);
       if (!finalStatus.stdout.trim()) {
         throw new V0ExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");
+      }
+
+      if (!prepared) {
+        prepared = await this.deliveryRuntime.prepare({
+          cwd: checkout.root,
+          work,
+          contextProfile: this.adeProfile,
+          signal: controller.signal,
+          onOutput: (output) => this.logCommandOutput(task.id, output),
+        });
+        await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; initialization configuration validated.`);
       }
 
       reviewResult = await this.deliveryRuntime.runPostAgentGates({
@@ -488,11 +506,22 @@ function classifyFailure(
   return { code: "EXECUTION_FAILED", summary: "Task execution failed." };
 }
 
-function buildCodexPrompt(prompt: string, adeProfile: AdeProfile, issue: GithubIssueSummary | null): string {
+function buildCodexPrompt(
+  prompt: string,
+  adeProfile: AdeProfile,
+  issue: GithubIssueSummary | null,
+  initialization = false,
+): string {
   return [
-    "Implement the following task in this repository.",
+    initialization
+      ? "Initialize ADE for this repository before implementing the requested setup task."
+      : "Implement the following task in this repository.",
     "Keep the change scoped, follow AGENTS.md, and run the relevant checks.",
-    `ADE has prepared the ${adeProfile} context profile for this task. Use the repository's ADE configuration and context pack as delivery guidance.`,
+    ...(initialization
+      ? [
+        "The repository may not have ADE configuration yet. Create only the required ADE configuration files, and do not rely on ADE commands that require an existing configuration before creating it.",
+      ]
+      : [`ADE has prepared the ${adeProfile} context profile for this task. Use the repository's ADE configuration and context pack as delivery guidance.`]),
     "Do not commit, push, create a pull request, or expose credentials; the worker owns those steps.",
     ...(issue ? [
       "The selected GitHub issue is the authoritative work reference. Read only the issue context needed to implement it.",

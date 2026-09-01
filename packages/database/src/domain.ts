@@ -353,7 +353,8 @@ export type V0TaskStatus =
   | "CANCELLED";
 export type V0TaskSource =
   | { type: "prompt"; prompt: string }
-  | { type: "github-issue"; issueNumber: number };
+  | { type: "github-issue"; issueNumber: number }
+  | { type: "ade-initialize" };
 export type V0TaskLogStream = "system" | "stdout" | "stderr";
 
 export interface V0TaskRecord {

@@ -23,6 +23,7 @@ All endpoints require the signed Dashboard session. Mutations additionally requi
 | --- | --- | --- |
 | `GET` | `/api/tasks` | Return the 100 most recent tasks. |
 | `POST` | `/api/tasks` | Create a pending task from `projectId` and either a prompt or a GitHub issue source; return `409` when another task is active. |
+| `POST` | `/api/projects/{id}/initialize` | Create and immediately wake a dedicated ADE initialization task for a project whose setup is required. |
 | `GET` | `/api/github/issues?projectId={id}` | Return the registered project's open ADE-managed issues whose work contract state is `ready`. |
 | `GET` | `/api/tasks/{id}` | Return task detail and up to 2,000 log records. |
 | `POST` | `/api/tasks/{id}/cancel` | Persist cancellation intent or cancel a pending task. |
@@ -44,6 +45,16 @@ or:
 ```json
 { "type": "github-issue", "issueNumber": 23 }
 ```
+
+The project initialization action uses a third source:
+
+```json
+{ "type": "ade-initialize" }
+```
+
+Initialization tasks let Codex create the missing ADE configuration before the ADE
+runtime validates the project. The worker then runs the normal context generation,
+setup check and delivery gates before creating the human-reviewed pull request.
 
 Issue titles are read-only Dashboard metadata. Issue bodies and comments are not copied into task persistence or returned by the issue API.
 
