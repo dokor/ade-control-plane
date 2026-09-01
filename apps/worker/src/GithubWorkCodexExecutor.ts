@@ -5,7 +5,7 @@ import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDis
 import type { CommandRunner } from "./v0/CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "./AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime } from "./AdeDeliveryRuntime.js";
-import { matchesGithubRemote, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
+import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
 
 export interface GithubWorkCodexExecutorOptions {
   github: GithubPullRequestClient & GithubIssueLifecycleClient;
@@ -189,6 +189,7 @@ class GithubWorkExecutionError extends Error {
 
 function classifyFailure(error: unknown): { code: string; summary: string } {
   if (error instanceof AdeDeliveryError) return { code: error.code, summary: error.safeSummary };
+  if (error instanceof ProjectCheckoutError) return { code: error.code, summary: error.safeSummary };
   if (error instanceof GithubWorkExecutionError) return { code: error.code, summary: error.safeSummary };
   return { code: "EXECUTION_FAILED", summary: "GitHub work execution failed." };
 }
