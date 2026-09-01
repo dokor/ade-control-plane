@@ -52,7 +52,6 @@ export class WorkerWakeCoordinator {
       const onAbort = (): void => finish({ reason: "shutdown", projectId: null, fullReconcile: false });
       this.waiter = finish;
       this.timer = setTimeout(() => finish({ reason: "periodic-full-reconcile", projectId: null, fullReconcile: true }), Math.max(1_000, timeoutMs));
-      this.timer.unref?.();
       signal?.addEventListener("abort", onAbort, { once: true });
     });
   }

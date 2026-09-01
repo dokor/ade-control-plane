@@ -29,7 +29,9 @@ test("bounds pending log persistence when child output bursts", async () => {
   const releaseTimer = setTimeout(releaseLogs, 50);
   await new NodeCommandRunner().run({
     executable: process.execPath,
-    args: ["-e", "for (let i = 0; i < 1000; i += 1) console.log(i)"],
+    // Produce enough output that the bounded queue is deterministically
+    // saturated before the intentionally slow sink is released.
+    args: ["-e", "for (let i = 0; i < 10000; i += 1) console.log(i)"],
     cwd: process.cwd(),
     onOutput: async ({ message }) => {
       await logGate;
@@ -38,6 +40,6 @@ test("bounds pending log persistence when child output bursts", async () => {
   });
   clearTimeout(releaseTimer);
 
-  assert.ok(messages.length < 1000);
+  assert.ok(messages.length < 10000);
   assert.match(messages.at(-1) ?? "", /output lines omitted/);
 });
