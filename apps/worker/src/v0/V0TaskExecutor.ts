@@ -514,6 +514,7 @@ function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile, issue:
     "## ADE runtime",
     "ADE deterministic staged review passed.",
     `- Runtime: \`${String(provenance.adeRuntimeVersion ?? "unknown")}\``,
+    `- Setup contract: \`${String(provenance.adeSetupContractVersion ?? "unknown")}\``,
     `- Context: \`${String(provenance.adeContextProfile ?? adeProfile)}\` (${String(provenance.adeContextStatus ?? "unknown")})`,
     `- Deterministic review: ${String(provenance.adeDeterministicReview ?? "passed")}`,
     `- Profile reviews: ${String(provenance.adeSelectedProfiles ?? "none")} (${String(provenance.adeProfileReview ?? "passed")})`,

@@ -57,7 +57,9 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
       [
         ["--version"],
         ["config", "validate"],
+        ["context", "generate"],
         ["context", "pack", "normal"],
+        ["setup", "check", "--json"],
         ["review", "--staged", "--json"],
       ],
     );
@@ -219,7 +221,9 @@ class SuccessfulCommands implements CommandRunner {
       if (statusCall === 1) return result(this.adeArtifactsDirty ? "?? outputs/context/context-pack.md" : "");
       return result(" M src/index.ts");
     }
+    if (input.executable === "ade" && input.args[0] === "--version") return result("ade 0.7.0\n");
     if (input.executable === "ade" && input.args[0] === "review") return result("", this.adeReviewExitCode);
+    if (input.executable === "ade" && input.args[0] === "setup") return result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"ready","missingRequiredIds":[]}');
     if (input.executable === "codex") {
       await input.onOutput?.({ stream: "stdout", message: "implementation completed" });
       if (this.cancelAfterCodex) this.task.cancelRequested = true;

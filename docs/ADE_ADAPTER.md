@@ -26,6 +26,15 @@ Every response is validated before it is normalized. Unknown fields, unsupported
 
 ## Current ADE Availability
 
-AI Delivery Engine `0.4.0` exposes `project:status`, which reports local workflow artifacts and does not provide the machine operations above. It therefore cannot yet be used as a real control-plane target for `runnable-work`, `advance`, decisions or reconciliation.
+AI Delivery Engine `0.7.0` exposes the versioned local project-setup contract
+through `ade setup contract --json` and `ade setup check --json`. It also
+exposes `project:status`, which reports local workflow artifacts but does not
+provide the machine operations above. It therefore cannot yet be used as a
+real control-plane target for `runnable-work`, `advance`, decisions or
+reconciliation.
+
+The worker consumes the setup contract during the mutating delivery preflight;
+the separate process adapter below remains reserved for a future ADE
+control-plane command surface.
 
 The deterministic fake and the process adapter tests provide the contract coverage until ADE exposes these versioned commands. The first real ADE integration test belongs with the implementation of this command surface, without changing the scheduler or this domain contract.

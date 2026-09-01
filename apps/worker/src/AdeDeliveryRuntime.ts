@@ -8,9 +8,13 @@ export type AdeDeliveryFailureCode =
   | "ADE_CONFIG_MISSING"
   | "ADE_CONFIG_INVALID"
   | "ADE_CONTEXT_FAILED"
+  | "ADE_SETUP_INCOMPLETE"
+  | "ADE_SETUP_INVALID"
   | "ADE_DETERMINISTIC_REVIEW_FAILED"
   | "ADE_PROFILE_REVIEW_BLOCKED"
   | "ADE_PROFILE_REVIEW_FAILED";
+
+const ADE_SETUP_CONTRACT_VERSION = "ade.project-setup/v1";
 
 export interface AdeProfileFinding {
   profile: string;
@@ -24,6 +28,7 @@ export interface AdeProfileFinding {
 
 export interface AdeDeliveryProvenance {
   runtimeVersion: string;
+  setupContractVersion: string;
   configStatus: "validated";
   contextStatus: "fresh";
   contextProfile: string;
@@ -38,6 +43,13 @@ export interface AdeDeliveryReviewResult {
   provenance: AdeDeliveryProvenance;
   findings: readonly AdeProfileFinding[];
   usage: readonly AgentUsageMetrics[];
+}
+
+export interface AdeDeliveryPreparation {
+  runtimeVersion: string;
+  setupContractVersion: string;
+  contextProfile: string;
+  rulePackIds: readonly string[];
 }
 
 export interface AdeDeliveryWorkContext {
@@ -89,13 +101,16 @@ export class AdeDeliveryRuntime {
     contextProfile?: string;
     signal?: AbortSignal;
     onOutput?(output: CommandOutput): void | Promise<void>;
-  }): Promise<{ runtimeVersion: string; contextProfile: string; rulePackIds: readonly string[] }> {
+  }): Promise<AdeDeliveryPreparation> {
     const runtimeVersion = await this.detectVersion(input);
     await this.runAde(input, ["config", "validate"], "ADE config validation", "ADE_CONFIG_INVALID");
     const contextProfile = input.contextProfile ?? configuredContextProfile(input.work.project) ?? "normal";
+    await this.runAde(input, ["context", "generate"], "ADE project context generation", "ADE_CONTEXT_FAILED");
     await this.runAde(input, ["context", "pack", contextProfile], `ADE ${contextProfile} context pack`, "ADE_CONTEXT_FAILED");
+    const setupContractVersion = await this.runSetupCheck(input, runtimeVersion);
     return {
       runtimeVersion,
+      setupContractVersion,
       contextProfile,
       rulePackIds: configuredRulePacks(input.work.project),
     };
@@ -105,7 +120,7 @@ export class AdeDeliveryRuntime {
     cwd: string;
     work: AdeDeliveryWorkContext;
     agentExecutor: AgentExecutor;
-    prepared: { runtimeVersion: string; contextProfile: string; rulePackIds: readonly string[] };
+    prepared: AdeDeliveryPreparation;
     signal?: AbortSignal;
     onOutput?(output: CommandOutput): void | Promise<void>;
   }): Promise<AdeDeliveryReviewResult> {
@@ -131,6 +146,7 @@ export class AdeDeliveryRuntime {
         return {
           provenance: {
             runtimeVersion: input.prepared.runtimeVersion,
+            setupContractVersion: input.prepared.setupContractVersion,
             configStatus: "validated",
             contextStatus: "fresh",
             contextProfile: input.prepared.contextProfile,
@@ -178,6 +194,7 @@ export class AdeDeliveryRuntime {
   public static provenanceSummary(provenance: AdeDeliveryProvenance): Record<string, string | number> {
     return {
       adeRuntimeVersion: provenance.runtimeVersion,
+      adeSetupContractVersion: provenance.setupContractVersion,
       adeConfigStatus: provenance.configStatus,
       adeContextStatus: provenance.contextStatus,
       adeContextProfile: provenance.contextProfile,
@@ -202,6 +219,49 @@ export class AdeDeliveryRuntime {
       throw new AdeDeliveryError("ADE_RUNTIME_MISMATCH", `The worker ADE runtime is ${detected}, but the task requires ${expected}.`);
     }
     return detected ?? expected ?? this.expectedVersion;
+  }
+
+  private async runSetupCheck(
+    input: { cwd: string; work: AdeDeliveryWorkContext; signal?: AbortSignal },
+    runtimeVersion: string,
+  ): Promise<string> {
+    let result: CommandResult;
+    try {
+      // ADE owns the setup catalogue and evaluation. Keep its JSON response
+      // private to this boundary: it may contain configuration diagnostics,
+      // while the worker only needs the safe readiness verdict and IDs.
+      result = await this.options.commands.run({
+        executable: this.executable,
+        args: ["setup", "check", "--json"],
+        cwd: input.cwd,
+        ...(this.options.environment ? { env: this.options.environment } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup could not be evaluated.");
+    }
+
+    const evaluation = parseSetupEvaluation(result.stdout);
+    if (!evaluation || evaluation.version !== ADE_SETUP_CONTRACT_VERSION) {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE returned an unsupported project setup contract.");
+    }
+    if (evaluation.adeVersion && parseVersion(evaluation.adeVersion) !== runtimeVersion) {
+      throw new AdeDeliveryError("ADE_RUNTIME_MISMATCH", "The ADE setup report does not match the detected worker runtime.");
+    }
+    if (evaluation.readiness === "invalid") {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup is invalid; fix the repository configuration before mutating work.");
+    }
+    if (evaluation.readiness === "incomplete") {
+      const missing = evaluation.missingRequiredIds.filter(isSafeSetupId).slice(0, 8);
+      throw new AdeDeliveryError(
+        "ADE_SETUP_INCOMPLETE",
+        `ADE project setup is incomplete${missing.length > 0 ? `: ${missing.join(", ")}` : "."}`,
+      );
+    }
+    if (result.exitCode !== 0) {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup returned an inconsistent readiness result.");
+    }
+    return evaluation.version;
   }
 
   private async runAde(
@@ -358,6 +418,30 @@ function asRecord(value: unknown): JsonObject {
 
 function parseJson(value: string): unknown {
   try { return JSON.parse(value); } catch { return null; }
+}
+
+interface SetupEvaluationSummary {
+  version: string;
+  adeVersion: string;
+  readiness: "ready" | "incomplete" | "invalid";
+  missingRequiredIds: readonly string[];
+}
+
+function parseSetupEvaluation(stdout: string): SetupEvaluationSummary | null {
+  const value = parseJson(stdout.trim());
+  if (!isRecord(value)) return null;
+  const version = typeof value.version === "string" ? value.version : null;
+  const adeVersion = typeof value.adeVersion === "string" ? parseVersion(value.adeVersion) : null;
+  const readiness = value.readiness === "ready" || value.readiness === "incomplete" || value.readiness === "invalid" ? value.readiness : null;
+  const missingRequiredIds = Array.isArray(value.missingRequiredIds)
+    ? value.missingRequiredIds.filter((entry): entry is string => typeof entry === "string")
+    : null;
+  if (!version || !adeVersion || !readiness || !missingRequiredIds) return null;
+  return { version, adeVersion, readiness, missingRequiredIds };
+}
+
+function isSafeSetupId(value: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]{0,99}$/iu.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

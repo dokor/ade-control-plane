@@ -42,13 +42,14 @@ test("selects different specialist sets for docs, normal code and security work"
 test("runs the ADE gates and returns safe provenance", async () => {
   const commands = new FakeCommands();
   const agent = new FakeAgent();
-  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.6.1", maxReviewAttempts: 1 });
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0", maxReviewAttempts: 1 });
   const prepared = await runtime.prepare({ cwd: "C:/checkout", work: work("Update the README documentation") });
   const result = await runtime.runPostAgentGates({ cwd: "C:/checkout", work: work("Update the README documentation"), agentExecutor: agent, prepared });
-  assert.equal(result.provenance.runtimeVersion, "0.6.1");
+  assert.equal(result.provenance.runtimeVersion, "0.7.0");
+  assert.equal(result.provenance.setupContractVersion, "ade.project-setup/v1");
   assert.equal(result.provenance.deterministicReview, "passed");
   assert.deepEqual(result.provenance.selectedProfiles, ["documentation", "tech-lead"]);
-  assert.deepEqual(commands.adeArgs, [["--version"], ["config", "validate"], ["context", "pack", "normal"], ["review", "--staged", "--json"]]);
+  assert.deepEqual(commands.adeArgs, [["--version"], ["config", "validate"], ["context", "generate"], ["context", "pack", "normal"], ["setup", "check", "--json"], ["review", "--staged", "--json"]]);
   assert.equal(agent.prompts.length, 2);
   assert.match(agent.prompts[0] ?? "", /documentation specialist reviewer/);
 });
@@ -57,17 +58,28 @@ test("blocks missing ADE configuration before agent work", async () => {
   const commands = new FakeCommands();
   commands.configExitCode = 1;
   commands.configStderr = "CONFIG_NOT_FOUND";
-  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.6.1" });
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0" });
   await assert.rejects(
     runtime.prepare({ cwd: "C:/checkout", work: work("Implement the API") }),
     (error: unknown) => error instanceof AdeDeliveryError && error.code === "ADE_CONFIG_MISSING",
   );
 });
 
+test("blocks an ADE setup evaluation that is incomplete", async () => {
+  const commands = new FakeCommands();
+  commands.setupExitCode = 1;
+  commands.setupStdout = '{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"incomplete","missingRequiredIds":["context.generated"]}';
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0" });
+  await assert.rejects(
+    runtime.prepare({ cwd: "C:/checkout", work: work("Implement the API") }),
+    (error: unknown) => error instanceof AdeDeliveryError && error.code === "ADE_SETUP_INCOMPLETE" && error.safeSummary.includes("context.generated"),
+  );
+});
+
 test("does not publish after a deterministic ADE review failure", async () => {
   const commands = new FakeCommands();
   commands.reviewExitCode = 1;
-  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.6.1" });
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0" });
   const prepared = await runtime.prepare({ cwd: "C:/checkout", work: work("Implement the API") });
   await assert.rejects(
     runtime.runPostAgentGates({ cwd: "C:/checkout", work: work("Implement the API"), agentExecutor: new FakeAgent(), prepared }),
@@ -80,7 +92,7 @@ test("retries blocking profile findings with a bounded correction loop", async (
   const agent = new SequenceAgent([
     passReview(), blockingReview(), passReview(), passReview(), passReview(), passReview(),
   ]);
-  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.6.1", maxReviewAttempts: 2 });
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0", maxReviewAttempts: 2 });
   const prepared = await runtime.prepare({ cwd: "C:/checkout", work: work("Fix authentication permissions") });
   const result = await runtime.runPostAgentGates({ cwd: "C:/checkout", work: work("Fix authentication permissions"), agentExecutor: agent, prepared });
   assert.equal(result.provenance.profileReviewAttempts, 2);
@@ -91,13 +103,16 @@ class FakeCommands implements CommandRunner {
   public readonly adeArgs: string[][] = [];
   public configExitCode = 0;
   public configStderr = "";
+  public setupExitCode = 0;
+  public setupStdout = '{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"ready","missingRequiredIds":[]}';
   public reviewExitCode = 0;
 
   public async run(input: CommandInput): Promise<CommandResult> {
     if (input.executable === "ade") {
       this.adeArgs.push([...input.args]);
-      if (input.args[0] === "--version") return result("ade 0.6.1\n");
+      if (input.args[0] === "--version") return result("ade 0.7.0\n");
       if (input.args[0] === "config") return result("", this.configExitCode, this.configStderr);
+      if (input.args[0] === "setup") return result(this.setupStdout, this.setupExitCode);
       if (input.args[0] === "review") return result("{\"status\":\"pass\"}\n", this.reviewExitCode);
     }
     if (input.executable === "git" && input.args.includes("--name-only")) return result("README.md\n");
