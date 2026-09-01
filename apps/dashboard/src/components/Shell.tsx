@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { AutoRefresh } from "./AutoRefresh.js";
+import { ManualRefreshButton } from "./ManualRefreshButton.js";
 import { SignOutButton } from "./SignOutButton.js";
 
 export function Shell({
@@ -26,6 +27,7 @@ export function Shell({
           <Link href="/runners">Runners</Link>
           <Link href="/analytics">Analytics</Link>
           <Link href="/settings">Settings</Link>
+          <ManualRefreshButton />
           <SignOutButton />
         </nav>
       </header>
