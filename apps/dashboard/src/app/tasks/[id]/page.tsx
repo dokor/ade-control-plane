@@ -6,6 +6,7 @@ import { TaskCancelButton } from "../../../components/TaskCancelButton.js";
 import { TaskPrRetryButton } from "../../../components/TaskPrRetryButton.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
 import { formatInstant } from "../../../lib/format.js";
+import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { getPersistence } from "../../../lib/persistence.js";
 import { buildTaskDetail, safePullRequestUrl } from "../../../lib/taskReadModel.js";
 
@@ -18,7 +19,8 @@ export default async function TaskDetailPage({
 }) {
   const { id } = await params;
   const { session, config } = await requireAuthenticatedContext(`/tasks/${id}`);
-  const detail = await buildTaskDetail(await getPersistence(), id);
+  const github = await loadGithubRuntime();
+  const detail = await buildTaskDetail(await getPersistence(), id, github?.issueReader);
   if (!detail) notFound();
 
   const { task, project, logs } = detail;
@@ -36,9 +38,7 @@ export default async function TaskDetailPage({
       <section className="task-detail-hero">
         <div>
           <p className="task-kicker">Execution {task.id.slice(0, 8)}</p>
-          <h2>{task.source.type === "github-issue"
-            ? `GitHub issue #${task.source.issueNumber}`
-            : task.prompt}</h2>
+          <h2>{detail.title}</h2>
           <p>{project.repositoryOwner}/{project.repositoryName}</p>
         </div>
         <div className="task-detail-state">
