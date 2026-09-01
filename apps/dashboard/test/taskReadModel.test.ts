@@ -57,6 +57,52 @@ test("builds the task runway with enabled projects and the active slot", async (
   assert.equal(dashboard.tasks.length, 2);
 });
 
+test("uses the GitHub issue title for task list items when available", async () => {
+  const issueTask = task({
+    source: { type: "github-issue", issueNumber: 23 },
+    prompt: "Implement GitHub issue #23",
+  });
+  const dashboard = await buildTaskDashboard(
+    createMemoryPersistence(createMemoryState({
+      projects: [project()],
+      v0Tasks: [issueTask],
+    })),
+    {
+      async getIssue() {
+        return {
+          number: 23,
+          title: "Improve the task runway",
+          state: "open",
+          url: "https://github.com/dokor/argos/issues/23",
+          updatedAt: NOW,
+        };
+      },
+    },
+  );
+
+  assert.equal(dashboard.tasks[0]?.title, "Improve the task runway");
+});
+
+test("falls back to the issue reference when GitHub title lookup fails", async () => {
+  const issueTask = task({
+    source: { type: "github-issue", issueNumber: 23 },
+    prompt: "Implement GitHub issue #23",
+  });
+  const dashboard = await buildTaskDashboard(
+    createMemoryPersistence(createMemoryState({
+      projects: [project()],
+      v0Tasks: [issueTask],
+    })),
+    {
+      async getIssue() {
+        throw new Error("GitHub unavailable");
+      },
+    },
+  );
+
+  assert.equal(dashboard.tasks[0]?.title, "GitHub issue #23");
+});
+
 test("sanitizes persisted task output before rendering detail", async () => {
   const state = createMemoryState({
     projects: [project()],

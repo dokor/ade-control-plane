@@ -26,7 +26,6 @@ export function Shell({
           <Link href="/runners">Runners</Link>
           <Link href="/analytics">Analytics</Link>
           <Link href="/settings">Settings</Link>
-          <span className="muted">{actorRef}</span>
           <SignOutButton />
         </nav>
       </header>

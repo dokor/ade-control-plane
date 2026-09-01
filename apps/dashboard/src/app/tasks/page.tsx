@@ -4,7 +4,8 @@ import { Shell } from "../../components/Shell.js";
 import { TaskCancelButton } from "../../components/TaskCancelButton.js";
 import { TaskComposer } from "../../components/TaskComposer.js";
 import { requireAuthenticatedContext } from "../../lib/auth.js";
-import { formatInstant } from "../../lib/format.js";
+import { formatHistoryDate, formatInstant } from "../../lib/format.js";
+import { loadGithubRuntime } from "../../lib/githubRuntime.js";
 import { getPersistence } from "../../lib/persistence.js";
 import { buildTaskDashboard, safePullRequestUrl } from "../../lib/taskReadModel.js";
 
@@ -12,7 +13,8 @@ export const dynamic = "force-dynamic";
 
 export default async function TasksPage() {
   const { session, config } = await requireAuthenticatedContext("/tasks");
-  const dashboard = await buildTaskDashboard(await getPersistence());
+  const github = await loadGithubRuntime();
+  const dashboard = await buildTaskDashboard(await getPersistence(), github?.issueReader);
 
   return (
     <Shell
@@ -109,13 +111,14 @@ export default async function TasksPage() {
                 <article key={task.id} className="task-history-row">
                   <div className="task-history-status">
                     <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
-                    <time>{formatInstant(task.createdAt)}</time>
+                    <time dateTime={task.createdAt} title={formatInstant(task.createdAt)}>{formatHistoryDate(task.createdAt)}</time>
                   </div>
                   <div className="task-history-main">
-                    <h3><Link href={`/tasks/${task.id}`}>{task.projectName}</Link></h3>
+                    <span className="badge badge-neutral task-history-project">{task.projectName}</span>
+                    <h3><Link href={`/tasks/${task.id}`}>{task.title}</Link></h3>
                     <p>{task.source.type === "github-issue"
                       ? `GitHub issue #${task.source.issueNumber}`
-                      : task.prompt}</p>
+                      : "Prompt libre"}</p>
                     <small>{task.repository} / {task.id.slice(0, 8)}</small>
                   </div>
                   <div className="task-history-action">
