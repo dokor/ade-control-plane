@@ -26,6 +26,7 @@ wait_healthy() {
     sleep 1
   done
   "${compose[@]}" ps >&2 || true
+  "${compose[@]}" logs --tail=200 "$service" >&2 || true
   die "$service did not become healthy"
 }
 
