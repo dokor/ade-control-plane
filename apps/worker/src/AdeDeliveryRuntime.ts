@@ -152,6 +152,7 @@ export class AdeDeliveryRuntime {
     work: AdeDeliveryWorkContext;
     agentExecutor: AgentExecutor;
     prepared: AdeDeliveryPreparation;
+    plan?: AdeDeliveryPlan;
     signal?: AbortSignal;
     onOutput?(output: CommandOutput): void | Promise<void>;
   }): Promise<AdeDeliveryReviewResult> {
@@ -160,7 +161,9 @@ export class AdeDeliveryRuntime {
     const usage: AgentUsageMetrics[] = [];
     let attempt = 0;
 
-    while (attempt < this.maxReviewAttempts) {
+    // Zero means no correction retry, never "skip the first validation pass".
+    const maximumAttempts = Math.max(1, input.plan?.maximumCorrectionAttempts ?? this.maxReviewAttempts);
+    while (attempt < maximumAttempts) {
       attempt += 1;
       await this.runCommand(input, "git add", {
         executable: "git",
@@ -168,7 +171,7 @@ export class AdeDeliveryRuntime {
       });
       if (!selectedProfiles) {
         const changedPaths = await this.listChangedPaths(input);
-        selectedProfiles = selectProfiles({ ...input.work, affectedPaths: changedPaths });
+        selectedProfiles = input.plan?.reviewProfiles ?? selectProfiles({ ...input.work, affectedPaths: changedPaths });
       }
       await this.runAde(input, ["review", "--staged", "--json"], "ADE deterministic staged review", "ADE_DETERMINISTIC_REVIEW_FAILED");
 
@@ -192,7 +195,7 @@ export class AdeDeliveryRuntime {
         };
       }
 
-      if (attempt >= this.maxReviewAttempts) {
+      if (attempt >= maximumAttempts) {
         throw new AdeDeliveryError("ADE_PROFILE_REVIEW_BLOCKED", "Required ADE profile reviews remain blocking after the allowed correction attempts.");
       }
 

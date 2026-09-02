@@ -74,6 +74,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       if (issue.updatedAt !== request.work.sourceUpdatedAt) {
         throw new GithubWorkExecutionError("GITHUB_ISSUE_STALE", "The GitHub issue changed after it was scheduled; reconcile it before retrying.");
       }
+      let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue });
       let lifecycle = await this.planIssueLifecycle(checkout.root, issue);
       if (lifecycle.action === "enrich") {
         if (!lifecycle.enrichmentPrompt) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
@@ -89,6 +90,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           upsertGithubWorkMetadata(enrichedBody, metadata),
         );
         lifecycle = await this.planIssueLifecycle(checkout.root, issue);
+        plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue });
       } else if (lifecycle.action === "wait" || lifecycle.action === "none") {
         return { status: "cancelled", provider: this.agentExecutor.provider, errorCode: "ISSUE_LIFECYCLE_WAIT", errorSummary: lifecycle.reason };
       }
@@ -113,7 +115,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       const prepared = await this.deliveryRuntime.prepare({
         cwd: checkout.root,
         work,
-        ...(this.options.adeContextProfile ? { contextProfile: this.options.adeContextProfile } : {}),
+        contextProfile: this.options.adeContextProfile ?? plan.implementationProfile,
       });
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
@@ -132,6 +134,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         work,
         agentExecutor: this.agentExecutor,
         prepared,
+        plan,
       });
       await this.mustRun("git commit", {
         executable: "git",
