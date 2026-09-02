@@ -57,6 +57,13 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         executionId: request.executionId, projectId: request.project.id, issueNumber: request.work.issueNumber,
         sourceUpdatedAt: request.work.sourceUpdatedAt, occurredAt: new Date().toISOString(), branchName: request.work.branchName,
       }) : null;
+      if ((workflow?.stage === "waiting-human" || workflow?.stage === "completed") && workflow.pullRequestNumber && workflow.pullRequestUrl) {
+        return {
+          status: "succeeded",
+          provider: this.agentExecutor.provider,
+          resultSummary: { ...(workflow.branchName ? { branchName: workflow.branchName } : {}), pullRequestNumber: workflow.pullRequestNumber, pullRequestUrl: workflow.pullRequestUrl },
+        };
+      }
       let checkpointStage: AdeDeliveryWorkflowStage | null = workflow?.stage ?? null;
       const checkpoint = async (
         stage: AdeDeliveryWorkflowStage,
