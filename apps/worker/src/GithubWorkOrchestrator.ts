@@ -64,6 +64,7 @@ export interface GithubWorkOrchestratorOptions {
   provider?: AgentProvider;
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
   leaseDurationMs?: number;
+  cancelPollMs?: number;
   reconciliationBackoffBaseMs?: number;
   reconciliationBackoffMaxMs?: number;
   now?(): Date;
@@ -82,6 +83,7 @@ export type GithubWorkCycleResult =
 export class GithubWorkOrchestrator {
   private readonly now: () => Date;
   private readonly leaseDurationMs: number;
+  private readonly cancelPollMs: number;
   private readonly reconciliationBackoffBaseMs: number;
   private readonly reconciliationBackoffMaxMs: number;
   private readonly reconciliationBackoff = new Map<string, { failures: number; retryAt: string }>();
@@ -89,6 +91,7 @@ export class GithubWorkOrchestrator {
   public constructor(private readonly options: GithubWorkOrchestratorOptions) {
     this.now = options.now ?? (() => new Date());
     this.leaseDurationMs = options.leaseDurationMs ?? 15 * 60 * 1_000;
+    this.cancelPollMs = positiveDuration(options.cancelPollMs, 1_000);
     this.reconciliationBackoffBaseMs = positiveDuration(options.reconciliationBackoffBaseMs, 30_000);
     this.reconciliationBackoffMaxMs = Math.max(this.reconciliationBackoffBaseMs, positiveDuration(options.reconciliationBackoffMaxMs, 15 * 60 * 1_000));
   }
@@ -197,7 +200,7 @@ export class GithubWorkOrchestrator {
     await store.executions.markRunning(scheduled.execution.id, now);
     try {
       const resumeDecision = resolvedDecisions.get(project.id);
-      const result = await this.options.dispatcher.execute({
+      const result = await this.dispatchWithCancellation({
         executionId: scheduled.execution.id,
         project,
         work,
@@ -229,17 +232,19 @@ export class GithubWorkOrchestrator {
       if (result.status === "failed") {
         await this.options.notifier?.failure(project, work, result.errorCode ?? "EXECUTION_FAILED");
       }
-    } catch {
+    } catch (error) {
+      const cancelled = error instanceof GithubExecutionCancelledError;
       await store.executions.complete({
-        executionId: scheduled.execution.id, status: "failed", finishedAt: this.now().toISOString(),
-        errorCode: "AGENT_DISPATCH_FAILED", errorSummary: "The code-agent dispatch failed.",
-        releaseReason: "github-work-dispatch-failed",
+        executionId: scheduled.execution.id, status: cancelled ? "cancelled" : "failed", finishedAt: this.now().toISOString(),
+        errorCode: cancelled ? null : "AGENT_DISPATCH_FAILED", errorSummary: cancelled ? null : "The code-agent dispatch failed.",
+        releaseReason: cancelled ? "github-work-cancelled" : "github-work-dispatch-failed",
         auditEvent: {
-          occurredAt: this.now().toISOString(), category: "execution", severity: "warning", actorType: "system",
+          occurredAt: this.now().toISOString(), category: "execution", severity: cancelled ? "info" : "warning", actorType: "system",
           projectId: project.id, runnerId: decision.selected.runnerId,
-          action: "github-work.dispatch-failed", result: "failed", metadata: { issueNumber: selection.item.issueNumber },
+          action: cancelled ? "github-work.cancelled" : "github-work.dispatch-failed", result: cancelled ? "cancelled" : "failed", metadata: { issueNumber: selection.item.issueNumber },
         },
       });
+      if (cancelled) return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
       await this.options.agentUsage?.record({
         executionId: scheduled.execution.id,
         projectId: project.id,
@@ -254,6 +259,33 @@ export class GithubWorkOrchestrator {
       await this.options.notifier?.failure(project, work, "AGENT_DISPATCH_FAILED");
     }
     return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
+  }
+
+  private async dispatchWithCancellation(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult> {
+    const controller = new AbortController();
+    let checking = false;
+    const checkCancellation = async (): Promise<void> => {
+      if (checking || controller.signal.aborted) return;
+      checking = true;
+      try {
+        if ((await this.options.persistence.executions.getById(request.executionId))?.cancelRequested) controller.abort();
+      } finally {
+        checking = false;
+      }
+    };
+    await checkCancellation();
+    const interval = setInterval(() => { void checkCancellation(); }, this.cancelPollMs);
+    interval.unref?.();
+    try {
+      const result = await this.options.dispatcher.execute({ ...request, signal: controller.signal });
+      if (controller.signal.aborted && result.status !== "cancelled") throw new GithubExecutionCancelledError();
+      return result;
+    } catch (error) {
+      if (controller.signal.aborted) throw new GithubExecutionCancelledError();
+      throw error;
+    } finally {
+      clearInterval(interval);
+    }
   }
 
   private async recordUsage(
@@ -397,6 +429,13 @@ function groupByProject(items: readonly GithubWorkItemRecord[]): Map<string, Git
 }
 
 function githubWorkRef(issueNumber: number): string { return `github:issue:${issueNumber}`; }
+
+class GithubExecutionCancelledError extends Error {
+  public constructor() {
+    super("GitHub work execution was cancelled.");
+    this.name = "GithubExecutionCancelledError";
+  }
+}
 
 function incompatibleProfile(
   repository: { id: string; owner: string; name: string },

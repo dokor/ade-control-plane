@@ -142,6 +142,21 @@ Rules:
 
 The command asks the control plane to schedule a safe retry; it does not directly execute runner work in the HTTP/webhook handler.
 
+## Cancel active execution
+
+### `execution.cancel`
+
+```ts
+{
+  executionId: string;
+}
+```
+
+Only a queued, leased, dispatched or running execution can be cancelled. The
+Dashboard records the authenticated, audited cancellation intent; the worker
+then aborts only that execution's process tree and records `cancelled`. It
+never treats a late cancellation as a successful result or starts a retry.
+
 ## ADE decision
 
 ### `ade.decision.apply`

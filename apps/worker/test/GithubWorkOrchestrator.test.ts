@@ -17,7 +17,13 @@ function work(projectId: string, number: number, state: GithubWorkItemRecord["st
   return { id: `${projectId}-${number}`, projectId, repositoryGithubId: `${projectId}-repo`, contractVersion: "ade.github-work/v1", issueNumber: number, issueUrl: `https://github.com/dokor/${projectId}/issues/${number}`, state, priority, dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: LATER, present: true };
 }
 
-function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partial<GithubWorkReader> = {}, resolvedDecision?: { projectId: string; decisionRef: string; option: string }) {
+function harness(
+  items: readonly GithubWorkItemRecord[],
+  readerOverrides: Partial<GithubWorkReader> = {},
+  thirdArgument?: { projectId: string; decisionRef: string; option: string } | ((request: GithubWorkDispatchRequest, executions: ExecutionRecord[]) => Promise<{ status: "succeeded" | "failed" | "cancelled" }>),
+) {
+  const resolvedDecision = typeof thirdArgument === "function" ? undefined : thirdArgument;
+  const dispatchOverride = typeof thirdArgument === "function" ? thirdArgument : undefined;
   const projects = [...new Set(items.map(({ projectId }) => projectId))].map((id) => project(id, id));
   const profiles: GithubWorkProfileRecord[] = [];
   const persisted: GithubWorkItemRecord[] = [];
@@ -54,6 +60,7 @@ function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partia
         : null,
     },
     executions: {
+      getById: async (executionId: string) => executions.find(({ id }) => id === executionId) ?? null,
       listActive: async () => executions.filter((entry) => ["queued", "leased", "dispatched", "running"].includes(entry.status)),
       listByProjectId: async (projectId: string) => executions.filter((entry) => entry.projectId === projectId),
       scheduleWithLease: async (input: { execution: { id: string; projectId: string; runnerId: string; workRef: string; capability: string; requestedAt: string }; lease: { leaseKey: string } }) => {
@@ -100,7 +107,10 @@ function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partia
     getWorkItem: async () => null,
     ...readerOverrides,
   };
-  const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, now: () => new Date(NOW), dispatcher: { execute: async (request) => { dispatches.push(request); return { status: "succeeded" }; } }, notifier: {
+  const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, cancelPollMs: 5, now: () => new Date(NOW), dispatcher: { execute: async (request) => {
+    dispatches.push(request);
+    return dispatchOverride ? dispatchOverride(request, executions) : { status: "succeeded" };
+  } }, notifier: {
     waitingHuman: async (_project, item) => { notifications.push({ kind: "waiting", issueNumber: item.issueNumber }); },
     failure: async (_project, item) => { notifications.push({ kind: "failure", issueNumber: item.issueNumber }); },
   } });
@@ -140,6 +150,26 @@ test("does not dispatch the same GitHub revision twice after completion", async 
   const second = await orchestrator.runCycle();
   assert.equal(second.outcome, "idle");
   assert.equal(dispatches.length, 1);
+});
+
+test("cancels only the active GitHub execution and releases its lease", async () => {
+  const { orchestrator, executions, dispatches } = harness(
+    [work("alpha", 9, "ready", 80)],
+    {},
+    async (request, currentExecutions) => {
+      const current = currentExecutions.find(({ id }) => id === request.executionId);
+      assert.ok(current);
+      current.cancelRequested = true;
+      return new Promise((resolve) => {
+        request.signal?.addEventListener("abort", () => resolve({ status: "cancelled" }), { once: true });
+      });
+    },
+  );
+
+  await orchestrator.runCycle();
+
+  assert.equal(dispatches[0]?.signal?.aborted, true);
+  assert.equal(executions[0]?.status, "cancelled");
 });
 
 test("a stale GitHub work projection is never dispatched", async () => {

@@ -1,0 +1,2 @@
+ALTER TABLE executions
+  ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT false;

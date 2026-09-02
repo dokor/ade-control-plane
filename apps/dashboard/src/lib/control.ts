@@ -13,6 +13,7 @@ export type ControlCommandType =
   | "runner.disable"
   | "runner.enable"
   | "execution.safe-retry"
+  | "execution.cancel"
   | "ade.decide";
 
 export const CONTROL_COMMAND_TYPES: readonly ControlCommandType[] = [
@@ -26,6 +27,7 @@ export const CONTROL_COMMAND_TYPES: readonly ControlCommandType[] = [
   "runner.disable",
   "runner.enable",
   "execution.safe-retry",
+  "execution.cancel",
   "ade.decide",
 ];
 
@@ -37,6 +39,7 @@ export const SENSITIVE_COMMAND_TYPES: readonly ControlCommandType[] = [
   "runner.disable",
   "runner.enable",
   "execution.safe-retry",
+  "execution.cancel",
   "ade.decide",
 ];
 
@@ -62,6 +65,7 @@ export type ValidatedControlCommand =
   | { type: "runner.disable"; runnerId: string }
   | { type: "runner.enable"; runnerId: string }
   | { type: "execution.safe-retry"; executionId: string; retryability: Retryability }
+  | { type: "execution.cancel"; executionId: string }
   | {
       type: "ade.decide";
       projectId: string;
@@ -210,6 +214,8 @@ export function validateCommand(
         retryability: "safe",
       };
     }
+    case "execution.cancel":
+      return { type, executionId: requireId(record, "executionId") };
   }
 }
 

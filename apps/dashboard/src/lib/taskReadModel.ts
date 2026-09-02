@@ -42,6 +42,8 @@ export interface GithubWorkListItem {
   state: GithubWorkItemRecord["state"];
   stage: string;
   executionStatus: ExecutionRecord["status"] | null;
+  executionId: string | null;
+  cancelRequested: boolean;
   executionError: string | null;
   pullRequestNumber: number | null;
 }
@@ -150,6 +152,8 @@ function githubWorkListItem(
     state: work.state,
     stage: githubWorkStage(work.state, execution?.status ?? null),
     executionStatus: execution?.status ?? null,
+    executionId: execution?.id ?? null,
+    cancelRequested: execution?.cancelRequested === true,
     executionError: execution?.errorSummary ? sanitizeText(execution.errorSummary) : null,
     pullRequestNumber: work.pullRequestNumber,
   };

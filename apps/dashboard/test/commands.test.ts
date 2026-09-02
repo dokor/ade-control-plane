@@ -141,6 +141,35 @@ test("an ADE decision accepts only its offered option and resolves idempotently"
   assert.equal(state.decisions[0]?.resolvedOption, "resume");
 });
 
+test("cancellation records intent only for an active execution", async () => {
+  const running = execution({ status: "running" });
+  const state = createMemoryState({ projects: [project()], executions: [running] });
+
+  const outcome = await submitDashboardCommand(context(state), {
+    type: "execution.cancel",
+    payload: { executionId: running.id },
+  });
+
+  assert.match(outcome.summary, /Cancellation requested/);
+  assert.equal(state.executions[0]?.status, "running");
+  assert.equal(state.executions[0]?.cancelRequested, true);
+  assert.equal(state.commands[0]?.status, "applied");
+});
+
+test("cancellation rejects an execution that has already finished", async () => {
+  const finished = execution({ status: "succeeded" });
+  const state = createMemoryState({ projects: [project()], executions: [finished] });
+
+  await assert.rejects(
+    submitDashboardCommand(context(state), {
+      type: "execution.cancel",
+      payload: { executionId: finished.id },
+    }),
+    /Only an active execution/,
+  );
+  assert.equal(state.executions[0]?.cancelRequested, undefined);
+});
+
 test("runner drain and disable are audited state changes", async () => {
   const state = createMemoryState({ runners: [runner()] });
   await submitDashboardCommand(context(state), {
