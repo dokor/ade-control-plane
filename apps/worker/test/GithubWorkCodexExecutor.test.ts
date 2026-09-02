@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { ProjectRecord } from "@ade-control-plane/database";
 
-import { GithubWorkCodexExecutor } from "../src/GithubWorkCodexExecutor.js";
+import { buildGithubWorkPrompt, GithubWorkCodexExecutor, parseImplementationHandoff } from "../src/GithubWorkCodexExecutor.js";
 import type { GithubWorkDispatchRequest } from "../src/GithubWorkOrchestrator.js";
 
 const project: ProjectRecord = {
@@ -64,4 +64,32 @@ test("reports an unavailable GitHub-work checkout with a safe actionable error",
   assert.equal(result.status, "failed");
   assert.equal(result.errorCode, "CHECKOUT_UNAVAILABLE");
   assert.equal(result.errorSummary, "The worker checkout root is unavailable.");
+});
+
+test("accepts only an ADE handoff bound to the selected issue revision", () => {
+  const issue = { number: request.work.issueNumber, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt };
+  const handoff = parseImplementationHandoff({
+    version: "ade.implementation-handoff/v1",
+    issue,
+    objective: "Ship the dashboard workflow.",
+    scope: ["Dashboard"],
+    acceptanceCriteria: ["A user can start the workflow."],
+    constraints: ["Do not expose credentials."],
+    humanDecisionRef: null,
+  }, issue);
+
+  const prompt = buildGithubWorkPrompt(request, handoff);
+  assert.match(prompt, /Ship the dashboard workflow/);
+  assert.match(prompt, /validated handoff above is authoritative/);
+  assert.doesNotMatch(prompt, /issue URL is the authoritative task reference/);
+});
+
+test("rejects a handoff from another issue revision", () => {
+  const issue = { number: request.work.issueNumber, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt };
+  assert.throws(() => parseImplementationHandoff({
+    version: "ade.implementation-handoff/v1",
+    issue: { ...issue, updatedAt: "2026-09-01T00:00:01.000Z" },
+    objective: "Ship the dashboard workflow.",
+    scope: [], acceptanceCriteria: [], constraints: [], humanDecisionRef: null,
+  }, issue), /does not match/);
 });
