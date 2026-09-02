@@ -35,9 +35,26 @@ export function normalizeEvent(
     actor: readActor(root.sender),
     subject: readSubject(event, root),
     comment: readComment(event, root),
+    pullRequest: readPullRequest(event, root),
     installationId:
       installation === null ? null : readIdentifier(installation.id, "installation.id"),
   };
+}
+
+function readPullRequest(
+  event: GithubEventName,
+  root: Record<string, unknown>,
+): import("./domain.js").GithubPullRequestRef | null {
+  if (event !== "pull_request") return null;
+  const pullRequest = asRecord(root.pull_request, "Delivery is missing a pull request.");
+  const head = asRecord(pullRequest.head, "Pull request is missing its head.");
+  const number = readNumber(root.number ?? pullRequest.number, "pull_request.number");
+  const headRef = readString(head.ref, "pull_request.head.ref");
+  const headSha = readString(head.sha, "pull_request.head.sha");
+  if (headRef.length > 500 || !/^[0-9a-f]{7,64}$/iu.test(headSha) || typeof pullRequest.merged !== "boolean") {
+    throw new GithubRejection("MALFORMED_PAYLOAD", "Pull request lifecycle fields are invalid.");
+  }
+  return { number, merged: pullRequest.merged, headRef, headSha: headSha.toLowerCase() };
 }
 
 function readRepository(value: unknown): GithubRepositoryRef {
@@ -65,7 +82,7 @@ function readSubject(
 ): GithubSubjectRef | null {
   if (event === "pull_request") {
     const pullRequest = asRecord(root.pull_request, "Delivery is missing a pull request.");
-    return { type: "pull_request", number: readNumber(pullRequest.number, "pull_request.number") };
+    return { type: "pull_request", number: readNumber(root.number ?? pullRequest.number, "pull_request.number") };
   }
 
   const issue = asOptionalRecord(root.issue);

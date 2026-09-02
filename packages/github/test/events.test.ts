@@ -35,9 +35,25 @@ test("keeps only the fields needed for routing and authorization", () => {
     "deliveryId",
     "event",
     "installationId",
+    "pullRequest",
     "repository",
     "subject",
   ]);
+});
+
+test("keeps only bounded lifecycle fields from a pull request delivery", () => {
+  const event = normalizeEvent("delivery-pr", "pull_request", {
+    action: "closed",
+    number: 91,
+    repository: { id: 1347812108, name: "argos", owner: { login: "dokor" } },
+    sender: { id: 11472726, login: "dokor", type: "User" },
+    pull_request: { merged: true, head: { ref: "ade/issue-148", sha: "0123456789abcdef0123456789abcdef01234567" } },
+  });
+
+  assert.deepEqual(event.subject, { type: "pull_request", number: 91 });
+  assert.deepEqual(event.pullRequest, {
+    number: 91, merged: true, headRef: "ade/issue-148", headSha: "0123456789abcdef0123456789abcdef01234567",
+  });
 });
 
 test("recognizes pull request comments and bot senders", () => {

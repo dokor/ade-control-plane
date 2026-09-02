@@ -3,14 +3,19 @@ import {
   authorizeInstallation,
   isGithubRejection,
   isMutating,
+  labelsForGithubWorkState,
   normalizeEvent,
+  readGithubWorkMetadata,
   renderAcknowledgement,
   renderStatusComment,
+  DEFAULT_GITHUB_WORK_METADATA,
+  upsertGithubWorkMetadata,
   upsertBotComment,
   verifyWebhook,
   type BotCommentStore,
   type GithubAuthorizationPolicy,
   type GithubClient,
+  type GithubIssueLifecycleClient,
   type GithubWorkReader,
   type NormalizedGithubEvent,
   type ParsedGithubCommand,
@@ -35,7 +40,7 @@ export interface GithubWebhookDependencies {
   quotaProvider: string;
   quotaAccountRef: string;
   /** Absent when no GitHub App credential is configured; the bot stays silent. */
-  client?: GithubClient | undefined;
+  client?: (GithubClient & GithubIssueLifecycleClient) | undefined;
   workReader?: GithubWorkReader | undefined;
   now?: string;
   correlationId: string;
@@ -95,6 +100,15 @@ export async function handleGithubDelivery(
     const project = await resolveProject(dependencies, event);
     if (!project) {
       return await ignore(dependencies, deliveryId, "UNKNOWN_REPOSITORY");
+    }
+
+    if (event.event === "pull_request" && event.pullRequest && dependencies.workReader && dependencies.client) {
+      authorizeInstallation(event.installationId, dependencies.policy);
+      const summary = await reconcilePullRequestLifecycle(dependencies, project, event);
+      await dependencies.persistence.githubDeliveries.updateOutcome(deliveryId, {
+        status: "processed", processedAt: now,
+      });
+      return { status: "processed", commandId: null, summary, projectId: project.id };
     }
 
     if (event.event === "issues" && event.subject?.type === "issue" && dependencies.workReader) {
@@ -163,6 +177,54 @@ async function reconcileGithubWork(
       sourceUpdatedAt: item.sourceUpdatedAt, observedAt: item.observedAt, expiresAt: item.expiresAt,
     })),
   });
+}
+
+/** Reconciles only a PR already correlated by durable work metadata. */
+async function reconcilePullRequestLifecycle(
+  dependencies: GithubWebhookDependencies,
+  project: ProjectRecord,
+  event: NormalizedGithubEvent,
+): Promise<string> {
+  const pullRequest = event.pullRequest;
+  const client = dependencies.client;
+  if (!pullRequest || !client) return "Pull request lifecycle ignored.";
+  if (event.action !== "synchronize" && event.action !== "closed") return "Pull request lifecycle refreshed.";
+  const work = (await dependencies.persistence.githubWork.listForProject(project.id))
+    .find((item) => item.pullRequestNumber === pullRequest.number && item.present);
+  if (!work) return "Pull request is not correlated with ADE work.";
+
+  const issue = await client.getIssueDetails(event.repository, work.issueNumber);
+  const metadata = issue ? readGithubWorkMetadata(issue.body) : null;
+  if (!issue || !metadata) throw new GithubWebhookLifecycleError("PULL_REQUEST_SOURCE_MISSING");
+  const correlated = metadata.pullRequestNumber === pullRequest.number &&
+    metadata.branchName === work.branchName && metadata.executionRef === work.executionRef &&
+    work.branchName === pullRequest.headRef;
+  const nextState = correlated && event.action === "closed" && pullRequest.merged
+    ? "completed"
+    : correlated && event.action === "closed"
+      ? "blocked"
+      : correlated
+        ? metadata.state
+        : "blocked";
+  const nextMetadata = {
+    ...(readGithubWorkMetadata(issue.body) ?? DEFAULT_GITHUB_WORK_METADATA),
+    state: nextState,
+    humanDecisionRef: nextState === "blocked" ? `pr-${pullRequest.number}-reconciliation` : metadata.humanDecisionRef,
+  };
+  if (nextState !== metadata.state || nextMetadata.humanDecisionRef !== metadata.humanDecisionRef) {
+    await client.updateIssueBody(event.repository, work.issueNumber, upsertGithubWorkMetadata(issue.body, nextMetadata));
+  }
+  await client.syncAdeWorkflowLabels(event.repository, work.issueNumber, labelsForGithubWorkState(nextState, metadata.pullRequestNumber));
+  await reconcileGithubWork(dependencies, project, event.repository);
+  return nextState === "completed"
+    ? "Merged pull request completed ADE work."
+    : nextState === "blocked"
+      ? "Pull request requires reconciliation."
+      : "Pull request lifecycle refreshed.";
+}
+
+class GithubWebhookLifecycleError extends Error {
+  public constructor(public readonly code: string) { super("GitHub pull request lifecycle could not be reconciled."); }
 }
 
 async function resolveProject(

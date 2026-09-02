@@ -26,6 +26,14 @@ export interface GithubCommentRef {
   body: string;
 }
 
+/** Bounded PR fields retained from a signed delivery for lifecycle checks. */
+export interface GithubPullRequestRef {
+  number: number;
+  merged: boolean;
+  headRef: string;
+  headSha: string;
+}
+
 /**
  * The only shape the rest of the control plane sees.
  *
@@ -41,6 +49,7 @@ export interface NormalizedGithubEvent {
   actor: GithubActor;
   subject: GithubSubjectRef | null;
   comment: GithubCommentRef | null;
+  pullRequest: GithubPullRequestRef | null;
   installationId: string | null;
 }
 

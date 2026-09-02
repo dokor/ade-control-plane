@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
 import test from "node:test";
 
-import { DeterministicFakeGithubClient, type GithubWorkReader } from "@ade-control-plane/github";
+import { DeterministicFakeGithubClient, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubWorkReader } from "@ade-control-plane/github";
 
 import { handleGithubDelivery } from "../src/lib/githubWebhook.js";
 import {
@@ -309,4 +309,50 @@ test("an unknown verb is rejected without touching control-plane state", async (
   assert.equal(state.commands.length, 0);
   assert.equal(state.projects[0]?.state, "enabled");
   assert.equal(state.deliveries[0]?.rejectionCode, "UNKNOWN_COMMAND");
+});
+
+test("a merged correlated pull request completes work and refreshes its dependencies", async () => {
+  const state = baseState();
+  const client = new DeterministicFakeGithubClient();
+  client.issues.set(42, {
+    number: 42, title: "Delivery", state: "open", url: "https://github.com/dokor/argos/issues/42", updatedAt: NOW,
+    labels: ["waiting-human", "pr-ready"],
+    body: upsertGithubWorkMetadata("Delivery", {
+      state: "waiting-human", priority: 80, dependsOn: [], retryPolicy: "reconcile-first",
+      humanDecisionRef: null, executionRef: "execution-1", branchName: "ade/issue-42", pullRequestNumber: 91,
+    }),
+  });
+  state.githubWorkItems.push({
+    id: "work-42", projectId: project().id, repositoryGithubId: REPOSITORY_ID, contractVersion: "ade.github-work/v1",
+    issueNumber: 42, issueUrl: "https://github.com/dokor/argos/issues/42", state: "waiting-human", priority: 80,
+    dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: "execution-1",
+    branchName: "ade/issue-42", pullRequestNumber: 91, sourceUpdatedAt: NOW, observedAt: NOW,
+    expiresAt: "2026-08-27T10:05:00.000Z", present: true,
+  });
+  const reader: GithubWorkReader = {
+    detectRepository: async (repository) => ({ repository, compatible: true, contractVersion: "ade.github-work-profile/v1", capabilities: ["github-work-items"], skillPaths: [], observedAt: NOW, reason: "compatible" }),
+    listWorkItems: async (repository) => {
+      const current = client.issues.get(42)!;
+      const metadata = readGithubWorkMetadata(current.body)!;
+      return [{ repository, contractVersion: "ade.github-work/v1", issueNumber: 42, issueUrl: "https://github.com/dokor/argos/issues/42", state: metadata.state, priority: metadata.priority, dependsOn: metadata.dependsOn, retryPolicy: metadata.retryPolicy, humanDecisionRef: metadata.humanDecisionRef, executionRef: metadata.executionRef, branchName: metadata.branchName, pullRequestNumber: metadata.pullRequestNumber, sourceUpdatedAt: current.updatedAt, observedAt: NOW, expiresAt: "2026-08-27T10:05:00.000Z" }];
+    },
+    getWorkItem: async () => null,
+  };
+  const raw = Buffer.from(JSON.stringify({
+    action: "closed", number: 91,
+    repository: { id: Number(REPOSITORY_ID), name: "argos", owner: { login: "dokor" } },
+    sender: { id: Number(ACTOR_ID), login: "dokor", type: "User" }, installation: { id: 555 },
+    pull_request: { merged: true, head: { ref: "ade/issue-42", sha: "0123456789abcdef0123456789abcdef01234567" } },
+  }));
+  const headers = new Headers({
+    "x-github-delivery": "pr-merged-1", "x-github-event": "pull_request",
+    "x-hub-signature-256": `sha256=${createHmac("sha256", SECRET).update(raw).digest("hex")}`,
+  });
+  const dependencies = { persistence: createMemoryPersistence(state), webhookSecret: SECRET, policy: { allowedActorIds: [ACTOR_ID] }, dashboardUrl: "https://ade.example.com", quotaProvider: "openai", quotaAccountRef: "codex-account-main", client, workReader: reader, now: NOW, correlationId: "corr-pr" };
+
+  const outcome = await handleGithubDelivery(dependencies, raw, headers);
+  assert.equal(outcome.status, "processed");
+  assert.equal(readGithubWorkMetadata(client.issues.get(42)!.body)?.state, "completed");
+  assert.deepEqual(client.issues.get(42)?.labels, ["backlog-refined"]);
+  assert.equal(state.githubWorkItems[0]?.state, "completed");
 });
