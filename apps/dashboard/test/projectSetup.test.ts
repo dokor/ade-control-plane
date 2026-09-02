@@ -98,6 +98,31 @@ test("recognizes a fully configured repository while keeping optional files visi
   assert.equal(readiness.requirements.find(({ key }) => key === "github-labels")?.state, "ready");
 });
 
+test("blocks a stale runner proof until its checkout matches the default branch", async () => {
+  const client = new DeterministicFakeGithubClient();
+  putReadyProfile(client);
+  client.contents.set("AGENTS.md", { path: "AGENTS.md", sha: "agents", content: Buffer.from("# Instructions").toString("base64") });
+  putRequiredLabels(client);
+  client.defaultBranchHead = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const readiness = await inspectProjectSetup(project, runtime(client), undefined, {
+    projectId: project.id, repositoryGithubId: "123", compatible: true, contractVersion: GITHUB_WORK_PROFILE_VERSION,
+    capabilities: ["github-work-items"], skillPaths: [".agents/skills"], reason: "compatible", observedAt: "2026-08-27T10:00:00.000Z",
+    adeStatus: "compatible", adeRuntimeVersion: "0.11.0", adeConfigVersion: "ade.project-setup/v1",
+    resolvedProfiles: ["normal"], resolvedRules: [], contextStatus: "fresh", missingRequiredCapabilityIds: [],
+    runnerCheckoutRef: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  });
+  assert.equal(readiness.ready, false);
+  assert.match(readiness.requirements.find(({ key }) => key === "runner-capability-check")?.detail ?? "", /stale/);
+});
+
+test("reports GitHub App permission failures without claiming setup is ready", async () => {
+  const client = new DeterministicFakeGithubClient();
+  client.listLabels = async () => { throw new Error("forbidden"); };
+  const readiness = await inspectProjectSetup(project, runtime(client));
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.requirements.find(({ key }) => key === "github-app")?.state, "invalid");
+});
+
 test("prepares only missing pieces and reuses the open setup PR on retry", async () => {
   const client = new DeterministicFakeGithubClient();
   const first = await prepareProjectSetup(project, runtime(client));

@@ -12,7 +12,7 @@ import {
 import type { GithubRuntime } from "./githubRuntime.js";
 
 type GithubSetupReadClient = GithubSetupClient & {
-  getRepositoryPathType(repository: GithubRepositoryRef, path: string): Promise<"file" | "directory" | null>;
+  getDefaultBranchHead(repository: GithubRepositoryRef): Promise<string>;
 };
 
 export type SetupRequirementState = "ready" | "missing" | "invalid" | "optional";
@@ -80,6 +80,7 @@ export async function inspectProjectSetup(
   const inspected = await Promise.all([
     readProfile(repository, setupClient),
     setupClient.listLabels(repository),
+    setupClient.getDefaultBranchHead(repository),
     Promise.all(Object.values(SETUP_PATHS).map(async (path) => [path, await setupClient.getRepositoryContent(repository, path)] as const)),
   ]).catch(() => null);
   if (!inspected) {
@@ -87,7 +88,7 @@ export async function inspectProjectSetup(
     requirements.push({ key: "github-app", label: "GitHub App access", state: "invalid", detail: "Check the App installation and repository contents/metadata permissions.", repairable: false, source: "runtime" });
     return { ready: false, requirements, missingLabels, missingFiles, plannedFiles, invalidFiles, checkedAt: now };
   }
-  const [profile, labels, files] = inspected;
+  const [profile, labels, defaultBranchHead, files] = inspected;
   const fileMap = new Map(files);
   if (profile.state === "missing") missingFiles.push(GITHUB_WORK_PROFILE_PATH);
   if (profile.state === "invalid") invalidFiles.push(GITHUB_WORK_PROFILE_PATH);
@@ -136,13 +137,15 @@ export async function inspectProjectSetup(
 
   if (compatibility !== undefined) {
     const missing = compatibility?.missingRequiredCapabilityIds ?? [];
-    const verified = compatibility?.adeStatus === "compatible";
+    const verified = compatibility?.adeStatus === "compatible" && compatibility.runnerCheckoutRef === defaultBranchHead;
     requirements.push({
       key: "runner-capability-check",
       label: "Runner ADE capability check",
       state: verified ? "ready" : "missing",
       detail: verified
-        ? `Runner checkout ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} passed ADE ${compatibility?.adeRuntimeVersion ?? "runtime"} setup and delivery checks.`
+        ? `Runner checkout ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} matches the default branch and passed ADE ${compatibility?.adeRuntimeVersion ?? "runtime"} setup and delivery checks.`
+        : compatibility?.adeStatus === "compatible"
+          ? "Runner checkout is stale relative to the repository default branch; refresh it before scheduling."
         : missing.length > 0
           ? `Runner checkout is missing required ADE capabilities: ${missing.join(", ")}.`
           : "Run Prepare ADE after the setup PR is merged to prove the runner checkout can resolve ADE workflows.",
@@ -220,7 +223,7 @@ async function readProfile(
 
 function asSetupClient(client: GithubRuntime["client"]): GithubSetupReadClient | null {
   const candidate = client as unknown as Partial<GithubSetupReadClient> | undefined;
-  if (!candidate || typeof candidate.getRepositoryContent !== "function" || typeof candidate.getRepositoryPathType !== "function" || typeof candidate.listLabels !== "function" || typeof candidate.createLabel !== "function" || typeof candidate.findOpenSetupPullRequest !== "function" || typeof candidate.createSetupPullRequest !== "function") return null;
+  if (!candidate || typeof candidate.getRepositoryContent !== "function" || typeof candidate.getRepositoryPathType !== "function" || typeof candidate.getDefaultBranchHead !== "function" || typeof candidate.listLabels !== "function" || typeof candidate.createLabel !== "function" || typeof candidate.findOpenSetupPullRequest !== "function" || typeof candidate.createSetupPullRequest !== "function") return null;
   return candidate as GithubSetupReadClient;
 }
 

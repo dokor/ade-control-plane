@@ -89,6 +89,7 @@ export interface GithubSetupClient {
     path: string,
   ): Promise<GithubRepositoryContent | null>;
   getRepositoryPathType(repository: GithubRepositoryRef, path: string): Promise<"file" | "directory" | null>;
+  getDefaultBranchHead(repository: GithubRepositoryRef): Promise<string>;
   listLabels(repository: GithubRepositoryRef): Promise<readonly GithubLabel[]>;
   createLabel(repository: GithubRepositoryRef, label: GithubLabel): Promise<GithubLabel>;
   findOpenSetupPullRequest(repository: GithubRepositoryRef, title: string): Promise<GithubPullRequest | null>;
@@ -306,6 +307,19 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient, 
     return { id: String(parsed.id), owner: parsed.owner.login, name: parsed.name, defaultBranch: parsed.default_branch, private: parsed.private, url: parsed.html_url };
   }
 
+  public async getDefaultBranchHead(repository: GithubRepositoryRef): Promise<string> {
+    const metadata = await this.getRepositoryMetadata(repository);
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/commits/${encodeURIComponent(metadata.defaultBranch)}`,
+      { headers: this.headers(token) },
+    );
+    if (!response.ok) throw new GithubApiError(response.status, "read default branch head", await safeGithubErrorDetail(response));
+    const parsed = await response.json().catch(() => null) as { sha?: unknown } | null;
+    if (!parsed || typeof parsed.sha !== "string" || !/^[0-9a-f]{40,64}$/iu.test(parsed.sha)) throw new Error("GitHub default branch head response is invalid.");
+    return parsed.sha.toLowerCase();
+  }
+
   public async listLabels(repository: GithubRepositoryRef): Promise<readonly GithubLabel[]> {
     const token = await this.options.tokens.getToken(this.options.installationId);
     const response = await this.fetchImplementation(
@@ -504,6 +518,7 @@ export class DeterministicFakeGithubClient
   public readonly directories = new Set<string>();
   public readonly labels: GithubLabel[] = [];
   public repositoryMetadata: GithubRepositoryMetadata = { id: "123", owner: "dokor", name: "alpha", defaultBranch: "main", private: false, url: "https://github.com/dokor/alpha" };
+  public defaultBranchHead = "0123456789012345678901234567890123456789";
   private readonly setupPullRequests = new Map<string, GithubPullRequest>();
   public readonly issues = new Map<number, GithubIssueDetails>();
 
@@ -569,6 +584,10 @@ export class DeterministicFakeGithubClient
 
   public async getRepositoryMetadata(_repository: GithubRepositoryRef): Promise<GithubRepositoryMetadata> {
     return this.repositoryMetadata;
+  }
+
+  public async getDefaultBranchHead(_repository: GithubRepositoryRef): Promise<string> {
+    return this.defaultBranchHead;
   }
 
   public async listLabels(_repository: GithubRepositoryRef): Promise<readonly GithubLabel[]> {
