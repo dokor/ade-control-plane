@@ -157,7 +157,6 @@ export {
 export {
   AdeDeliveryError,
   AdeDeliveryRuntime,
-  selectProfiles,
   type AdeDeliveryProvenance,
   type AdeDeliveryReviewResult,
   type AdeDeliveryWorkContext,

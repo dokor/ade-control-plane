@@ -10,7 +10,7 @@ import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, t
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
-import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPreparation, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
+import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPlan, type AdeDeliveryPreparation, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
 import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./ProjectCheckout.js";
 
 interface V0Persistence {
@@ -162,6 +162,21 @@ export class V0TaskExecutor {
         ...(issue?.title ? { issueTitle: issue.title } : {}),
       } as const;
       const initialization = task.source.type === "ade-initialize";
+      const planIssue = {
+        number: issue?.number ?? 0,
+        title: issue?.title ?? task.prompt,
+        body: task.prompt,
+        labels: [] as readonly string[],
+        state: "open" as const,
+        url: issue?.url ?? `ade://tasks/${task.id}`,
+      };
+      let deliveryPlan: AdeDeliveryPlan | undefined;
+      if (!initialization) {
+        deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
+        if (deliveryPlan.action !== "develop") {
+          throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
+        }
+      }
       let prepared: AdeDeliveryPreparation | undefined;
       if (!initialization) {
         prepared = await this.deliveryRuntime.prepare({
@@ -212,6 +227,10 @@ export class V0TaskExecutor {
           onOutput: (output) => this.logCommandOutput(task.id, output),
         });
         await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; initialization configuration validated.`);
+        deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
+        if (deliveryPlan.action !== "develop") {
+          throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
+        }
       }
 
       reviewResult = await this.deliveryRuntime.runPostAgentGates({
@@ -219,6 +238,7 @@ export class V0TaskExecutor {
         work,
         agentExecutor: this.agentExecutor,
         prepared,
+        plan: deliveryPlan!,
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });

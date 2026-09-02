@@ -136,6 +136,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         prepared,
         plan,
       });
+      if (!plan.publicationReady) {
+        throw new GithubWorkExecutionError("ADE_PUBLICATION_BLOCKED", `ADE has not opened the publication gate: ${plan.reason}`);
+      }
       await this.mustRun("git commit", {
         executable: "git",
         args: ["-c", "user.name=ADE Control Plane", "-c", "user.email=ade-control-plane@localhost", "-c", "core.hooksPath=/dev/null", "commit", "-m", `feat: implement GitHub issue #${request.work.issueNumber}`],
