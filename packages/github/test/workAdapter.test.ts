@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   GITHUB_WORK_PROFILE_VERSION,
   HttpGithubWorkAdapter,
+  GithubWorkAdapterError,
   isGithubWorkItemFresh,
   normalizeGithubWorkItem,
   type GithubWorkRepositoryProfile,
@@ -143,6 +144,20 @@ test("treats a missing or invalid profile as incompatible without executing proj
 
   assert.equal((await missing.detectRepository(repository)).reason, "missing-profile");
   assert.equal((await invalid.detectRepository(repository)).reason, "unsupported-profile");
+});
+
+test("preserves a bounded retry time from GitHub rate-limit headers", async () => {
+  const adapter = new HttpGithubWorkAdapter({
+    installationId: "installation-1",
+    tokens: { getToken: async () => "token" },
+    now: () => observedAt,
+    fetchImplementation: async () => new Response(null, { status: 429, headers: { "retry-after": "60" } }),
+  });
+
+  await assert.rejects(
+    () => adapter.detectRepository(repository),
+    (error: unknown) => error instanceof GithubWorkAdapterError && error.status === 429 && error.retryAt === "2026-08-28T10:01:00.000Z",
+  );
 });
 
 test("uses the same strict normalizer for one-issue webhook refreshes", async () => {

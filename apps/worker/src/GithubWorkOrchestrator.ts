@@ -15,7 +15,7 @@ import type {
   ProjectRecord,
   RunnerRecord,
 } from "@ade-control-plane/database";
-import type { GithubWorkItem, GithubWorkReader, GithubWorkRepositoryProfile } from "@ade-control-plane/github";
+import { GithubWorkAdapterError, type GithubWorkItem, type GithubWorkReader, type GithubWorkRepositoryProfile } from "@ade-control-plane/github";
 import type { AgentProvider } from "./AgentExecutor.js";
 import type { AgentUsageInput } from "@ade-control-plane/database";
 
@@ -57,6 +57,8 @@ export interface GithubWorkOrchestratorOptions {
   provider?: AgentProvider;
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
   leaseDurationMs?: number;
+  reconciliationBackoffBaseMs?: number;
+  reconciliationBackoffMaxMs?: number;
   now?(): Date;
 }
 
@@ -73,10 +75,15 @@ export type GithubWorkCycleResult =
 export class GithubWorkOrchestrator {
   private readonly now: () => Date;
   private readonly leaseDurationMs: number;
+  private readonly reconciliationBackoffBaseMs: number;
+  private readonly reconciliationBackoffMaxMs: number;
+  private readonly reconciliationBackoff = new Map<string, { failures: number; retryAt: string }>();
 
   public constructor(private readonly options: GithubWorkOrchestratorOptions) {
     this.now = options.now ?? (() => new Date());
     this.leaseDurationMs = options.leaseDurationMs ?? 15 * 60 * 1_000;
+    this.reconciliationBackoffBaseMs = positiveDuration(options.reconciliationBackoffBaseMs, 30_000);
+    this.reconciliationBackoffMaxMs = Math.max(this.reconciliationBackoffBaseMs, positiveDuration(options.reconciliationBackoffMaxMs, 15 * 60 * 1_000));
   }
 
   public async reconcileAll(): Promise<void> {
@@ -125,7 +132,8 @@ export class GithubWorkOrchestrator {
       runners: runners.map(toRunner),
     });
     if (!decision.selected) {
-      return { outcome: "idle", reason: decision.reason, ...(decision.nextWakeUpAt ? { nextWakeUpAt: decision.nextWakeUpAt } : {}) };
+      const nextWakeUpAt = earliestWakeUpAt(decision.nextWakeUpAt, this.nextReconciliationWakeUpAt(now));
+      return { outcome: "idle", reason: decision.reason, ...(nextWakeUpAt ? { nextWakeUpAt } : {}) };
     }
 
     const project = projects.find((entry) => entry.id === decision.selected?.projectId);
@@ -247,6 +255,8 @@ export class GithubWorkOrchestrator {
   public async reconcileProject(project: ProjectRecord): Promise<void> {
     const repository = { id: project.repositoryId ?? `unresolved:${project.id}`, owner: project.repositoryOwner, name: project.repositoryName };
     const observedAt = this.now().toISOString();
+    const delayed = this.reconciliationBackoff.get(project.id);
+    if (delayed && Date.parse(delayed.retryAt) > Date.parse(observedAt)) return;
     try {
       const previous = await this.options.persistence.githubWork.listForProject(project.id);
       const profile = project.repositoryId
@@ -258,13 +268,43 @@ export class GithubWorkOrchestrator {
         items: items.map((item) => toItemInput(project.id, item)),
       });
       await this.notifyAttentionChanges(project, previous, reconciled);
-    } catch {
+      this.reconciliationBackoff.delete(project.id);
+    } catch (error) {
+      const retryAt = this.recordReconciliationBackoff(project.id, observedAt, error);
+      await this.options.persistence.githubWork.reconcile({
+        profile: toProfileInput(project.id, incompatibleProfile(repository, observedAt, "reconciliation-deferred")),
+        items: [],
+      }).catch(() => undefined);
       await this.options.persistence.auditEvents.append({
         occurredAt: observedAt, category: "github-work", severity: "warning", actorType: "system",
         projectId: project.id, action: "github-work.reconciliation-failed", result: "deferred",
-        metadata: {},
+        metadata: {
+          failureCode: reconciliationFailureCode(error),
+          retryAt,
+        },
       });
     }
+  }
+
+  private recordReconciliationBackoff(projectId: string, observedAt: string, error: unknown): string {
+    const previous = this.reconciliationBackoff.get(projectId);
+    const failures = (previous?.failures ?? 0) + 1;
+    const retryAt = error instanceof GithubWorkAdapterError && error.retryAt && Date.parse(error.retryAt) > Date.parse(observedAt)
+      ? error.retryAt
+      : new Date(Date.parse(observedAt) + Math.min(
+        this.reconciliationBackoffMaxMs,
+        this.reconciliationBackoffBaseMs * 2 ** Math.min(failures - 1, 8),
+      )).toISOString();
+    this.reconciliationBackoff.set(projectId, { failures, retryAt });
+    return retryAt;
+  }
+
+  private nextReconciliationWakeUpAt(now: string): string | undefined {
+    const nowMs = Date.parse(now);
+    return [...this.reconciliationBackoff.values()]
+      .map(({ retryAt }) => retryAt)
+      .filter((retryAt) => Date.parse(retryAt) > nowMs)
+      .toSorted()[0];
   }
 
   private async notifyAttentionChanges(
@@ -329,8 +369,12 @@ function groupByProject(items: readonly GithubWorkItemRecord[]): Map<string, Git
 
 function githubWorkRef(issueNumber: number): string { return `github:issue:${issueNumber}`; }
 
-function incompatibleProfile(repository: { id: string; owner: string; name: string }, observedAt: string): GithubWorkRepositoryProfile {
-  return { repository, compatible: false, contractVersion: null, capabilities: [], skillPaths: [], observedAt, reason: "invalid-profile" };
+function incompatibleProfile(
+  repository: { id: string; owner: string; name: string },
+  observedAt: string,
+  reason: GithubWorkRepositoryProfile["reason"] = "invalid-profile",
+): GithubWorkRepositoryProfile {
+  return { repository, compatible: false, contractVersion: null, capabilities: [], skillPaths: [], observedAt, reason };
 }
 
 function toProfileInput(projectId: string, profile: GithubWorkRepositoryProfile) {
@@ -345,4 +389,20 @@ function toItemInput(projectId: string, item: GithubWorkItem) {
     dependsOn: item.dependsOn, retryPolicy: item.retryPolicy, humanDecisionRef: item.humanDecisionRef,
     executionRef: item.executionRef, branchName: item.branchName, pullRequestNumber: item.pullRequestNumber,
     sourceUpdatedAt: item.sourceUpdatedAt, observedAt: item.observedAt, expiresAt: item.expiresAt };
+}
+
+function reconciliationFailureCode(error: unknown): string {
+  if (!(error instanceof GithubWorkAdapterError)) return "GITHUB_RECONCILIATION_FAILED";
+  if (error.status === 429) return "GITHUB_RATE_LIMITED";
+  if (error.status === 403) return "GITHUB_FORBIDDEN_OR_RATE_LIMITED";
+  if (error.status >= 500 && error.status <= 599) return "GITHUB_TRANSIENT_FAILURE";
+  return "GITHUB_RECONCILIATION_FAILED";
+}
+
+function earliestWakeUpAt(...candidates: readonly (string | undefined)[]): string | undefined {
+  return candidates.filter((candidate): candidate is string => candidate !== undefined && !Number.isNaN(Date.parse(candidate))).toSorted()[0];
+}
+
+function positiveDuration(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }

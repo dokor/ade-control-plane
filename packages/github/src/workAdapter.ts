@@ -29,7 +29,7 @@ export interface GithubWorkRepositoryProfile {
   capabilities: readonly string[];
   skillPaths: readonly string[];
   observedAt: string;
-  reason: "compatible" | "missing-profile" | "invalid-profile" | "unsupported-profile";
+  reason: "compatible" | "missing-profile" | "invalid-profile" | "unsupported-profile" | "reconciliation-deferred";
 }
 
 /**
@@ -95,7 +95,7 @@ export class HttpGithubWorkAdapter implements GithubWorkReader {
       `/repos/${encode(repository.owner)}/${encode(repository.name)}/contents/${GITHUB_WORK_PROFILE_PATH}`,
     );
     if (response.status === 404) return incompatible(repository, observedAt, "missing-profile");
-    if (!response.ok) throw new GithubWorkAdapterError(response.status, "read repository profile");
+    if (!response.ok) throw githubWorkAdapterError(response, "read repository profile", this.now());
 
     const content = await safeJson(response);
     const profile = parseRepositoryProfile(content);
@@ -125,7 +125,7 @@ export class HttpGithubWorkAdapter implements GithubWorkReader {
       `/repos/${encode(repository.owner)}/${encode(repository.name)}/issues/${issueNumber}`,
     );
     if (response.status === 404) return null;
-    if (!response.ok) throw new GithubWorkAdapterError(response.status, "read issue");
+    if (!response.ok) throw githubWorkAdapterError(response, "read issue", this.now());
     return normalizeGithubWorkItem(await safeJson(response), profile, this.now(), this.freshnessMs);
   }
 
@@ -139,7 +139,7 @@ export class HttpGithubWorkAdapter implements GithubWorkReader {
       const response = await this.request(
         `/repos/${encode(repository.owner)}/${encode(repository.name)}/issues?state=all&per_page=100&sort=updated&direction=desc&page=${page}`,
       );
-      if (!response.ok) throw new GithubWorkAdapterError(response.status, "list issues");
+      if (!response.ok) throw githubWorkAdapterError(response, "list issues", this.now());
       const issues = await safeJson(response);
       if (!Array.isArray(issues)) throw new GithubWorkAdapterError(502, "validate issue list");
       for (const issue of issues) {
@@ -218,10 +218,27 @@ export function isGithubWorkItemFresh(item: GithubWorkItem, asOf: string): boole
 }
 
 export class GithubWorkAdapterError extends Error {
-  public constructor(public readonly status: number, action: string) {
+  public constructor(public readonly status: number, action: string, public readonly retryAt?: string) {
     super(`GitHub work adapter ${action} failed with status ${status}.`);
     this.name = "GithubWorkAdapterError";
   }
+}
+
+function githubWorkAdapterError(response: Response, action: string, now: Date): GithubWorkAdapterError {
+  return new GithubWorkAdapterError(response.status, action, retryAtFromHeaders(response.headers, now));
+}
+
+function retryAtFromHeaders(headers: Headers, now: Date): string | undefined {
+  const retryAfter = headers.get("retry-after");
+  if (retryAfter && /^\d+$/u.test(retryAfter)) {
+    return new Date(now.getTime() + Number(retryAfter) * 1_000).toISOString();
+  }
+  const rateLimitReset = headers.get("x-ratelimit-reset");
+  if (rateLimitReset && /^\d+$/u.test(rateLimitReset)) {
+    const reset = Number(rateLimitReset) * 1_000;
+    if (Number.isSafeInteger(reset) && reset > now.getTime()) return new Date(reset).toISOString();
+  }
+  return undefined;
 }
 
 interface RepositoryProfileData {
