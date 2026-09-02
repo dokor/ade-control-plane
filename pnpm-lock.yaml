@@ -38,20 +38,20 @@ importers:
         version: link:../../packages/quota
       next:
         specifier: 15.5.24
-        version: 15.5.24(@types/node@24.13.3)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
+        version: 15.5.24(@types/node@24.13.3)(react-dom@19.1.1(react@19.2.8))(react@19.2.8)
       react:
-        specifier: 19.1.1
-        version: 19.1.1
+        specifier: 19.2.8
+        version: 19.2.8
       react-dom:
         specifier: 19.1.1
-        version: 19.1.1(react@19.1.1)
+        version: 19.1.1(react@19.2.8)
     devDependencies:
       '@types/react':
-        specifier: 19.1.12
-        version: 19.1.12
+        specifier: 19.2.18
+        version: 19.2.18
       '@types/react-dom':
         specifier: 19.1.9
-        version: 19.1.9(@types/react@19.1.12)
+        version: 19.1.9(@types/react@19.2.18)
 
   apps/worker:
     dependencies:
@@ -481,8 +481,8 @@ packages:
     peerDependencies:
       '@types/react': ^19.0.0
 
-  '@types/react@19.1.12':
-    resolution: {integrity: sha512-cMoR+FoAf/Jyq6+Df2/Z41jISvGZZ2eTlnsaJRptmZ76Caldwy1odD4xTr/gNV9VLj0AWgg/nmkevIyUfIIq5w==}
+  '@types/react@19.2.18':
+    resolution: {integrity: sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==}
 
   caniuse-lite@1.0.30001810:
     resolution: {integrity: sha512-TITQPUkaz+aVk5GL6NhOdwk1aEaNTSDPsGFWrTuhKGtjTF70jL/Oht2W4c6rXUe5fu7Ie19VIahAXHIIiWWNeg==}
@@ -595,8 +595,8 @@ packages:
     peerDependencies:
       react: ^19.1.1
 
-  react@19.1.1:
-    resolution: {integrity: sha512-w8nqGImo45dmMIfljjMwOGtbmC/mk4CMYhWIicdSflH91J9TyCyczcPFXJzrZ/ZXcgGRFeP6BU0BEJTw6tZdfQ==}
+  react@19.2.8:
+    resolution: {integrity: sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==}
     engines: {node: '>=0.10.0'}
 
   scheduler@0.26.0:
@@ -889,11 +889,11 @@ snapshots:
       pg-protocol: 1.16.0
       pg-types: 2.2.0
 
-  '@types/react-dom@19.1.9(@types/react@19.1.12)':
+  '@types/react-dom@19.1.9(@types/react@19.2.18)':
     dependencies:
-      '@types/react': 19.1.12
+      '@types/react': 19.2.18
 
-  '@types/react@19.1.12':
+  '@types/react@19.2.18':
     dependencies:
       csstype: 3.2.3
 
@@ -940,15 +940,15 @@ snapshots:
 
   nanoid@3.3.18: {}
 
-  next@15.5.24(@types/node@24.13.3)(react-dom@19.1.1(react@19.1.1))(react@19.1.1):
+  next@15.5.24(@types/node@24.13.3)(react-dom@19.1.1(react@19.2.8))(react@19.2.8):
     dependencies:
       '@next/env': 15.5.24
       '@swc/helpers': 0.5.15
       caniuse-lite: 1.0.30001810
       postcss: 8.4.31
-      react: 19.1.1
-      react-dom: 19.1.1(react@19.1.1)
-      styled-jsx: 5.1.6(react@19.1.1)
+      react: 19.2.8
+      react-dom: 19.1.1(react@19.2.8)
+      styled-jsx: 5.1.6(react@19.2.8)
     optionalDependencies:
       '@next/swc-darwin-arm64': 15.5.24
       '@next/swc-darwin-x64': 15.5.24
@@ -1017,12 +1017,12 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
-  react-dom@19.1.1(react@19.1.1):
+  react-dom@19.1.1(react@19.2.8):
     dependencies:
-      react: 19.1.1
+      react: 19.2.8
       scheduler: 0.26.0
 
-  react@19.1.1: {}
+  react@19.2.8: {}
 
   scheduler@0.26.0: {}
 
@@ -1067,10 +1067,10 @@ snapshots:
 
   split2@4.2.0: {}
 
-  styled-jsx@5.1.6(react@19.1.1):
+  styled-jsx@5.1.6(react@19.2.8):
     dependencies:
       client-only: 0.0.1
-      react: 19.1.1
+      react: 19.2.8
 
   tslib@2.8.1: {}
 
