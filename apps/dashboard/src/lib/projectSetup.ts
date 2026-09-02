@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import type { ProjectRecord } from "@ade-control-plane/database";
+import type { GithubWorkProfileRecord, ProjectRecord } from "@ade-control-plane/database";
 import {
   GITHUB_WORK_PROFILE_PATH,
   GITHUB_WORK_PROFILE_VERSION,
@@ -61,6 +61,7 @@ export async function inspectProjectSetup(
   project: ProjectRecord,
   runtime: GithubRuntime | null,
   now = new Date().toISOString(),
+  compatibility?: GithubWorkProfileRecord | null,
 ): Promise<ProjectSetupReadiness> {
   const setupClient = asSetupClient(runtime?.client);
   const requirements: ProjectSetupRequirement[] = [];
@@ -132,6 +133,23 @@ export async function inspectProjectSetup(
     source: "github",
   });
   requirements.push({ key: "github-app", label: "GitHub App access", state: "ready", detail: "The configured App can read repository setup data.", repairable: false, source: "runtime" });
+
+  if (compatibility !== undefined) {
+    const missing = compatibility?.missingRequiredCapabilityIds ?? [];
+    const verified = compatibility?.adeStatus === "compatible";
+    requirements.push({
+      key: "runner-capability-check",
+      label: "Runner ADE capability check",
+      state: verified ? "ready" : "missing",
+      detail: verified
+        ? `Runner checkout ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} passed ADE ${compatibility?.adeRuntimeVersion ?? "runtime"} setup and delivery checks.`
+        : missing.length > 0
+          ? `Runner checkout is missing required ADE capabilities: ${missing.join(", ")}.`
+          : "Run Prepare ADE after the setup PR is merged to prove the runner checkout can resolve ADE workflows.",
+      repairable: false,
+      source: "runtime",
+    });
+  }
 
   const mandatory = requirements.filter((requirement) => requirement.key !== "context" && requirement.key !== "issue-template");
   return { ready: mandatory.every(({ state }) => state === "ready"), requirements, missingLabels, missingFiles, plannedFiles: [...new Set(plannedFiles)], invalidFiles, checkedAt: now };

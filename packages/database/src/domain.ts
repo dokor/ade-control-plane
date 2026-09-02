@@ -235,6 +235,8 @@ export interface GithubWorkProfileRecord {
   resolvedProfiles?: readonly string[];
   resolvedRules?: readonly string[];
   contextStatus?: "fresh" | "stale" | "missing" | "unknown";
+  missingRequiredCapabilityIds?: readonly string[];
+  runnerCheckoutRef?: string | null;
 }
 
 /** A requested local cleanup, handled by the worker that owns V0_PROJECT_ROOT. */

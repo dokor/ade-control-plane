@@ -19,7 +19,7 @@ export async function GET(
     const persistence = await getPersistence();
     const project = await persistence.projects.getById(id);
     if (!project) throw new ControlError("NOT_FOUND", "Project was not found.");
-    return { body: { readiness: await inspectProjectSetup(project, await loadGithubRuntime()) } };
+    return { body: { readiness: await inspectProjectSetup(project, await loadGithubRuntime(), undefined, await persistence.githubWork.getProfile(project.id)) } };
   });
 }
 

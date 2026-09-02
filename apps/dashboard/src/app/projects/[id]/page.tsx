@@ -39,6 +39,8 @@ export default async function ProjectPage({
   const setupReadiness = await inspectProjectSetup(
     projectRecord,
     await loadGithubRuntime(),
+    undefined,
+    await persistence.githubWork.getProfile(projectRecord.id),
   );
 
   const { project, availableActions } = detail;

@@ -245,6 +245,8 @@ export interface GithubWorkProfileInput {
   resolvedProfiles?: readonly string[];
   resolvedRules?: readonly string[];
   contextStatus?: "fresh" | "stale" | "missing" | "unknown";
+  missingRequiredCapabilityIds?: readonly string[];
+  runnerCheckoutRef?: string | null;
 }
 
 export interface GithubWorkItemInput {
@@ -280,6 +282,18 @@ export interface GithubWorkRepository {
   listForProject(projectId: string): Promise<readonly GithubWorkItemRecord[]>;
   listForProjects(projectIds: readonly string[]): Promise<readonly GithubWorkItemRecord[]>;
   reconcile(input: GithubWorkReconciliationInput): Promise<readonly GithubWorkItemRecord[]>;
+  recordAdeReadiness(input: {
+    projectId: string;
+    status: AdeProjectCompatibilityState;
+    configVersion?: string | null;
+    runtimeVersion?: string | null;
+    resolvedProfiles?: readonly string[];
+    resolvedRules?: readonly string[];
+    contextStatus?: "fresh" | "stale" | "missing" | "unknown";
+    missingRequiredCapabilityIds?: readonly string[];
+    runnerCheckoutRef?: string | null;
+    observedAt: string;
+  }): Promise<GithubWorkProfileRecord | null>;
 }
 
 export interface GithubBotCommentRepository {

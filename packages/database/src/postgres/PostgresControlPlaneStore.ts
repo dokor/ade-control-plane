@@ -447,6 +447,8 @@ function mapGithubWorkProfile(row: TimestampRow): GithubWorkProfileRecord {
     resolvedProfiles: row.resolved_profiles ? toStringArray(row.resolved_profiles) : [],
     resolvedRules: row.resolved_rules ? toStringArray(row.resolved_rules) : [],
     contextStatus: (row.context_status as GithubWorkProfileRecord["contextStatus"] | null | undefined) ?? "unknown",
+    missingRequiredCapabilityIds: row.ade_missing_required_ids ? toStringArray(row.ade_missing_required_ids) : [],
+    runnerCheckoutRef: row.runner_checkout_ref === null || row.runner_checkout_ref === undefined ? null : String(row.runner_checkout_ref),
   };
 }
 
@@ -653,20 +655,26 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
     return withTransaction(this.pool, async (client) => {
       const profile = input.profile;
       await client.query(
-        `INSERT INTO github_work_profiles (project_id, repository_github_id, compatible, contract_version, capabilities, skill_paths, reason, observed_at, ade_status, ade_config_version, ade_runtime_version, resolved_profiles, resolved_rules, context_status)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14)
+        `INSERT INTO github_work_profiles (project_id, repository_github_id, compatible, contract_version, capabilities, skill_paths, reason, observed_at, ade_status, ade_config_version, ade_runtime_version, resolved_profiles, resolved_rules, context_status, ade_missing_required_ids, runner_checkout_ref)
+         VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15::jsonb, $16)
          ON CONFLICT (project_id) DO UPDATE SET
            repository_github_id = EXCLUDED.repository_github_id, compatible = EXCLUDED.compatible,
            contract_version = EXCLUDED.contract_version, capabilities = EXCLUDED.capabilities,
            skill_paths = EXCLUDED.skill_paths, reason = EXCLUDED.reason, observed_at = EXCLUDED.observed_at,
-           ade_status = EXCLUDED.ade_status, ade_config_version = EXCLUDED.ade_config_version,
-           ade_runtime_version = EXCLUDED.ade_runtime_version, resolved_profiles = EXCLUDED.resolved_profiles,
-           resolved_rules = EXCLUDED.resolved_rules, context_status = EXCLUDED.context_status`,
+           ade_status = CASE WHEN $17 THEN EXCLUDED.ade_status ELSE github_work_profiles.ade_status END,
+           ade_config_version = CASE WHEN $17 THEN EXCLUDED.ade_config_version ELSE github_work_profiles.ade_config_version END,
+           ade_runtime_version = CASE WHEN $17 THEN EXCLUDED.ade_runtime_version ELSE github_work_profiles.ade_runtime_version END,
+           resolved_profiles = CASE WHEN $17 THEN EXCLUDED.resolved_profiles ELSE github_work_profiles.resolved_profiles END,
+           resolved_rules = CASE WHEN $17 THEN EXCLUDED.resolved_rules ELSE github_work_profiles.resolved_rules END,
+           context_status = CASE WHEN $17 THEN EXCLUDED.context_status ELSE github_work_profiles.context_status END,
+           ade_missing_required_ids = CASE WHEN $17 THEN EXCLUDED.ade_missing_required_ids ELSE github_work_profiles.ade_missing_required_ids END,
+           runner_checkout_ref = CASE WHEN $17 THEN EXCLUDED.runner_checkout_ref ELSE github_work_profiles.runner_checkout_ref END`,
         [profile.projectId, profile.repositoryGithubId, profile.compatible, profile.contractVersion ?? null,
           JSON.stringify(profile.capabilities ?? []), JSON.stringify(profile.skillPaths ?? []), profile.reason, profile.observedAt,
-          profile.adeStatus ?? (profile.compatible ? "compatible" : profile.reason === "missing-profile" ? "setup-required" : "incompatible"),
+          profile.adeStatus ?? (profile.reason === "missing-profile" ? "setup-required" : "setup-required"),
           profile.adeConfigVersion ?? null, profile.adeRuntimeVersion ?? null,
-          JSON.stringify(profile.resolvedProfiles ?? []), JSON.stringify(profile.resolvedRules ?? []), profile.contextStatus ?? "unknown"],
+          JSON.stringify(profile.resolvedProfiles ?? []), JSON.stringify(profile.resolvedRules ?? []), profile.contextStatus ?? "unknown",
+          JSON.stringify(profile.missingRequiredCapabilityIds ?? []), profile.runnerCheckoutRef ?? null, profile.adeStatus !== undefined],
       );
       await client.query("UPDATE github_work_items SET present = false WHERE project_id = $1", [profile.projectId]);
       for (const item of input.items) {
@@ -693,6 +701,19 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
       );
       return result.rows.map(mapGithubWorkItem);
     });
+  }
+
+  public async recordAdeReadiness(input: Parameters<GithubWorkRepository["recordAdeReadiness"]>[0]): Promise<GithubWorkProfileRecord | null> {
+    const result = await this.pool.query<TimestampRow>(
+      `UPDATE github_work_profiles SET ade_status = $2, ade_config_version = $3, ade_runtime_version = $4,
+        resolved_profiles = $5::jsonb, resolved_rules = $6::jsonb, context_status = $7,
+        ade_missing_required_ids = $8::jsonb, runner_checkout_ref = $9, observed_at = $10
+       WHERE project_id = $1 RETURNING *`,
+      [input.projectId, input.status, input.configVersion ?? null, input.runtimeVersion ?? null,
+        JSON.stringify(input.resolvedProfiles ?? []), JSON.stringify(input.resolvedRules ?? []), input.contextStatus ?? "unknown",
+        JSON.stringify(input.missingRequiredCapabilityIds ?? []), input.runnerCheckoutRef ?? null, input.observedAt],
+    );
+    return result.rows[0] ? mapGithubWorkProfile(result.rows[0]) : null;
   }
 }
 
