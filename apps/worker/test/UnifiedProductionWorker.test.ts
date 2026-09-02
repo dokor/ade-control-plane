@@ -41,3 +41,22 @@ test("does not dispatch either source while quota blocks new work", async () => 
   await worker.run(stop.signal);
   assert.deepEqual(calls, []);
 });
+
+test("schedules one jittered provider refresh after a known quota reset", async () => {
+  const worker = new UnifiedProductionWorker({
+    wake: { wait: async () => ({ reason: "quota", projectId: null, fullReconcile: false }) },
+    manual: { recoverInterruptedTask: async () => {}, runOnce: async () => false },
+    github: { runCycle: async () => ({ outcome: "idle", reason: "none" }) },
+    quota: { refresh: async () => ({
+      snapshot: { provider: "openai", accountRef: "test", usedPercent: 100, observedAt: "2026-09-01T00:00:00.000Z", resetsAt: "2026-09-01T00:01:00.000Z" },
+      refreshed: true,
+      decision: { canStartWork: false, state: "blocked", reason: "blocked", refreshRequired: false, resetsAt: "2026-09-01T00:01:00.000Z" },
+    }) },
+    fullReconcileIntervalMs: 300_000,
+    now: () => new Date("2026-09-01T00:00:00.000Z"),
+    random: () => 0.5,
+  });
+
+  await worker.runOnce({ reason: "quota", projectId: null, fullReconcile: false });
+  assert.equal(worker.nextWaitTimeoutMs(300_000), 75_000);
+});

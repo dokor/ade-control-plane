@@ -55,6 +55,7 @@ export interface QuotaView {
   observedAt: string | null;
   snapshotAgeMs: number | null;
   reason: string;
+  canStartWork: boolean;
   refreshRequired: boolean;
 }
 
@@ -407,6 +408,7 @@ function buildQuotaView(
       observedAt: null,
       snapshotAgeMs: null,
       reason: "No provider quota snapshot has been recorded yet.",
+      canStartWork: false,
       refreshRequired: true,
     };
   }
@@ -444,6 +446,7 @@ function buildQuotaView(
     observedAt: snapshot.observedAt,
     snapshotAgeMs: ageMs(snapshot.observedAt, now),
     reason: decision.reason,
+    canStartWork: decision.canStartWork,
     refreshRequired: decision.refreshRequired,
   };
 }

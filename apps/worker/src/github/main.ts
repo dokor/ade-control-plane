@@ -68,7 +68,9 @@ async function main(): Promise<void> {
       provider: config.agentProvider,
       agentUsage: store.agentUsage,
       ownerId: `github-work:${hostname()}:${process.pid}`,
-      allowStartWithoutQuotaSnapshot: config.codexAppServerUrl === null,
+      // Codex quota observations must never be applied to Claude work. Claude
+      // has no live quota source yet, so its explicit policy is unsupported.
+      allowStartWithoutQuotaSnapshot: config.agentProvider !== "codex" || config.codexAppServerUrl === null,
       notifier: new GithubWorkNotifier({
         persistence: store,
         client: github,
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
     });
     await manual.recoverInterruptedTask();
     while (!stop.signal.aborted) {
-      const event = await wake.wait(config.fullReconcileIntervalMs, stop.signal);
+      const event = await wake.wait(unified.nextWaitTimeoutMs(config.fullReconcileIntervalMs), stop.signal);
       if (stop.signal.aborted || event.reason === "shutdown") break;
       await store.runners.recordHeartbeat(runner.id, new Date().toISOString()).catch(() => undefined);
       const mode = (await store.settings.get()).schedulerMode;
@@ -147,7 +149,7 @@ async function ensureLocalRunner(store: PostgresControlPlaneStore, provider: "co
 }
 
 function createQuotaCoordinator(store: PostgresControlPlaneStore, config: V0WorkerRuntimeConfig) {
-  if (!config.codexAppServerUrl) return undefined;
+  if (config.agentProvider !== "codex" || !config.codexAppServerUrl) return undefined;
   return new QuotaRefreshCoordinator({
     provider: "openai",
     accountRef: config.quotaAccountRef,

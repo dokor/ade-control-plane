@@ -26,6 +26,14 @@ test("applies quota thresholds and fails closed", () => {
   assert.equal(evaluateQuota(snapshot(null), undefined, at).canStartWork, false);
 });
 
+test("a passed reset time requests a fresh provider read without allowing work", () => {
+  const at = "2026-08-28T12:00:00.000Z";
+  const decision = evaluateQuota({ ...snapshot(100), observedAt: "2026-08-28T11:58:00.000Z", resetsAt: "2026-08-28T11:59:00.000Z" }, undefined, at);
+  assert.equal(decision.state, "blocked");
+  assert.equal(decision.canStartWork, false);
+  assert.equal(decision.refreshRequired, true);
+});
+
 test("normalizes OpenAI headers without inventing missing usage", () => {
   const headers = new Map([
     ["x-ratelimit-limit-tokens", "1000"],

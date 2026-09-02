@@ -77,6 +77,7 @@ export default async function OverviewPage() {
             Snapshot {formatAge(overview.quota.snapshotAgeMs)}
           </p>
           <p className="detail">{overview.quota.reason}</p>
+          <p className="detail">Dispatch allowed: {overview.quota.canStartWork ? "yes" : "no"}</p>
         </article>
 
         <article className="card">
