@@ -64,6 +64,30 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           resultSummary: { ...(workflow.branchName ? { branchName: workflow.branchName } : {}), pullRequestNumber: workflow.pullRequestNumber, pullRequestUrl: workflow.pullRequestUrl },
         };
       }
+      if (workflow?.stage === "publishing" && workflow.branchName && workflow.headSha) {
+        const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
+        const remoteHead = await this.git(checkout.root, ["ls-remote", "origin", `refs/heads/${workflow.branchName}`]);
+        const sha = remoteHead.stdout.trim().split(/\s+/u)[0] ?? "";
+        if (sha === workflow.headSha) {
+          const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
+          const existing = await this.options.github.findPullRequest?.(repository, workflow.branchName, checkout.baseBranch);
+          const pullRequest = existing ?? await this.options.github.createPullRequest(repository, {
+            title: `ADE: issue #${request.work.issueNumber}`,
+            body: `Automated implementation for GitHub issue #${request.work.issueNumber}.\n\nCloses #${request.work.issueNumber}\n\nReview and merge remain explicit human actions.`,
+            head: workflow.branchName,
+            base: checkout.baseBranch,
+          });
+          const issue = await this.options.github.getIssueDetails(repository, request.work.issueNumber);
+          if (!issue) throw new GithubWorkExecutionError("GITHUB_ISSUE_NOT_FOUND", "The selected GitHub issue is no longer available for PR reconciliation.");
+          await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName: workflow.branchName, pullRequestNumber: pullRequest.number });
+          await workflows?.transition({
+            workflowId: workflow.id, expectedStage: "publishing", stage: "waiting-human", attempt: workflow.attempt,
+            reason: "Reconciled a pushed branch to its single pull request after restart.", idempotencyKey: `${request.executionId}:waiting-human:${workflow.attempt}`,
+            occurredAt: new Date().toISOString(), pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, branchName: workflow.branchName,
+          });
+          return { status: "succeeded", provider: this.agentExecutor.provider, resultSummary: { branchName: workflow.branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url } };
+        }
+      }
       let checkpointStage: AdeDeliveryWorkflowStage | null = workflow?.stage ?? null;
       const checkpoint = async (
         stage: AdeDeliveryWorkflowStage,
@@ -184,7 +208,11 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         cwd: checkout.root, env: this.gitEnvironment,
       });
       await this.mustRun("git push", { executable: "git", args: ["push", "--set-upstream", "origin", branchName], cwd: checkout.root, env: this.gitEnvironment });
-      const pullRequest = await this.options.github.createPullRequest(
+      const headSha = (await this.git(checkout.root, ["rev-parse", "HEAD"])).stdout.trim();
+      await checkpoint("publishing", "Branch pushed; reconciling pull request creation.", { branchName, headSha: /^[0-9a-f]{40,64}$/iu.test(headSha) ? headSha : null });
+      const pullRequest = await this.options.github.findPullRequest?.(
+        { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, branchName, checkout.baseBranch,
+      ) ?? await this.options.github.createPullRequest(
         { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName },
         {
           title: `ADE: issue #${request.work.issueNumber}`,
