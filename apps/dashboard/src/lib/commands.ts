@@ -303,6 +303,13 @@ async function applyCommand(
         context.submitter.actorRef,
         context.now,
       );
+      if (resolved) {
+        await persistence.wakeups?.signal({
+          reason: "ade-decision-resolved",
+          projectId: command.projectId,
+          signaledAt: context.now,
+        });
+      }
       // A replayed resolution finds no open decision and stays a no-op.
       return resolved
         ? `Decision ${command.decisionRef} resolved as ${command.option}; the worker will forward it to ADE.`
