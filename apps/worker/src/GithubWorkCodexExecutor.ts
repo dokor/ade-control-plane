@@ -20,7 +20,7 @@ export interface GithubWorkCodexExecutorOptions {
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
   /** Optional while non-PostgreSQL test doubles are being retired. */
-  persistence?: Pick<ControlPlanePersistence, "deliveryWorkflows">;
+  persistence?: Pick<ControlPlanePersistence, "deliveryWorkflows" | "adeDecisions">;
 }
 
 /**
@@ -146,7 +146,16 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         lifecycle = await this.planIssueLifecycle(checkout.root, issue);
         plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue });
       } else if (lifecycle.action === "wait" || lifecycle.action === "none") {
-        return { status: "cancelled", provider: this.agentExecutor.provider, errorCode: "ISSUE_LIFECYCLE_WAIT", errorSummary: lifecycle.reason };
+        const decisionRef = `issue-${request.work.issueNumber}-${issue.updatedAt.replace(/[^0-9]/gu, "").slice(0, 14)}`;
+        await this.options.persistence?.adeDecisions.upsert({
+          projectId: request.project.id,
+          decisionRef,
+          prompt: lifecycle.reason.slice(0, 500),
+          options: ["resume", "wait"],
+          observedAt: new Date().toISOString(),
+        });
+        await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName, humanDecisionRef: decisionRef });
+        return { status: "succeeded", provider: this.agentExecutor.provider, resultSummary: { humanDecisionRef: decisionRef, waitingReason: lifecycle.reason.slice(0, 500) } };
       }
       if (lifecycle.action !== "develop" || !lifecycle.implementationHandoff) {
         throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a validated implementation handoff.");

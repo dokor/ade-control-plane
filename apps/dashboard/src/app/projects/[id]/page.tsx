@@ -177,8 +177,24 @@ export default async function ProjectPage({
                   <span className="muted">{formatInstant(decision.observedAt)}</span>
                 </div>
                 <p className="detail">{decision.prompt}</p>
+                <div className="actions" aria-label={`Resolve ${decision.decisionRef}`}>
+                  {decision.options.map((option) => (
+                    <ControlButton
+                      key={option}
+                      type="ade.decide"
+                      payload={{
+                        projectId: project.id,
+                        decisionRef: decision.decisionRef,
+                        option,
+                      }}
+                      label={option}
+                      variant="primary"
+                      confirm={`Apply the \"${option}\" decision for ${decision.decisionRef}?`}
+                    />
+                  ))}
+                </div>
                 <p className="detail">
-                  Resolve from the linked issue or pull request with one of:
+                  You can also resolve it from the linked issue or pull request with one of:
                 </p>
                 <ul className="detail">
                   {decision.githubCommands.map((command) => (
