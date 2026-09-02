@@ -64,6 +64,7 @@ async function main(): Promise<void> {
         adeContextProfile: config.adeProfile,
         gitEnvironment: config.gitEnvironment,
         agentExecutor,
+        persistence: store,
       }),
       provider: config.agentProvider,
       agentUsage: store.agentUsage,

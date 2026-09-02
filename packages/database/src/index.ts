@@ -1,4 +1,7 @@
 export type {
+  AdeDeliveryWorkflowRepository,
+  AdeDeliveryWorkflowStartInput,
+  AdeDeliveryWorkflowTransitionInput,
   AdeDecisionInput,
   AdeDecisionRepository,
   AuditEventInput,
@@ -44,6 +47,9 @@ export type {
   WorkerWakeupRepository,
 } from "./contracts.js";
 export type {
+  AdeDeliveryStageTransitionRecord,
+  AdeDeliveryWorkflowRecord,
+  AdeDeliveryWorkflowStage,
   AdeDecisionRecord,
   AdeDecisionStatus,
   AuditEventRecord,

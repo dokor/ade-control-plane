@@ -67,6 +67,47 @@ test("reports an unavailable GitHub-work checkout with a safe actionable error",
   assert.equal(result.errorSummary, "The worker checkout root is unavailable.");
 });
 
+test("persists admission and planning before touching the checkout", async () => {
+  const stages: string[] = [];
+  const executor = new GithubWorkCodexExecutor({
+    projectRoot: "C:/not-a-worker-checkout-root",
+    commands: { run: async () => { throw new Error("command execution should not be reached"); } },
+    github: {
+      getIssueDetails: async () => { throw new Error("GitHub should not be reached"); },
+      updateIssueBody: async () => { throw new Error("GitHub should not be reached"); },
+      syncAdeWorkflowLabels: async () => { throw new Error("GitHub should not be reached"); },
+      createPullRequest: async () => { throw new Error("GitHub should not be reached"); },
+    },
+    persistence: {
+      deliveryWorkflows: {
+        start: async () => ({ id: "workflow-1", stage: "admitted", attempt: 0 }),
+        transition: async (input: { stage: string; attempt: number }) => {
+          stages.push(input.stage);
+          return { id: "workflow-1", stage: input.stage, attempt: input.attempt };
+        },
+      },
+    } as never,
+  });
+
+  const result = await executor.execute(request);
+  assert.equal(result.errorCode, "CHECKOUT_UNAVAILABLE");
+  assert.deepEqual(stages, ["planning"]);
+});
+
+test("restarts a waiting-human workflow without replaying the provider", async () => {
+  const executor = new GithubWorkCodexExecutor({
+    projectRoot: "C:/not-a-worker-checkout-root",
+    commands: { run: async () => { throw new Error("provider must not be replayed"); } },
+    github: {} as never,
+    persistence: { deliveryWorkflows: {
+      start: async () => ({ id: "workflow-1", stage: "waiting-human", attempt: 1, branchName: "ade/issue-139", pullRequestNumber: 91, pullRequestUrl: "https://github.com/dokor/ade-control-plane/pull/91" }),
+    } } as never,
+  });
+  const result = await executor.execute(request);
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.resultSummary?.pullRequestNumber, 91);
+});
+
 test("accepts only an ADE handoff bound to the selected issue revision", () => {
   const issue = { number: request.work.issueNumber, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt };
   const handoff = parseImplementationHandoff({

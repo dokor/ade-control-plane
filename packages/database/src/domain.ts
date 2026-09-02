@@ -101,6 +101,42 @@ export interface ExecutionRecord {
   updatedAt: string;
 }
 
+export interface AdeDeliveryWorkflowRecord {
+  id: string;
+  executionId: string;
+  projectId: string;
+  issueNumber: number;
+  sourceUpdatedAt: string;
+  stage: AdeDeliveryWorkflowStage;
+  attempt: number;
+  adePlan: JsonObject | null;
+  provenance: JsonObject | null;
+  providerExecutionRef: string | null;
+  validationSummary: JsonObject | null;
+  reviewSummary: JsonObject | null;
+  branchName: string | null;
+  headSha: string | null;
+  pullRequestNumber: number | null;
+  pullRequestUrl: string | null;
+  retryClassification: string | null;
+  reconciliationRequired: boolean;
+  humanDecisionRef: string | null;
+  transitionReason: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdeDeliveryStageTransitionRecord {
+  id: string;
+  workflowId: string;
+  stage: AdeDeliveryWorkflowStage;
+  attempt: number;
+  reason: string;
+  idempotencyKey: string;
+  details: JsonObject | null;
+  occurredAt: string;
+}
+
 export interface ExecutionLeaseRecord {
   id: string;
   executionId: string;
@@ -306,6 +342,20 @@ export type AgentUsageCostKind =
   | "subscription_included"
   | "credit_consumption"
   | "unknown";
+
+/** Durable, provider-neutral checkpoints for a GitHub issue delivery. */
+export type AdeDeliveryWorkflowStage =
+  | "admitted"
+  | "planning"
+  | "enriching"
+  | "ready-for-dev"
+  | "implementing"
+  | "validating"
+  | "reviewing"
+  | "correcting"
+  | "publishing"
+  | "waiting-human"
+  | "completed";
 
 export interface AgentUsageMetrics {
   inputTokens?: number;

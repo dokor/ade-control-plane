@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Notification, Pool } from "pg";
 
 import type {
+  AdeDeliveryWorkflowRepository,
+  AdeDeliveryWorkflowStartInput,
+  AdeDeliveryWorkflowTransitionInput,
   AdeDecisionInput,
   AdeDecisionRepository,
   AuditEventInput,
@@ -44,6 +47,9 @@ import type {
   AgentUsageQuery,
 } from "../contracts.js";
 import type {
+  AdeDeliveryStageTransitionRecord,
+  AdeDeliveryWorkflowRecord,
+  AdeDeliveryWorkflowStage,
   AdeDecisionRecord,
   AdeDecisionStatus,
   AuditEventRecord,
@@ -208,6 +214,36 @@ function mapExecution(row: TimestampRow): ExecutionRecord {
     errorSummary: row.error_summary === null ? null : String(row.error_summary),
     createdAt: toIsoString(row.created_at) ?? "",
     updatedAt: toIsoString(row.updated_at) ?? "",
+  };
+}
+
+function mapDeliveryWorkflow(row: TimestampRow): AdeDeliveryWorkflowRecord {
+  return {
+    id: String(row.id), executionId: String(row.execution_id), projectId: String(row.project_id),
+    issueNumber: Number(row.issue_number), sourceUpdatedAt: toIsoString(row.source_updated_at) ?? "",
+    stage: row.stage as AdeDeliveryWorkflowStage, attempt: Number(row.attempt),
+    adePlan: row.ade_plan === null ? null : toJsonObject(row.ade_plan),
+    provenance: row.provenance === null ? null : toJsonObject(row.provenance),
+    providerExecutionRef: row.provider_execution_ref === null ? null : String(row.provider_execution_ref),
+    validationSummary: row.validation_summary === null ? null : toJsonObject(row.validation_summary),
+    reviewSummary: row.review_summary === null ? null : toJsonObject(row.review_summary),
+    branchName: row.branch_name === null ? null : String(row.branch_name),
+    headSha: row.head_sha === null ? null : String(row.head_sha),
+    pullRequestNumber: row.pull_request_number === null ? null : Number(row.pull_request_number),
+    pullRequestUrl: row.pull_request_url === null ? null : String(row.pull_request_url),
+    retryClassification: row.retry_classification === null ? null : String(row.retry_classification),
+    reconciliationRequired: Boolean(row.reconciliation_required),
+    humanDecisionRef: row.human_decision_ref === null ? null : String(row.human_decision_ref),
+    transitionReason: String(row.transition_reason),
+    createdAt: toIsoString(row.created_at) ?? "", updatedAt: toIsoString(row.updated_at) ?? "",
+  };
+}
+
+function mapDeliveryTransition(row: TimestampRow): AdeDeliveryStageTransitionRecord {
+  return {
+    id: String(row.id), workflowId: String(row.workflow_id), stage: row.stage as AdeDeliveryWorkflowStage,
+    attempt: Number(row.attempt), reason: String(row.reason), idempotencyKey: String(row.idempotency_key),
+    details: row.details === null ? null : toJsonObject(row.details), occurredAt: toIsoString(row.occurred_at) ?? "",
   };
 }
 
@@ -1540,6 +1576,91 @@ class PostgresExecutionRepository implements ExecutionRepository {
   }
 }
 
+class PostgresAdeDeliveryWorkflowRepository implements AdeDeliveryWorkflowRepository {
+  public constructor(private readonly pool: Pool) {}
+
+  public async start(input: AdeDeliveryWorkflowStartInput): Promise<AdeDeliveryWorkflowRecord> {
+    return withTransaction(this.pool, async (client) => {
+      const inserted = await queryOptional(client, `
+        INSERT INTO ade_delivery_workflows (
+          id, execution_id, project_id, issue_number, source_updated_at, stage, attempt,
+          ade_plan, provenance, branch_name, transition_reason, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, 'admitted', 0, $6::jsonb, $7::jsonb, $8, 'delivery admitted', $9, $9)
+        ON CONFLICT (execution_id) DO NOTHING
+        RETURNING *
+      `, [
+        input.id ?? randomUUID(), input.executionId, input.projectId, input.issueNumber, input.sourceUpdatedAt,
+        serializeJson(input.adePlan ?? null), serializeJson(input.provenance ?? null), input.branchName ?? null, input.occurredAt,
+      ]);
+      if (inserted) {
+        await queryRequired(client, `
+          INSERT INTO ade_delivery_stage_transitions (id, workflow_id, stage, attempt, reason, idempotency_key, details, occurred_at)
+          VALUES ($1, $2, 'admitted', 0, 'delivery admitted', $3, NULL, $4)
+          RETURNING *
+        `, [randomUUID(), inserted.id, `admitted:${input.executionId}`, input.occurredAt], "Initial delivery workflow transition could not be recorded.");
+        return mapDeliveryWorkflow(inserted);
+      }
+      const existingRow = await queryRequired(client, "SELECT * FROM ade_delivery_workflows WHERE execution_id = $1", [input.executionId], `Delivery workflow ${input.executionId} was not found.`);
+      const existing = mapDeliveryWorkflow(existingRow);
+      if (existing.projectId !== input.projectId || existing.issueNumber !== input.issueNumber || existing.sourceUpdatedAt !== input.sourceUpdatedAt) {
+        throw new Error(`Delivery workflow ${input.executionId} conflicts with a different source revision.`);
+      }
+      return existing;
+    });
+  }
+
+  public async getByExecutionId(executionId: string): Promise<AdeDeliveryWorkflowRecord | null> {
+    const row = await queryOptional(this.pool, "SELECT * FROM ade_delivery_workflows WHERE execution_id = $1", [executionId]);
+    return row ? mapDeliveryWorkflow(row) : null;
+  }
+
+  public async getById(workflowId: string): Promise<AdeDeliveryWorkflowRecord | null> {
+    const row = await queryOptional(this.pool, "SELECT * FROM ade_delivery_workflows WHERE id = $1", [workflowId]);
+    return row ? mapDeliveryWorkflow(row) : null;
+  }
+
+  public async listTransitions(workflowId: string): Promise<readonly AdeDeliveryStageTransitionRecord[]> {
+    const result = await this.pool.query("SELECT * FROM ade_delivery_stage_transitions WHERE workflow_id = $1 ORDER BY occurred_at ASC, id ASC", [workflowId]);
+    return result.rows.map(mapDeliveryTransition);
+  }
+
+  public async transition(input: AdeDeliveryWorkflowTransitionInput): Promise<AdeDeliveryWorkflowRecord> {
+    return withTransaction(this.pool, async (client) => {
+      const workflowRow = await queryRequired(client, "SELECT * FROM ade_delivery_workflows WHERE id = $1 FOR UPDATE", [input.workflowId], `Delivery workflow ${input.workflowId} was not found.`);
+      const workflow = mapDeliveryWorkflow(workflowRow);
+      const existing = await queryOptional(client, "SELECT * FROM ade_delivery_stage_transitions WHERE workflow_id = $1 AND idempotency_key = $2", [input.workflowId, input.idempotencyKey]);
+      if (existing) return workflow;
+      if (input.expectedStage !== undefined && workflow.stage !== input.expectedStage) {
+        throw new Error(`Delivery workflow ${input.workflowId} is at ${workflow.stage}, not ${input.expectedStage}.`);
+      }
+      await queryRequired(client, `
+        INSERT INTO ade_delivery_stage_transitions (id, workflow_id, stage, attempt, reason, idempotency_key, details, occurred_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+        RETURNING *
+      `, [randomUUID(), input.workflowId, input.stage, input.attempt, input.reason, input.idempotencyKey, serializeJson(input.details ?? null), input.occurredAt], "Delivery workflow transition could not be recorded.");
+      const updated = await queryRequired(client, `
+        UPDATE ade_delivery_workflows
+        SET stage = $2, attempt = $3, transition_reason = $4, updated_at = $5,
+            ade_plan = COALESCE($6::jsonb, ade_plan), provenance = COALESCE($7::jsonb, provenance),
+            provider_execution_ref = COALESCE($8, provider_execution_ref), validation_summary = COALESCE($9::jsonb, validation_summary),
+            review_summary = COALESCE($10::jsonb, review_summary), branch_name = COALESCE($11, branch_name),
+            head_sha = COALESCE($12, head_sha), pull_request_number = COALESCE($13, pull_request_number),
+            pull_request_url = COALESCE($14, pull_request_url), retry_classification = COALESCE($15, retry_classification),
+            reconciliation_required = COALESCE($16, reconciliation_required), human_decision_ref = COALESCE($17, human_decision_ref)
+        WHERE id = $1
+        RETURNING *
+      `, [
+        input.workflowId, input.stage, input.attempt, input.reason, input.occurredAt,
+        serializeJson(input.adePlan ?? null), serializeJson(input.provenance ?? null), input.providerExecutionRef ?? null,
+        serializeJson(input.validationSummary ?? null), serializeJson(input.reviewSummary ?? null), input.branchName ?? null,
+        input.headSha ?? null, input.pullRequestNumber ?? null, input.pullRequestUrl ?? null,
+        input.retryClassification ?? null, input.reconciliationRequired ?? null, input.humanDecisionRef ?? null,
+      ], "Delivery workflow disappeared while recording its transition.");
+      return mapDeliveryWorkflow(updated);
+    });
+  }
+}
+
 class PostgresAgentUsageRepository implements AgentUsageRepository {
   public constructor(private readonly pool: Pool) {}
 
@@ -2246,6 +2367,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
   public readonly githubWork: GithubWorkRepository;
   public readonly controlCommands: ControlCommandRepository;
   public readonly executionLeases: ExecutionLeaseRepository;
+  public readonly deliveryWorkflows: AdeDeliveryWorkflowRepository;
   public readonly executions: ExecutionRepository;
   public readonly projectSnapshots: ProjectSnapshotRepository;
   public readonly projects: ProjectRepository;
@@ -2265,6 +2387,7 @@ export class PostgresControlPlaneStore implements ControlPlanePersistence {
     this.runners = new PostgresRunnerRepository(this.pool);
     this.executions = new PostgresExecutionRepository(this.pool);
     this.executionLeases = new PostgresExecutionLeaseRepository(this.pool);
+    this.deliveryWorkflows = new PostgresAdeDeliveryWorkflowRepository(this.pool);
     this.providerQuotaSnapshots = new PostgresProviderQuotaSnapshotRepository(
       this.pool,
     );

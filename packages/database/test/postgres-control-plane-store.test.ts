@@ -143,6 +143,41 @@ if (!testDatabaseUrl) {
     }
   });
 
+  test("persists idempotent ADE delivery stage transitions", async () => {
+    const context = await createTestStore();
+    try {
+      const now = new Date().toISOString();
+      const project = await context.store.projects.register({
+        adeAdapter: "github-work", name: "Workflow", priority: 50,
+        repositoryName: "workflow", repositoryOwner: "dokor", slug: "workflow",
+      });
+      const scheduled = await context.store.executions.scheduleWithLease({
+        execution: { capability: "github-work.codex", projectId: project.id, requestedAt: now, workRef: "github:issue:146" },
+        lease: { acquiredAt: now, expiresAt: new Date(Date.parse(now) + 60_000).toISOString(), heartbeatAt: now, leaseKey: "workflow:146", ownerId: "worker", projectId: project.id },
+      });
+      assert.ok(scheduled);
+
+      const workflow = await context.store.deliveryWorkflows!.start({
+        executionId: scheduled.execution.id, projectId: project.id, issueNumber: 146,
+        sourceUpdatedAt: now, occurredAt: now, adePlan: { version: "ade.issue-lifecycle/v1" },
+      });
+      const transitioned = await context.store.deliveryWorkflows!.transition({
+        workflowId: workflow.id, expectedStage: "admitted", stage: "planning", attempt: 0,
+        reason: "ADE plan accepted", idempotencyKey: "plan:source-revision", occurredAt: now,
+      });
+      const replayed = await context.store.deliveryWorkflows!.transition({
+        workflowId: workflow.id, expectedStage: "admitted", stage: "planning", attempt: 0,
+        reason: "ADE plan accepted", idempotencyKey: "plan:source-revision", occurredAt: now,
+      });
+
+      assert.equal(transitioned.stage, "planning");
+      assert.equal(replayed.stage, "planning");
+      assert.equal((await context.store.deliveryWorkflows!.listTransitions(workflow.id)).length, 2);
+    } finally {
+      await context.close();
+    }
+  });
+
   test("returns stale leases as reconciliation candidates", async () => {
     const context = await createTestStore();
 
