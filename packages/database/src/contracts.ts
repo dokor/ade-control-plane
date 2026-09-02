@@ -1,4 +1,7 @@
 import type {
+  AdeDeliveryStageTransitionRecord,
+  AdeDeliveryWorkflowRecord,
+  AdeDeliveryWorkflowStage,
   AdeDecisionRecord,
   AdeDecisionStatus,
   AuditEventRecord,
@@ -43,6 +46,41 @@ import type {
   AgentUsageMetrics,
   AgentUsageRecord,
 } from "./domain.js";
+
+export interface AdeDeliveryWorkflowStartInput {
+  id?: string;
+  executionId: string;
+  projectId: string;
+  issueNumber: number;
+  sourceUpdatedAt: string;
+  occurredAt: string;
+  adePlan?: JsonObject | null;
+  provenance?: JsonObject | null;
+  branchName?: string | null;
+}
+
+export interface AdeDeliveryWorkflowTransitionInput {
+  workflowId: string;
+  expectedStage?: AdeDeliveryWorkflowStage;
+  stage: AdeDeliveryWorkflowStage;
+  attempt: number;
+  reason: string;
+  idempotencyKey: string;
+  occurredAt: string;
+  details?: JsonObject | null;
+  adePlan?: JsonObject | null;
+  provenance?: JsonObject | null;
+  providerExecutionRef?: string | null;
+  validationSummary?: JsonObject | null;
+  reviewSummary?: JsonObject | null;
+  branchName?: string | null;
+  headSha?: string | null;
+  pullRequestNumber?: number | null;
+  pullRequestUrl?: string | null;
+  retryClassification?: string | null;
+  reconciliationRequired?: boolean;
+  humanDecisionRef?: string | null;
+}
 
 export interface ProjectRegistrationInput {
   id?: string;
@@ -465,6 +503,14 @@ export interface ExecutionLeaseRepository {
   ): Promise<ExecutionLeaseRecord | null>;
 }
 
+export interface AdeDeliveryWorkflowRepository {
+  start(input: AdeDeliveryWorkflowStartInput): Promise<AdeDeliveryWorkflowRecord>;
+  getByExecutionId(executionId: string): Promise<AdeDeliveryWorkflowRecord | null>;
+  getById(workflowId: string): Promise<AdeDeliveryWorkflowRecord | null>;
+  listTransitions(workflowId: string): Promise<readonly AdeDeliveryStageTransitionRecord[]>;
+  transition(input: AdeDeliveryWorkflowTransitionInput): Promise<AdeDeliveryWorkflowRecord>;
+}
+
 export interface ProviderQuotaSnapshotRepository {
   append(input: ProviderQuotaSnapshotInput): Promise<ProviderQuotaSnapshotRecord>;
   getLatest(
@@ -519,6 +565,7 @@ export interface ControlPlanePersistence {
   readonly runners: RunnerRepository;
   readonly executions: ExecutionRepository;
   readonly executionLeases: ExecutionLeaseRepository;
+  readonly deliveryWorkflows?: AdeDeliveryWorkflowRepository;
   readonly providerQuotaSnapshots: ProviderQuotaSnapshotRepository;
   readonly controlCommands: ControlCommandRepository;
   readonly auditEvents: AuditEventRepository;
