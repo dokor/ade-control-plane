@@ -1580,23 +1580,33 @@ class PostgresAdeDeliveryWorkflowRepository implements AdeDeliveryWorkflowReposi
   public constructor(private readonly pool: Pool) {}
 
   public async start(input: AdeDeliveryWorkflowStartInput): Promise<AdeDeliveryWorkflowRecord> {
-    const inserted = await queryOptional(this.pool, `
-      INSERT INTO ade_delivery_workflows (
-        id, execution_id, project_id, issue_number, source_updated_at, stage, attempt,
-        ade_plan, provenance, branch_name, transition_reason, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, 'admitted', 0, $6::jsonb, $7::jsonb, $8, 'delivery admitted', $9, $9)
-      ON CONFLICT (execution_id) DO NOTHING
-      RETURNING *
-    `, [
-      input.id ?? randomUUID(), input.executionId, input.projectId, input.issueNumber, input.sourceUpdatedAt,
-      serializeJson(input.adePlan ?? null), serializeJson(input.provenance ?? null), input.branchName ?? null, input.occurredAt,
-    ]);
-    if (inserted) return mapDeliveryWorkflow(inserted);
-    const existing = await this.getByExecutionId(input.executionId);
-    if (!existing || existing.projectId !== input.projectId || existing.issueNumber !== input.issueNumber || existing.sourceUpdatedAt !== input.sourceUpdatedAt) {
-      throw new Error(`Delivery workflow ${input.executionId} conflicts with a different source revision.`);
-    }
-    return existing;
+    return withTransaction(this.pool, async (client) => {
+      const inserted = await queryOptional(client, `
+        INSERT INTO ade_delivery_workflows (
+          id, execution_id, project_id, issue_number, source_updated_at, stage, attempt,
+          ade_plan, provenance, branch_name, transition_reason, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, 'admitted', 0, $6::jsonb, $7::jsonb, $8, 'delivery admitted', $9, $9)
+        ON CONFLICT (execution_id) DO NOTHING
+        RETURNING *
+      `, [
+        input.id ?? randomUUID(), input.executionId, input.projectId, input.issueNumber, input.sourceUpdatedAt,
+        serializeJson(input.adePlan ?? null), serializeJson(input.provenance ?? null), input.branchName ?? null, input.occurredAt,
+      ]);
+      if (inserted) {
+        await queryRequired(client, `
+          INSERT INTO ade_delivery_stage_transitions (id, workflow_id, stage, attempt, reason, idempotency_key, details, occurred_at)
+          VALUES ($1, $2, 'admitted', 0, 'delivery admitted', $3, NULL, $4)
+          RETURNING *
+        `, [randomUUID(), inserted.id, `admitted:${input.executionId}`, input.occurredAt], "Initial delivery workflow transition could not be recorded.");
+        return mapDeliveryWorkflow(inserted);
+      }
+      const existingRow = await queryRequired(client, "SELECT * FROM ade_delivery_workflows WHERE execution_id = $1", [input.executionId], `Delivery workflow ${input.executionId} was not found.`);
+      const existing = mapDeliveryWorkflow(existingRow);
+      if (existing.projectId !== input.projectId || existing.issueNumber !== input.issueNumber || existing.sourceUpdatedAt !== input.sourceUpdatedAt) {
+        throw new Error(`Delivery workflow ${input.executionId} conflicts with a different source revision.`);
+      }
+      return existing;
+    });
   }
 
   public async getByExecutionId(executionId: string): Promise<AdeDeliveryWorkflowRecord | null> {

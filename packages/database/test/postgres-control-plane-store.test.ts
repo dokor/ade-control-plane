@@ -172,7 +172,7 @@ if (!testDatabaseUrl) {
 
       assert.equal(transitioned.stage, "planning");
       assert.equal(replayed.stage, "planning");
-      assert.equal((await context.store.deliveryWorkflows!.listTransitions(workflow.id)).length, 1);
+      assert.equal((await context.store.deliveryWorkflows!.listTransitions(workflow.id)).length, 2);
     } finally {
       await context.close();
     }
