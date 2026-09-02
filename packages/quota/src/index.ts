@@ -44,9 +44,13 @@ export function evaluateQuota(
   const now = Date.parse(asOf);
   const observedAt = Date.parse(snapshot.observedAt);
   const expiresAt = snapshot.expiresAt === undefined ? undefined : Date.parse(snapshot.expiresAt);
+  const resetAt = snapshot.resetsAt === undefined ? undefined : Date.parse(snapshot.resetsAt);
   const stale = Number.isNaN(now) || Number.isNaN(observedAt) ||
     observedAt + policy.staleAfterMs <= now ||
     (expiresAt !== undefined && (Number.isNaN(expiresAt) || expiresAt <= now));
+  // A provider reset time is only a hint to read the provider again. It is
+  // never evidence that a new quota window is actually available.
+  const resetRefreshRequired = resetAt !== undefined && !Number.isNaN(resetAt) && resetAt <= now;
   const reset = snapshot.resetsAt === undefined ? {} : { resetsAt: snapshot.resetsAt };
 
   if (snapshot.usedPercent === null || stale) {
@@ -60,8 +64,8 @@ export function evaluateQuota(
       ...reset,
     };
   }
-  if (snapshot.usedPercent >= policy.blockedAtPercent) return blockedDecision("Provider quota is blocked.", reset);
-  if (snapshot.usedPercent >= policy.drainingAtPercent) return quotaDecision("draining", "Provider quota is draining.", reset);
+  if (snapshot.usedPercent >= policy.blockedAtPercent) return blockedDecision("Provider quota is blocked.", reset, resetRefreshRequired);
+  if (snapshot.usedPercent >= policy.drainingAtPercent) return quotaDecision("draining", "Provider quota is draining.", reset, resetRefreshRequired);
   if (snapshot.usedPercent >= policy.throttledAtPercent) return quotaDecision("throttled", "Provider quota is throttled.", reset);
   return quotaDecision("normal", "Provider quota allows normal scheduling.", reset);
 }
@@ -468,14 +472,15 @@ function parseResetSeconds(value: string | null): number | null {
   return Number(match[1] ?? 0) * 60 + Number(match[2] ?? 0);
 }
 
-function blockedDecision(reason: string, reset: { resetsAt?: string }): QuotaDecision {
-  return { state: "blocked", canStartWork: false, reason, refreshRequired: false, ...reset };
+function blockedDecision(reason: string, reset: { resetsAt?: string }, refreshRequired = false): QuotaDecision {
+  return { state: "blocked", canStartWork: false, reason, refreshRequired, ...reset };
 }
 
 function quotaDecision(
   state: Exclude<QuotaState, "blocked" | "unknown">,
   reason: string,
   reset: { resetsAt?: string },
+  refreshRequired = false,
 ): QuotaDecision {
-  return { state, canStartWork: true, reason, refreshRequired: false, ...reset };
+  return { state, canStartWork: true, reason, refreshRequired, ...reset };
 }
