@@ -1,4 +1,4 @@
-import type { AgentUsageMetrics, ProjectRecord } from "@ade-control-plane/database";
+import type { AdeDeliveryWorkflowStage, AdeDeliveryWorkflowTransitionInput, AgentUsageMetrics, ControlPlanePersistence, ProjectRecord } from "@ade-control-plane/database";
 import { DEFAULT_GITHUB_WORK_METADATA, labelsForGithubWorkState, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient, type GithubPullRequestClient } from "@ade-control-plane/github";
 
 import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDispatcher } from "./GithubWorkOrchestrator.js";
@@ -19,6 +19,8 @@ export interface GithubWorkCodexExecutorOptions {
   adeContextProfile?: string;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
+  /** Optional while non-PostgreSQL test doubles are being retired. */
+  persistence?: Pick<ControlPlanePersistence, "deliveryWorkflows">;
 }
 
 /**
@@ -50,6 +52,26 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     let branchName: string | null = null;
     let usage: AgentUsageMetrics | undefined;
     try {
+      const workflows = this.options.persistence?.deliveryWorkflows;
+      const workflow = workflows ? await workflows.start({
+        executionId: request.executionId, projectId: request.project.id, issueNumber: request.work.issueNumber,
+        sourceUpdatedAt: request.work.sourceUpdatedAt, occurredAt: new Date().toISOString(), branchName: request.work.branchName,
+      }) : null;
+      let checkpointStage: AdeDeliveryWorkflowStage | null = workflow?.stage ?? null;
+      const checkpoint = async (
+        stage: AdeDeliveryWorkflowStage,
+        reason: string,
+        updates: Omit<AdeDeliveryWorkflowTransitionInput, "workflowId" | "expectedStage" | "stage" | "attempt" | "reason" | "idempotencyKey" | "occurredAt"> = {},
+      ): Promise<void> => {
+        if (!workflows || !workflow || checkpointStage === stage) return;
+        await workflows.transition({
+          workflowId: workflow.id, ...(checkpointStage ? { expectedStage: checkpointStage } : {}), stage,
+          attempt: workflow.attempt, reason, idempotencyKey: `${request.executionId}:${stage}:${workflow.attempt}`,
+          occurredAt: new Date().toISOString(), ...updates,
+        });
+        checkpointStage = stage;
+      };
+      await checkpoint("planning", "Preparing the ADE issue lifecycle plan.");
       const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
       branchName = request.work.branchName ?? `ade/issue-${request.work.issueNumber}`;
       const remote = await this.git(checkout.root, ["remote", "get-url", "origin"]);
@@ -77,6 +99,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue });
       let lifecycle = await this.planIssueLifecycle(checkout.root, issue);
       if (lifecycle.action === "enrich") {
+        await checkpoint("enriching", "ADE requested issue enrichment before development.");
         if (!lifecycle.enrichmentPrompt) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
         const enrichment = await this.agentExecutor.execute({ cwd: checkout.root, prompt: lifecycle.enrichmentPrompt });
         if (enrichment.exitCode !== 0) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_FAILED", "ADE issue enrichment failed.");
@@ -97,6 +120,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       if (lifecycle.action !== "develop" || !lifecycle.implementationHandoff) {
         throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a validated implementation handoff.");
       }
+      await checkpoint("ready-for-dev", "ADE admitted the issue handoff for development.", {
+        adePlan: { action: lifecycle.action, reason: lifecycle.reason, handoffVersion: lifecycle.implementationHandoff.version },
+      });
       const currentIssue = await this.options.github.getIssueDetails(
         { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName },
         request.work.issueNumber,
@@ -106,6 +132,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       }
       issue = currentIssue;
       await this.updateLifecycle(issue.body, request, { state: "running", executionRef: request.executionId, branchName });
+      await checkpoint("implementing", "The worker recorded ownership before provider execution.");
       const work = {
         project: request.project,
         source: "github-issue" as const,
@@ -125,10 +152,12 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       if (agentResult.exitCode !== 0) {
         throw new GithubWorkExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
+      await checkpoint("validating", "Provider execution completed; validating its repository changes.");
       const finalStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
       if (!finalStatus.stdout.trim()) {
         throw new GithubWorkExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");
       }
+      await checkpoint("reviewing", "Deterministic validation passed; running ADE review gates.");
       const review = await this.deliveryRuntime.runPostAgentGates({
         cwd: checkout.root,
         work,
@@ -139,6 +168,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       if (!plan.publicationReady) {
         throw new GithubWorkExecutionError("ADE_PUBLICATION_BLOCKED", `ADE has not opened the publication gate: ${plan.reason}`);
       }
+      await checkpoint("publishing", "ADE validation and review gates passed; publishing the reviewed change.", {
+        provenance: AdeDeliveryRuntime.provenanceSummary(review.provenance),
+      });
       await this.mustRun("git commit", {
         executable: "git",
         args: ["-c", "user.name=ADE Control Plane", "-c", "user.email=ade-control-plane@localhost", "-c", "core.hooksPath=/dev/null", "commit", "-m", `feat: implement GitHub issue #${request.work.issueNumber}`],
@@ -164,6 +196,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         },
       );
       await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName, pullRequestNumber: pullRequest.number });
+      await checkpoint("waiting-human", "Pull request created; an explicit human review and merge is required.", {
+        pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, branchName,
+      });
       return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, ...AdeDeliveryRuntime.provenanceSummary(review.provenance) } };
     } catch (error) {
       const failure = classifyFailure(error);
