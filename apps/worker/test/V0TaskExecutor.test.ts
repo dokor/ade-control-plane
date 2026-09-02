@@ -55,6 +55,7 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
     assert.deepEqual(
       commands.calls.filter(({ executable }) => executable === "ade").map(({ args }) => args),
       [
+        ["delivery", "plan", "--json"],
         ["--version"],
         ["config", "validate"],
         ["context", "generate"],
@@ -264,6 +265,7 @@ class SuccessfulCommands implements CommandRunner {
       return result(" M src/index.ts");
     }
     if (input.executable === "ade" && input.args[0] === "--version") return result("ade 0.7.0\n");
+    if (input.executable === "ade" && input.args[0] === "delivery") return result(deliveryPlanResponse());
     if (input.executable === "ade" && input.args[0] === "config" && this.adeConfigMissingUntilCodex && !this.codexStarted) {
       return result("ADE configuration is missing", 1);
     }
@@ -354,4 +356,17 @@ async function setup() {
 
 function result(stdout: string, exitCode = 0): CommandResult {
   return { exitCode, signal: null, stdout, stderr: "" };
+}
+
+function deliveryPlanResponse(): string {
+  return JSON.stringify({
+    version: "ade.delivery-plan/v1", status: "supported", plan: {
+      lifecycle: { action: "develop", reason: "Ready for development." },
+      implementation: { profile: "implementation" }, validations: [], reviews: [
+        { profile: "backend", reason: "Configured by ADE.", invocation: { version: "ade.profile-invocation/v1", kind: "specialist-review", instructions: "Run the ADE backend review." } },
+      ],
+      correction: { maximumAttempts: 1, invocation: { version: "ade.profile-invocation/v1", kind: "correction", instructions: "Apply ADE review corrections." } },
+      publication: { ready: true },
+    },
+  });
 }

@@ -10,11 +10,25 @@ export type AdeDeliveryFailureCode =
   | "ADE_CONTEXT_FAILED"
   | "ADE_SETUP_INCOMPLETE"
   | "ADE_SETUP_INVALID"
+  | "ADE_DELIVERY_PLAN_UNSUPPORTED"
   | "ADE_DETERMINISTIC_REVIEW_FAILED"
   | "ADE_PROFILE_REVIEW_BLOCKED"
   | "ADE_PROFILE_REVIEW_FAILED";
 
 const ADE_SETUP_CONTRACT_VERSION = "ade.project-setup/v1";
+export const ADE_DELIVERY_PLAN_VERSION = "ade.delivery-plan/v1";
+
+export interface AdeDeliveryPlan {
+  version: typeof ADE_DELIVERY_PLAN_VERSION;
+  action: "enrich" | "develop" | "wait" | "none";
+  reason: string;
+  implementationProfile: string;
+  reviews: readonly { profile: string; instructions: string; selectionReason: string }[];
+  validationRuleIds: readonly string[];
+  maximumCorrectionAttempts: number;
+  correctionInstructions: string | null;
+  publicationReady: boolean;
+}
 
 export interface AdeProfileFinding {
   profile: string;
@@ -34,6 +48,7 @@ export interface AdeDeliveryProvenance {
   contextProfile: string;
   rulePackIds: readonly string[];
   selectedProfiles: readonly string[];
+  selectedProfileReasons: readonly string[];
   deterministicReview: "passed";
   profileReview: "passed";
   profileReviewAttempts: number;
@@ -66,7 +81,6 @@ export interface AdeDeliveryRuntimeOptions {
   executable?: string;
   expectedVersion?: string;
   environment?: Readonly<Record<string, string>>;
-  maxReviewAttempts?: number;
 }
 
 export class AdeDeliveryError extends Error {
@@ -87,12 +101,10 @@ export class AdeDeliveryError extends Error {
 export class AdeDeliveryRuntime {
   private readonly executable: string;
   private readonly expectedVersion: string;
-  private readonly maxReviewAttempts: number;
 
   public constructor(private readonly options: AdeDeliveryRuntimeOptions) {
     this.executable = options.executable ?? "ade";
     this.expectedVersion = options.expectedVersion ?? "unknown";
-    this.maxReviewAttempts = clampAttempts(options.maxReviewAttempts ?? 2);
   }
 
   public async prepare(input: {
@@ -116,32 +128,52 @@ export class AdeDeliveryRuntime {
     };
   }
 
+  /** Negotiates ADE's repository-owned delivery contract over stdin. */
+  public async resolveDeliveryPlan(input: { cwd: string; issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string }; signal?: AbortSignal }): Promise<AdeDeliveryPlan> {
+    let result: CommandResult;
+    try {
+      result = await this.options.commands.run({
+        executable: this.executable, args: ["delivery", "plan", "--json"], cwd: input.cwd,
+        stdin: JSON.stringify({ issue: input.issue, negotiation: { acceptedVersions: [ADE_DELIVERY_PLAN_VERSION], requiredCapabilities: ["implementation-context", "deterministic-validation", "specialist-review", "profile-invocations", "correction-and-rereview", "human-publication-gate"] } }),
+        ...(this.options.environment ? { env: this.options.environment } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch {
+      throw new AdeDeliveryError("ADE_DELIVERY_PLAN_UNSUPPORTED", "The installed ADE runtime could not negotiate the required delivery-plan contract.");
+    }
+    const plan = parseDeliveryPlan(result.stdout);
+    if (result.exitCode !== 0 || !plan) {
+      throw new AdeDeliveryError("ADE_DELIVERY_PLAN_UNSUPPORTED", deliveryPlanCompatibilityReason(result.stdout) ?? "The installed ADE runtime does not provide the required delivery-plan contract.");
+    }
+    return plan;
+  }
+
   public async runPostAgentGates(input: {
     cwd: string;
     work: AdeDeliveryWorkContext;
     agentExecutor: AgentExecutor;
     prepared: AdeDeliveryPreparation;
+    plan: AdeDeliveryPlan;
     signal?: AbortSignal;
     onOutput?(output: CommandOutput): void | Promise<void>;
   }): Promise<AdeDeliveryReviewResult> {
-    let selectedProfiles: readonly string[] | undefined;
+    const selectedProfiles = input.plan.reviews.map((review) => review.profile);
+    const instructionsByProfile = new Map(input.plan.reviews.map((review) => [review.profile, review.instructions]));
     const findings: AdeProfileFinding[] = [];
     const usage: AgentUsageMetrics[] = [];
     let attempt = 0;
 
-    while (attempt < this.maxReviewAttempts) {
+    // Zero means no correction retry, never "skip the first validation pass".
+    const maximumAttempts = Math.max(1, input.plan.maximumCorrectionAttempts);
+    while (attempt < maximumAttempts) {
       attempt += 1;
       await this.runCommand(input, "git add", {
         executable: "git",
         args: ["-c", "core.hooksPath=/dev/null", "add", "--all"],
       });
-      if (!selectedProfiles) {
-        const changedPaths = await this.listChangedPaths(input);
-        selectedProfiles = selectProfiles({ ...input.work, affectedPaths: changedPaths });
-      }
       await this.runAde(input, ["review", "--staged", "--json"], "ADE deterministic staged review", "ADE_DETERMINISTIC_REVIEW_FAILED");
 
-      const pass = await this.runProfileReviews(input, selectedProfiles, attempt, findings, usage);
+      const pass = await this.runProfileReviews(input, selectedProfiles, attempt, findings, usage, instructionsByProfile);
       if (pass) {
         return {
           provenance: {
@@ -152,6 +184,7 @@ export class AdeDeliveryRuntime {
             contextProfile: input.prepared.contextProfile,
             rulePackIds: input.prepared.rulePackIds,
             selectedProfiles,
+            selectedProfileReasons: input.plan.reviews.map((review) => `${review.profile}: ${review.selectionReason}`),
             deterministicReview: "passed",
             profileReview: "passed",
             profileReviewAttempts: attempt,
@@ -161,13 +194,13 @@ export class AdeDeliveryRuntime {
         };
       }
 
-      if (attempt >= this.maxReviewAttempts) {
+      if (attempt >= maximumAttempts) {
         throw new AdeDeliveryError("ADE_PROFILE_REVIEW_BLOCKED", "Required ADE profile reviews remain blocking after the allowed correction attempts.");
       }
 
       const correction = await input.agentExecutor.execute({
         cwd: input.cwd,
-        prompt: buildCorrectionPrompt(input.work, findings.filter((finding) => finding.blocking)),
+        prompt: `${input.plan.correctionInstructions ?? ""}\n\nBlocking ADE findings:\n${findings.filter((finding) => finding.blocking).map((finding) => `- [${finding.profile}] ${finding.category}: ${finding.summary}`).join("\n")}`,
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.onOutput ? { onOutput: input.onOutput } : {}),
       });
@@ -180,17 +213,6 @@ export class AdeDeliveryRuntime {
     throw new AdeDeliveryError("ADE_PROFILE_REVIEW_BLOCKED", "ADE profile review did not reach a passing state.");
   }
 
-  private async listChangedPaths(input: { cwd: string; work: AdeDeliveryWorkContext }): Promise<readonly string[]> {
-    const result = await this.options.commands.run({
-      executable: "git",
-      args: ["-c", "core.hooksPath=/dev/null", "diff", "--cached", "--name-only", "--"],
-      cwd: input.cwd,
-      ...(this.options.environment ? { env: this.options.environment } : {}),
-    });
-    if (result.exitCode !== 0) return input.work.affectedPaths ?? [];
-    return result.stdout.split(/\r?\n/u).map((path) => path.trim()).filter((path) => path.length > 0).slice(0, 100);
-  }
-
   public static provenanceSummary(provenance: AdeDeliveryProvenance): Record<string, string | number> {
     return {
       adeRuntimeVersion: provenance.runtimeVersion,
@@ -200,6 +222,7 @@ export class AdeDeliveryRuntime {
       adeContextProfile: provenance.contextProfile,
       adeRulePackIds: provenance.rulePackIds.join(",").slice(0, 500),
       adeSelectedProfiles: provenance.selectedProfiles.join(",").slice(0, 500),
+      adeSelectedProfileReasons: provenance.selectedProfileReasons.join(" | ").slice(0, 500),
       adeDeterministicReview: provenance.deterministicReview,
       adeProfileReview: provenance.profileReview,
       adeProfileReviewAttempts: provenance.profileReviewAttempts,
@@ -312,12 +335,13 @@ export class AdeDeliveryRuntime {
     attempt: number,
     findings: AdeProfileFinding[],
     usage: AgentUsageMetrics[],
+    instructionsByProfile: ReadonlyMap<string, string>,
   ): Promise<boolean> {
     let pass = true;
     for (const profile of profiles) {
       const result = await input.agentExecutor.execute({
         cwd: input.cwd,
-        prompt: buildProfileReviewPrompt(input.work, profile),
+        prompt: instructionsByProfile.get(profile) ?? "",
         ...(input.signal ? { signal: input.signal } : {}),
         ...(input.onOutput ? { onOutput: input.onOutput } : {}),
       });
@@ -333,28 +357,6 @@ export class AdeDeliveryRuntime {
   }
 }
 
-export function selectProfiles(work: AdeDeliveryWorkContext): readonly string[] {
-  const configured = configuredProfiles(work.project);
-  if (configured.length > 0) return configured;
-  const text = `${work.prompt} ${work.issueTitle ?? ""} ${(work.affectedPaths ?? []).join(" ")}`.toLowerCase();
-  const profiles: string[] = [];
-  if (/doc|documentation|readme|copy/iu.test(text)) profiles.push("documentation");
-  if (/front|ui|ux|css|tsx|react|component/iu.test(text)) profiles.push("frontend");
-  if (/seo|metadata|sitemap/iu.test(text)) profiles.push("seo");
-  if (/api|backend|server|database|sql|worker/iu.test(text)) profiles.push("backend");
-  if (/auth|security|permission|secret|token|credential/iu.test(text)) profiles.push("security");
-  if (profiles.includes("security") && !profiles.includes("backend")) profiles.unshift("backend");
-  if (!profiles.includes("documentation") && !profiles.includes("frontend") && !profiles.includes("backend")) profiles.push("tech-lead");
-  if (!profiles.includes("documentation")) profiles.push("qa");
-  return [...new Set(profiles), ...(profiles.includes("tech-lead") ? [] : ["tech-lead"])];
-}
-
-function configuredProfiles(project: ProjectRecord): readonly string[] {
-  const ade = asRecord(project.configuration.ade);
-  const raw = ade.profileReviews ?? ade.profiles ?? ade.requiredProfiles;
-  return boundedStrings(raw, 12);
-}
-
 function configuredRulePacks(project: ProjectRecord): readonly string[] {
   const ade = asRecord(project.configuration.ade);
   return boundedStrings(ade.rulePacks ?? ade.rules, 20);
@@ -364,31 +366,6 @@ function configuredContextProfile(project: ProjectRecord): string | null {
   const ade = asRecord(project.configuration.ade);
   const profile = ade.contextProfile;
   return typeof profile === "string" && /^[a-z0-9][a-z0-9._-]{0,63}$/iu.test(profile) ? profile : null;
-}
-
-function buildProfileReviewPrompt(work: AdeDeliveryWorkContext, profile: string): string {
-  return [
-    `Act as the ADE ${profile} specialist reviewer for the selected repository.`,
-    "Review the current staged diff and the authoritative work reference below.",
-    "Do not edit files, commit, push, create a pull request, or use GitHub publication actions.",
-    "Return one JSON object on one line with this shape:",
-    '{"status":"pass|findings","findings":[{"severity":"info|warning|error","category":"short-code","summary":"safe summary","blocking":true|false,"status":"open|accepted-risk|not-applicable"}]}',
-    "Never include chain-of-thought, secrets, raw prompts, or full file contents.",
-    `Work: ${work.issueNumber ? `GitHub issue #${work.issueNumber}` : "manual task"}`,
-    `Summary: ${boundedText(work.issueTitle ?? work.prompt, 1_000)}`,
-    `Profile: ${profile}`,
-  ].join("\n");
-}
-
-function buildCorrectionPrompt(work: AdeDeliveryWorkContext, findings: readonly AdeProfileFinding[]): string {
-  return [
-    "Apply only the smallest code/documentation corrections required by the blocking ADE profile findings below.",
-    "Follow the authoritative task, repository instructions and existing project policy.",
-    "Do not commit, push, create a pull request, or expose credentials.",
-    `Task: ${boundedText(work.issueTitle ?? work.prompt, 1_000)}`,
-    "Blocking findings:",
-    ...findings.map((finding) => `- [${finding.profile}] ${finding.category}: ${finding.summary}`),
-  ].join("\n");
 }
 
 function parseProfileReview(stdout: string, profile: string, attempt: number): readonly AdeProfileFinding[] {
@@ -440,6 +417,37 @@ function parseSetupEvaluation(stdout: string): SetupEvaluationSummary | null {
   return { version, adeVersion, readiness, missingRequiredIds };
 }
 
+function parseDeliveryPlan(stdout: string): AdeDeliveryPlan | null {
+  const value = parseJson(stdout.trim());
+  if (!isRecord(value) || value.version !== ADE_DELIVERY_PLAN_VERSION || value.status !== "supported" || !isRecord(value.plan)) return null;
+  const plan = value.plan;
+  const lifecycle = isRecord(plan.lifecycle) ? plan.lifecycle : null;
+  const implementation = isRecord(plan.implementation) ? plan.implementation : null;
+  const correction = isRecord(plan.correction) ? plan.correction : null;
+  const publication = isRecord(plan.publication) ? plan.publication : null;
+  const reviews = Array.isArray(plan.reviews) ? plan.reviews : null;
+  const validations = Array.isArray(plan.validations) ? plan.validations : null;
+  if (!lifecycle || !implementation || !correction || !publication || !reviews || !validations ||
+      (lifecycle.action !== "enrich" && lifecycle.action !== "develop" && lifecycle.action !== "wait" && lifecycle.action !== "none") ||
+      typeof lifecycle.reason !== "string" || typeof implementation.profile !== "string" ||
+      typeof correction.maximumAttempts !== "number" || !Number.isInteger(correction.maximumAttempts) || correction.maximumAttempts < 0 || correction.maximumAttempts > 5 ||
+      typeof publication.ready !== "boolean") return null;
+  const safe = (entry: unknown, key: string, max: number): string | null => isRecord(entry) && typeof entry[key] === "string" && new RegExp(`^[a-z0-9][a-z0-9._/-]{0,${max}}$`, "iu").test(entry[key]) ? entry[key] as string : null;
+  const reviewProfiles = reviews.map((review) => safe(review, "profile", 99));
+  const validationRuleIds = validations.map((validation) => safe(validation, "ruleId", 127));
+  const selectionReasons = reviews.map((review) => isRecord(review) && typeof review.reason === "string" ? boundedText(review.reason, 500) : null);
+  const instructions = reviews.map((review) => isRecord(review) && isRecord(review.invocation) && review.invocation.version === "ade.profile-invocation/v1" && review.invocation.kind === "specialist-review" && typeof review.invocation.instructions === "string" ? boundedText(review.invocation.instructions, 4_000) : null);
+  const correctionInstructions = isRecord(correction.invocation) && correction.invocation.version === "ade.profile-invocation/v1" && correction.invocation.kind === "correction" && typeof correction.invocation.instructions === "string" ? boundedText(correction.invocation.instructions, 4_000) : null;
+  if (reviewProfiles.some((profile) => profile === null) || selectionReasons.some((reason) => !reason) || instructions.some((instruction) => !instruction) || validationRuleIds.some((rule) => rule === null) || !safe(implementation, "profile", 99) || (reviews.length > 0 && !correctionInstructions)) return null;
+  return { version: ADE_DELIVERY_PLAN_VERSION, action: lifecycle.action, reason: boundedText(lifecycle.reason, 500), implementationProfile: implementation.profile, reviews: (reviewProfiles as string[]).map((profile, index) => ({ profile, selectionReason: selectionReasons[index]!, instructions: instructions[index]! })), validationRuleIds: [...new Set(validationRuleIds as string[])], maximumCorrectionAttempts: correction.maximumAttempts, correctionInstructions, publicationReady: publication.ready };
+}
+
+function deliveryPlanCompatibilityReason(stdout: string): string | null {
+  const value = parseJson(stdout.trim());
+  if (!isRecord(value) || value.status !== "unsupported" || !isRecord(value.reason) || typeof value.reason.code !== "string" || typeof value.reason.message !== "string") return null;
+  return `ADE delivery-plan incompatibility (${boundedText(value.reason.code, 80)}): ${boundedText(value.reason.message, 500)}`;
+}
+
 function isSafeSetupId(value: string): boolean {
   return /^[a-z0-9][a-z0-9._-]{0,99}$/iu.test(value);
 }
@@ -450,4 +458,3 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function boundedText(value: string, maximum: number): string { return value.replace(/[\u0000-\u001F\u007F]/gu, " ").trim().slice(0, maximum); }
 function sanitizeDetail(value: string): string { return boundedText(value, 500).replace(/(?:token|secret|password|key)\s*[:=]\s*\S+/giu, "$1=[redacted]"); }
-function clampAttempts(value: number): number { return Number.isInteger(value) && value >= 1 && value <= 3 ? value : 2; }
