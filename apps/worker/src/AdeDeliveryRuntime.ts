@@ -10,11 +10,24 @@ export type AdeDeliveryFailureCode =
   | "ADE_CONTEXT_FAILED"
   | "ADE_SETUP_INCOMPLETE"
   | "ADE_SETUP_INVALID"
+  | "ADE_DELIVERY_PLAN_UNSUPPORTED"
   | "ADE_DETERMINISTIC_REVIEW_FAILED"
   | "ADE_PROFILE_REVIEW_BLOCKED"
   | "ADE_PROFILE_REVIEW_FAILED";
 
 const ADE_SETUP_CONTRACT_VERSION = "ade.project-setup/v1";
+export const ADE_DELIVERY_PLAN_VERSION = "ade.delivery-plan/v1";
+
+export interface AdeDeliveryPlan {
+  version: typeof ADE_DELIVERY_PLAN_VERSION;
+  action: "enrich" | "develop" | "wait" | "none";
+  reason: string;
+  implementationProfile: string;
+  reviewProfiles: readonly string[];
+  validationRuleIds: readonly string[];
+  maximumCorrectionAttempts: number;
+  publicationReady: boolean;
+}
 
 export interface AdeProfileFinding {
   profile: string;
@@ -114,6 +127,24 @@ export class AdeDeliveryRuntime {
       contextProfile,
       rulePackIds: configuredRulePacks(input.work.project),
     };
+  }
+
+  /** Negotiates ADE's repository-owned delivery contract over stdin. */
+  public async resolveDeliveryPlan(input: { cwd: string; issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string }; signal?: AbortSignal }): Promise<AdeDeliveryPlan> {
+    let result: CommandResult;
+    try {
+      result = await this.options.commands.run({
+        executable: this.executable, args: ["delivery", "plan", "--json"], cwd: input.cwd,
+        stdin: JSON.stringify({ issue: input.issue, negotiation: { acceptedVersions: [ADE_DELIVERY_PLAN_VERSION], requiredCapabilities: ["implementation-context", "deterministic-validation", "specialist-review", "correction-and-rereview", "human-publication-gate"] } }),
+        ...(this.options.environment ? { env: this.options.environment } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch {
+      throw new AdeDeliveryError("ADE_DELIVERY_PLAN_UNSUPPORTED", "The installed ADE runtime could not negotiate the required delivery-plan contract.");
+    }
+    const plan = parseDeliveryPlan(result.stdout);
+    if (result.exitCode !== 0 || !plan) throw new AdeDeliveryError("ADE_DELIVERY_PLAN_UNSUPPORTED", "The installed ADE runtime does not provide the required delivery-plan contract.");
+    return plan;
   }
 
   public async runPostAgentGates(input: {
@@ -438,6 +469,28 @@ function parseSetupEvaluation(stdout: string): SetupEvaluationSummary | null {
     : null;
   if (!version || !adeVersion || !readiness || !missingRequiredIds) return null;
   return { version, adeVersion, readiness, missingRequiredIds };
+}
+
+function parseDeliveryPlan(stdout: string): AdeDeliveryPlan | null {
+  const value = parseJson(stdout.trim());
+  if (!isRecord(value) || value.version !== ADE_DELIVERY_PLAN_VERSION || value.status !== "supported" || !isRecord(value.plan)) return null;
+  const plan = value.plan;
+  const lifecycle = isRecord(plan.lifecycle) ? plan.lifecycle : null;
+  const implementation = isRecord(plan.implementation) ? plan.implementation : null;
+  const correction = isRecord(plan.correction) ? plan.correction : null;
+  const publication = isRecord(plan.publication) ? plan.publication : null;
+  const reviews = Array.isArray(plan.reviews) ? plan.reviews : null;
+  const validations = Array.isArray(plan.validations) ? plan.validations : null;
+  if (!lifecycle || !implementation || !correction || !publication || !reviews || !validations ||
+      (lifecycle.action !== "enrich" && lifecycle.action !== "develop" && lifecycle.action !== "wait" && lifecycle.action !== "none") ||
+      typeof lifecycle.reason !== "string" || typeof implementation.profile !== "string" ||
+      typeof correction.maximumAttempts !== "number" || !Number.isInteger(correction.maximumAttempts) || correction.maximumAttempts < 0 || correction.maximumAttempts > 5 ||
+      typeof publication.ready !== "boolean") return null;
+  const safe = (entry: unknown, key: string, max: number): string | null => isRecord(entry) && typeof entry[key] === "string" && new RegExp(`^[a-z0-9][a-z0-9._/-]{0,${max}}$`, "iu").test(entry[key]) ? entry[key] as string : null;
+  const reviewProfiles = reviews.map((review) => safe(review, "profile", 99));
+  const validationRuleIds = validations.map((validation) => safe(validation, "ruleId", 127));
+  if (reviewProfiles.some((profile) => profile === null) || validationRuleIds.some((rule) => rule === null) || !safe(implementation, "profile", 99)) return null;
+  return { version: ADE_DELIVERY_PLAN_VERSION, action: lifecycle.action, reason: boundedText(lifecycle.reason, 500), implementationProfile: implementation.profile, reviewProfiles: [...new Set(reviewProfiles as string[])], validationRuleIds: [...new Set(validationRuleIds as string[])], maximumCorrectionAttempts: correction.maximumAttempts, publicationReady: publication.ready };
 }
 
 function isSafeSetupId(value: string): boolean {
