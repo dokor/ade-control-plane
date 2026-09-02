@@ -1,5 +1,6 @@
 import type { GithubRepositoryRef } from "./domain.js";
 import type { GithubIssueDetails, GithubIssueLifecycleClient } from "./issues.js";
+import { mergeAdeWorkflowLabels } from "./workLabels.js";
 
 export interface GithubRepositoryContent {
   path: string;
@@ -173,6 +174,20 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient, 
       method: "PATCH", headers: { ...this.headers(token), "content-type": "application/json" }, body: JSON.stringify({ body }),
     });
     if (!response.ok) throw new GithubApiError(response.status, "update issue", await safeGithubErrorDetail(response));
+    const issue = normalizeIssueDetails(await response.json().catch(() => null), repository);
+    if (!issue) throw new Error("GitHub issue response is invalid.");
+    return issue;
+  }
+
+  public async syncAdeWorkflowLabels(repository: GithubRepositoryRef, issueNumber: number, labels: readonly string[]): Promise<GithubIssueDetails> {
+    const current = await this.getIssueDetails(repository, issueNumber);
+    if (!current) throw new Error("GitHub issue was not found.");
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(`${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/issues/${issueNumber}`, {
+      method: "PATCH", headers: { ...this.headers(token), "content-type": "application/json" },
+      body: JSON.stringify({ labels: mergeAdeWorkflowLabels(current.labels, labels) }),
+    });
+    if (!response.ok) throw new GithubApiError(response.status, "sync issue labels", await safeGithubErrorDetail(response));
     const issue = normalizeIssueDetails(await response.json().catch(() => null), repository);
     if (!issue) throw new Error("GitHub issue response is invalid.");
     return issue;
@@ -484,6 +499,14 @@ export class DeterministicFakeGithubClient
     const issue = this.issues.get(issueNumber);
     if (!issue) throw new Error("GitHub issue was not found.");
     const updated = { ...issue, body, updatedAt: new Date().toISOString() };
+    this.issues.set(issueNumber, updated);
+    return updated;
+  }
+
+  public async syncAdeWorkflowLabels(_repository: GithubRepositoryRef, issueNumber: number, labels: readonly string[]): Promise<GithubIssueDetails> {
+    const issue = this.issues.get(issueNumber);
+    if (!issue) throw new Error("GitHub issue was not found.");
+    const updated = { ...issue, labels: mergeAdeWorkflowLabels(issue.labels, labels), updatedAt: new Date().toISOString() };
     this.issues.set(issueNumber, updated);
     return updated;
   }

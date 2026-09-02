@@ -76,6 +76,7 @@ export {
   type HttpGithubWorkAdapterOptions,
 } from "./workAdapter.js";
 export { DEFAULT_GITHUB_WORK_METADATA, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubWorkMetadata } from "./workMetadata.js";
+export { ADE_WORKFLOW_LABELS, labelsForGithubWorkState, mergeAdeWorkflowLabels, type AdeWorkflowLabel } from "./workLabels.js";
 export {
   GithubIssueAdapterError,
   HttpGithubIssueAdapter,

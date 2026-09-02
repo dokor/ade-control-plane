@@ -1,5 +1,5 @@
 import type { AgentUsageMetrics, ProjectRecord } from "@ade-control-plane/database";
-import { DEFAULT_GITHUB_WORK_METADATA, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient, type GithubPullRequestClient } from "@ade-control-plane/github";
+import { DEFAULT_GITHUB_WORK_METADATA, labelsForGithubWorkState, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient, type GithubPullRequestClient } from "@ade-control-plane/github";
 
 import type { GithubWorkDispatchRequest, GithubWorkDispatchResult, GithubWorkDispatcher } from "./GithubWorkOrchestrator.js";
 import type { CommandRunner } from "./v0/CommandRunner.js";
@@ -152,6 +152,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           body: [
             `Automated implementation for GitHub issue #${request.work.issueNumber}.`,
             `Source issue: ${request.work.issueUrl}`,
+            `Closes #${request.work.issueNumber}`,
             "",
             "## ADE runtime",
             ...Object.entries(AdeDeliveryRuntime.provenanceSummary(review.provenance)).map(([key, value]) => `- ${key}: ${value}`),
@@ -202,7 +203,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
 
   private async updateLifecycle(body: string, request: GithubWorkDispatchRequest, change: Partial<import("@ade-control-plane/github").GithubWorkMetadata>): Promise<void> {
     const metadata = { ...(readGithubWorkMetadata(body) ?? DEFAULT_GITHUB_WORK_METADATA), ...change };
-    await this.options.github.updateIssueBody({ id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
+    const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
+    await this.options.github.updateIssueBody(repository, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
+    await this.options.github.syncAdeWorkflowLabels(repository, request.work.issueNumber, labelsForGithubWorkState(metadata.state, metadata.pullRequestNumber));
   }
 }
 
