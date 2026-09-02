@@ -11,6 +11,10 @@ import {
 
 import type { GithubRuntime } from "./githubRuntime.js";
 
+type GithubSetupReadClient = GithubSetupClient & {
+  getRepositoryPathType(repository: GithubRepositoryRef, path: string): Promise<"file" | "directory" | null>;
+};
+
 export type SetupRequirementState = "ready" | "missing" | "invalid" | "optional";
 
 export interface ProjectSetupRequirement {
@@ -89,7 +93,19 @@ export async function inspectProjectSetup(
   requirements.push({ key: "repository-access", label: "Repository accessible", state: "ready", detail: "Repository contents and labels can be read.", repairable: false, source: "repository" });
   requirements.push(profile.requirement);
   requirements.push({ key: "runtime", label: "ADE runtime compatible", state: "ready", detail: `Using the shared ADE contract ${GITHUB_WORK_PROFILE_VERSION}.`, repairable: false, source: "runtime" });
-  requirements.push({ key: "profiles", label: "Profiles and rules available", state: profile.valid ? "ready" : profile.state === "missing" ? "missing" : "invalid", detail: profile.valid ? "The repository profile declares the supported work capability." : "Profiles and rules cannot be resolved until the ADE profile is valid.", repairable: profile.state === "missing", source: "repository" });
+  const missingSkillPaths = profile.valid
+    ? (await Promise.all(profile.skillPaths.map(async (path) => [path, await setupClient.getRepositoryPathType(repository, path)] as const)))
+      .filter(([, type]) => type !== "directory").map(([path]) => path)
+    : [];
+  requirements.push({
+    key: "skills",
+    label: "Declared ADE skills",
+    state: !profile.valid ? profile.state === "missing" ? "missing" : "invalid" : profile.skillPaths.length === 0 || missingSkillPaths.length > 0 ? "missing" : "ready",
+    detail: !profile.valid ? "Skill paths cannot be verified until the ADE profile is valid." : profile.skillPaths.length === 0 ? "Declare at least one contained skill path in .ade/control-plane.json." : missingSkillPaths.length > 0 ? `Create the declared skill directories in the repository: ${missingSkillPaths.join(", ")}.` : "Every declared ADE skill path exists in the repository.",
+    repairable: profile.valid && missingSkillPaths.length > 0,
+    source: "repository",
+  });
+  requirements.push({ key: "profiles", label: "Profiles and rules available", state: profile.valid && profile.skillPaths.length > 0 && missingSkillPaths.length === 0 ? "ready" : profile.state === "invalid" ? "invalid" : "missing", detail: profile.valid && profile.skillPaths.length > 0 && missingSkillPaths.length === 0 ? "The repository profile and its declared ADE skills can be resolved." : "Profiles and rules remain blocked until the ADE profile and declared skill paths are executable.", repairable: profile.state === "missing" || missingSkillPaths.length > 0, source: "repository" });
 
   const hasInstructions = Boolean(fileMap.get(SETUP_PATHS.instructions) ?? fileMap.get(SETUP_PATHS.alternativeInstructions));
   if (!hasInstructions) {
@@ -173,20 +189,21 @@ function repositoryRef(project: ProjectRecord): GithubRepositoryRef {
 async function readProfile(
   repository: GithubRepositoryRef,
   setupClient: GithubSetupClient,
-): Promise<{ valid: boolean; state: "ready" | "missing" | "invalid"; requirement: ProjectSetupRequirement }> {
+): Promise<{ valid: boolean; state: "ready" | "missing" | "invalid"; skillPaths: readonly string[]; requirement: ProjectSetupRequirement }> {
   const content = await setupClient.getRepositoryContent(repository, GITHUB_WORK_PROFILE_PATH);
-  if (!content) return { valid: false, state: "missing", requirement: { key: "ade-config", label: "ADE configuration", state: "missing", detail: `${GITHUB_WORK_PROFILE_PATH} is missing.`, repairable: true, source: "repository" } };
+  if (!content) return { valid: false, state: "missing", skillPaths: [], requirement: { key: "ade-config", label: "ADE configuration", state: "missing", detail: `${GITHUB_WORK_PROFILE_PATH} is missing.`, repairable: true, source: "repository" } };
   let parsed: unknown;
   try { parsed = JSON.parse(Buffer.from(content.content.replace(/\s/g, ""), "base64").toString("utf8")); } catch { parsed = null; }
-  const valid = isRecord(parsed) && parsed.version === GITHUB_WORK_PROFILE_VERSION && isStringArray(parsed.capabilities) && isStringArray(parsed.skillPaths);
-  if (!valid) return { valid: false, state: "invalid", requirement: { key: "ade-config", label: "ADE configuration", state: "invalid", detail: `${GITHUB_WORK_PROFILE_PATH} exists but is not a valid ${GITHUB_WORK_PROFILE_VERSION} profile.`, repairable: false, source: "repository" } };
-  return { valid: true, state: "ready", requirement: { key: "ade-config", label: "ADE configuration", state: "ready", detail: `${GITHUB_WORK_PROFILE_PATH} is valid.`, repairable: false, source: "repository" } };
+  if (!isRecord(parsed) || parsed.version !== GITHUB_WORK_PROFILE_VERSION || !isStringArray(parsed.capabilities) || !isSafeSkillPaths(parsed.skillPaths)) {
+    return { valid: false, state: "invalid", skillPaths: [], requirement: { key: "ade-config", label: "ADE configuration", state: "invalid", detail: `${GITHUB_WORK_PROFILE_PATH} exists but is not a valid ${GITHUB_WORK_PROFILE_VERSION} profile.`, repairable: false, source: "repository" } };
+  }
+  return { valid: true, state: "ready", skillPaths: parsed.skillPaths, requirement: { key: "ade-config", label: "ADE configuration", state: "ready", detail: `${GITHUB_WORK_PROFILE_PATH} is valid.`, repairable: false, source: "repository" } };
 }
 
-function asSetupClient(client: GithubRuntime["client"]): GithubSetupClient | null {
-  const candidate = client as unknown as Partial<GithubSetupClient> | undefined;
-  if (!candidate || typeof candidate.getRepositoryContent !== "function" || typeof candidate.listLabels !== "function" || typeof candidate.createLabel !== "function" || typeof candidate.findOpenSetupPullRequest !== "function" || typeof candidate.createSetupPullRequest !== "function") return null;
-  return candidate as GithubSetupClient;
+function asSetupClient(client: GithubRuntime["client"]): GithubSetupReadClient | null {
+  const candidate = client as unknown as Partial<GithubSetupReadClient> | undefined;
+  if (!candidate || typeof candidate.getRepositoryContent !== "function" || typeof candidate.getRepositoryPathType !== "function" || typeof candidate.listLabels !== "function" || typeof candidate.createLabel !== "function" || typeof candidate.findOpenSetupPullRequest !== "function" || typeof candidate.createSetupPullRequest !== "function") return null;
+  return candidate as GithubSetupReadClient;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -195,4 +212,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isSafeSkillPaths(value: unknown): value is string[] {
+  return isStringArray(value) && value.every((path) => /^(?:[A-Za-z0-9._-]+)(?:\/[A-Za-z0-9._-]+)*$/u.test(path) && !path.includes("..") && !path.split("/").some((segment) => segment === "." || segment === ""));
 }

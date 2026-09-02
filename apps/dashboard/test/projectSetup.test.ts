@@ -23,6 +23,13 @@ const project = {
 };
 
 function runtime(client: DeterministicFakeGithubClient): GithubRuntime {
+  const setupClient = client as unknown as {
+    contents: Map<string, unknown>;
+    directories?: Set<string>;
+    getRepositoryPathType?: (_repository: unknown, path: string) => Promise<"file" | "directory" | null>;
+  };
+  setupClient.directories ??= new Set<string>();
+  setupClient.getRepositoryPathType ??= async (_repository, path) => setupClient.contents.has(path) ? "file" : setupClient.directories?.has(path) ? "directory" : null;
   return {
     webhookSecret: null,
     policy: { allowedActorIds: [], allowedInstallationIds: [] },
@@ -41,6 +48,9 @@ function putFile(client: DeterministicFakeGithubClient, path: string, value: unk
 
 function putReadyProfile(client: DeterministicFakeGithubClient): void {
   putFile(client, GITHUB_WORK_PROFILE_PATH, { version: GITHUB_WORK_PROFILE_VERSION, capabilities: ["github-work-items"], skillPaths: [".agents/skills"] });
+  const directories = client as unknown as { directories?: Set<string> };
+  directories.directories ??= new Set<string>();
+  directories.directories.add(".agents/skills");
 }
 
 function putRequiredLabels(client: DeterministicFakeGithubClient): void {
@@ -63,6 +73,18 @@ test("distinguishes invalid configuration from missing configuration", async () 
   assert.equal(readiness.requirements.find(({ key }) => key === "ade-config")?.state, "invalid");
   assert.equal(readiness.missingFiles.includes(GITHUB_WORK_PROFILE_PATH), false);
   assert.ok(readiness.invalidFiles.includes(GITHUB_WORK_PROFILE_PATH));
+});
+
+test("blocks readiness when a declared skill directory is missing", async () => {
+  const client = new DeterministicFakeGithubClient();
+  putFile(client, GITHUB_WORK_PROFILE_PATH, { version: GITHUB_WORK_PROFILE_VERSION, capabilities: ["github-work-items"], skillPaths: [".agents/skills"] });
+  client.contents.set("AGENTS.md", { path: "AGENTS.md", sha: "agents", content: Buffer.from("# Instructions").toString("base64") });
+  putRequiredLabels(client);
+  const readiness = await inspectProjectSetup(project, runtime(client));
+  const skills = readiness.requirements.find(({ key }) => key === "skills");
+  assert.equal(readiness.ready, false);
+  assert.equal(skills?.state, "missing");
+  assert.match(skills?.detail ?? "", /\.agents\/skills/);
 });
 
 test("recognizes a fully configured repository while keeping optional files visible", async () => {

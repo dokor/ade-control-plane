@@ -88,6 +88,7 @@ export interface GithubSetupClient {
     repository: GithubRepositoryRef,
     path: string,
   ): Promise<GithubRepositoryContent | null>;
+  getRepositoryPathType(repository: GithubRepositoryRef, path: string): Promise<"file" | "directory" | null>;
   listLabels(repository: GithubRepositoryRef): Promise<readonly GithubLabel[]>;
   createLabel(repository: GithubRepositoryRef, label: GithubLabel): Promise<GithubLabel>;
   findOpenSetupPullRequest(repository: GithubRepositoryRef, title: string): Promise<GithubPullRequest | null>;
@@ -275,6 +276,20 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient, 
       throw new Error("GitHub repository content response is invalid.");
     }
     return { path: parsed.path, sha: parsed.sha, content: parsed.content };
+  }
+
+  public async getRepositoryPathType(repository: GithubRepositoryRef, path: string): Promise<"file" | "directory" | null> {
+    const token = await this.options.tokens.getToken(this.options.installationId);
+    const response = await this.fetchImplementation(
+      `${this.baseUrl}/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${path.split("/").map(encodeURIComponent).join("/")}`,
+      { headers: this.headers(token) },
+    );
+    if (response.status === 404) return null;
+    if (!response.ok) throw new GithubApiError(response.status, "read repository path", await safeGithubErrorDetail(response));
+    const parsed = await response.json().catch(() => null);
+    if (Array.isArray(parsed)) return "directory";
+    if (parsed && typeof parsed === "object" && (parsed as { type?: unknown }).type === "file") return "file";
+    throw new Error("GitHub repository path response is invalid.");
   }
 
   public async getRepositoryMetadata(repository: GithubRepositoryRef): Promise<GithubRepositoryMetadata> {
@@ -486,6 +501,7 @@ export class DeterministicFakeGithubClient
   private nextId = 1;
 
   public readonly contents = new Map<string, GithubRepositoryContent>();
+  public readonly directories = new Set<string>();
   public readonly labels: GithubLabel[] = [];
   public repositoryMetadata: GithubRepositoryMetadata = { id: "123", owner: "dokor", name: "alpha", defaultBranch: "main", private: false, url: "https://github.com/dokor/alpha" };
   private readonly setupPullRequests = new Map<string, GithubPullRequest>();
@@ -544,6 +560,11 @@ export class DeterministicFakeGithubClient
 
   public async getRepositoryContent(_repository: GithubRepositoryRef, path: string): Promise<GithubRepositoryContent | null> {
     return this.contents.get(path) ?? null;
+  }
+
+  public async getRepositoryPathType(_repository: GithubRepositoryRef, path: string): Promise<"file" | "directory" | null> {
+    if (this.contents.has(path)) return "file";
+    return this.directories.has(path) ? "directory" : null;
   }
 
   public async getRepositoryMetadata(_repository: GithubRepositoryRef): Promise<GithubRepositoryMetadata> {
