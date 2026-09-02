@@ -55,6 +55,7 @@ test("reports an unavailable GitHub-work checkout with a safe actionable error",
     github: {
       getIssueDetails: async () => { throw new Error("GitHub should not be reached"); },
       updateIssueBody: async () => { throw new Error("GitHub should not be reached"); },
+      syncAdeWorkflowLabels: async () => { throw new Error("GitHub should not be reached"); },
       createPullRequest: async () => { throw new Error("GitHub should not be reached"); },
     },
   });
