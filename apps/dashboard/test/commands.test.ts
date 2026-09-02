@@ -120,6 +120,27 @@ test("safe retry is accepted for a classified-safe execution without dispatching
   assert.equal(state.executions[0]?.status, "failed");
 });
 
+test("an ADE decision accepts only its offered option and resolves idempotently", async () => {
+  const current = project();
+  const state = createMemoryState({
+    projects: [current],
+    decisions: [{
+      id: "decision-1", projectId: current.id, decisionRef: "issue-42-20260901", prompt: "Choose publication.",
+      options: ["resume", "wait"], status: "open", resolvedOption: null, resolvedBy: null,
+      observedAt: NOW, resolvedAt: null,
+    }],
+  });
+  await assert.rejects(
+    submitDashboardCommand(context(state), { type: "ade.decide", payload: { projectId: current.id, decisionRef: "issue-42-20260901", option: "unsafe" } }),
+    /not one ADE offered/,
+  );
+  const first = await submitDashboardCommand(context(state), { type: "ade.decide", payload: { projectId: current.id, decisionRef: "issue-42-20260901", option: "resume" } });
+  const replay = await submitDashboardCommand(context(state), { type: "ade.decide", payload: { projectId: current.id, decisionRef: "issue-42-20260901", option: "resume" } });
+  assert.match(first.summary, /resolved as resume/);
+  assert.match(replay.summary, /already resolved/);
+  assert.equal(state.decisions[0]?.resolvedOption, "resume");
+});
+
 test("runner drain and disable are audited state changes", async () => {
   const state = createMemoryState({ runners: [runner()] });
   await submitDashboardCommand(context(state), {
