@@ -357,8 +357,8 @@ test("a merged correlated pull request completes work and refreshes its dependen
   assert.equal(state.githubWorkItems[0]?.state, "completed");
 });
 
-test("a closed-unmerged or mismatched pull request is durably blocked", async () => {
-  for (const [action, merged, headRef] of [["closed", false, "ade/issue-42"], ["synchronize", false, "unexpected-branch"]] as const) {
+test("a closed-unmerged, changed, or mismatched pull request is durably blocked", async () => {
+  for (const [action, merged, headRef] of [["closed", false, "ade/issue-42"], ["synchronize", false, "ade/issue-42"], ["synchronize", false, "unexpected-branch"]] as const) {
     const state = baseState();
     const client = new DeterministicFakeGithubClient();
     client.issues.set(42, {

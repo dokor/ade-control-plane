@@ -203,6 +203,8 @@ async function reconcilePullRequestLifecycle(
     ? "completed"
     : correlated && event.action === "closed"
       ? "blocked"
+      : correlated && event.action === "synchronize"
+        ? "blocked"
       : correlated
         ? metadata.state
         : "blocked";
