@@ -67,6 +67,13 @@ export interface AdeDeliveryPreparation {
   rulePackIds: readonly string[];
 }
 
+export interface AdeSetupEvaluation {
+  runtimeVersion: string;
+  setupContractVersion: string;
+  readiness: "ready" | "incomplete" | "invalid";
+  missingRequiredIds: readonly string[];
+}
+
 export interface AdeDeliveryWorkContext {
   project: ProjectRecord;
   source: "prompt" | "github-issue";
@@ -119,12 +126,49 @@ export class AdeDeliveryRuntime {
     const contextProfile = input.contextProfile ?? configuredContextProfile(input.work.project) ?? "normal";
     await this.runAde(input, ["context", "generate"], "ADE project context generation", "ADE_CONTEXT_FAILED");
     await this.runAde(input, ["context", "pack", contextProfile], `ADE ${contextProfile} context pack`, "ADE_CONTEXT_FAILED");
-    const setupContractVersion = await this.runSetupCheck(input, runtimeVersion);
+    const evaluation = await this.inspectSetup(input, runtimeVersion);
+    this.requireReadySetup(evaluation);
     return {
       runtimeVersion,
-      setupContractVersion,
+      setupContractVersion: evaluation.setupContractVersion,
       contextProfile,
       rulePackIds: configuredRulePacks(input.work.project),
+    };
+  }
+
+  /** Runs ADE's read-only, versioned setup report in a runner checkout. */
+  public async inspectSetup(
+    input: { cwd: string; work: AdeDeliveryWorkContext; signal?: AbortSignal },
+    detectedRuntimeVersion?: string,
+  ): Promise<AdeSetupEvaluation> {
+    const runtimeVersion = detectedRuntimeVersion ?? await this.detectVersion(input);
+    let result: CommandResult;
+    try {
+      result = await this.options.commands.run({
+        executable: this.executable,
+        args: ["setup", "check", "--json"],
+        cwd: input.cwd,
+        ...(this.options.environment ? { env: this.options.environment } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup could not be evaluated.");
+    }
+    const evaluation = parseSetupEvaluation(result.stdout);
+    if (!evaluation || evaluation.version !== ADE_SETUP_CONTRACT_VERSION) {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE returned an unsupported project setup contract.");
+    }
+    if (evaluation.adeVersion && parseVersion(evaluation.adeVersion) !== runtimeVersion) {
+      throw new AdeDeliveryError("ADE_RUNTIME_MISMATCH", "The ADE setup report does not match the detected worker runtime.");
+    }
+    if (result.exitCode !== 0 && evaluation.readiness === "ready") {
+      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup returned an inconsistent readiness result.");
+    }
+    return {
+      runtimeVersion,
+      setupContractVersion: evaluation.version,
+      readiness: evaluation.readiness,
+      missingRequiredIds: evaluation.missingRequiredIds.filter(isSafeSetupId).slice(0, 20),
     };
   }
 
@@ -244,33 +288,7 @@ export class AdeDeliveryRuntime {
     return detected ?? expected ?? this.expectedVersion;
   }
 
-  private async runSetupCheck(
-    input: { cwd: string; work: AdeDeliveryWorkContext; signal?: AbortSignal },
-    runtimeVersion: string,
-  ): Promise<string> {
-    let result: CommandResult;
-    try {
-      // ADE owns the setup catalogue and evaluation. Keep its JSON response
-      // private to this boundary: it may contain configuration diagnostics,
-      // while the worker only needs the safe readiness verdict and IDs.
-      result = await this.options.commands.run({
-        executable: this.executable,
-        args: ["setup", "check", "--json"],
-        cwd: input.cwd,
-        ...(this.options.environment ? { env: this.options.environment } : {}),
-        ...(input.signal ? { signal: input.signal } : {}),
-      });
-    } catch {
-      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup could not be evaluated.");
-    }
-
-    const evaluation = parseSetupEvaluation(result.stdout);
-    if (!evaluation || evaluation.version !== ADE_SETUP_CONTRACT_VERSION) {
-      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE returned an unsupported project setup contract.");
-    }
-    if (evaluation.adeVersion && parseVersion(evaluation.adeVersion) !== runtimeVersion) {
-      throw new AdeDeliveryError("ADE_RUNTIME_MISMATCH", "The ADE setup report does not match the detected worker runtime.");
-    }
+  private requireReadySetup(evaluation: AdeSetupEvaluation): void {
     if (evaluation.readiness === "invalid") {
       throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup is invalid; fix the repository configuration before mutating work.");
     }
@@ -281,10 +299,6 @@ export class AdeDeliveryRuntime {
         `ADE project setup is incomplete${missing.length > 0 ? `: ${missing.join(", ")}` : "."}`,
       );
     }
-    if (result.exitCode !== 0) {
-      throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup returned an inconsistent readiness result.");
-    }
-    return evaluation.version;
   }
 
   private async runAde(

@@ -1,6 +1,7 @@
 import type {
   AgentUsageInput,
   AgentUsageMetrics,
+  GithubWorkRepository,
   ProjectRepository,
   ProjectRecord,
   V0TaskRepository,
@@ -10,7 +11,7 @@ import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, t
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
-import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPlan, type AdeDeliveryPreparation, type AdeDeliveryReviewResult } from "../AdeDeliveryRuntime.js";
+import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPlan, type AdeDeliveryPreparation, type AdeDeliveryReviewResult, type AdeSetupEvaluation } from "../AdeDeliveryRuntime.js";
 import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./ProjectCheckout.js";
 
 interface V0Persistence {
@@ -19,6 +20,7 @@ interface V0Persistence {
     markPushed?: V0TaskRepository["markPushed"];
   };
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
+  githubWork?: Pick<GithubWorkRepository, "recordAdeReadiness">;
 }
 
 export interface V0TaskExecutorOptions {
@@ -171,6 +173,28 @@ export class V0TaskExecutor {
         url: issue?.url ?? `ade://tasks/${task.id}`,
       };
       let deliveryPlan: AdeDeliveryPlan | undefined;
+      if (initialization) {
+        const setup = await this.deliveryRuntime.inspectSetup({ cwd: checkout.root, work, signal: controller.signal });
+        if (setup.readiness === "ready") {
+          deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
+          if (deliveryPlan.action !== "develop") {
+            throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
+          }
+          await this.recordAdeReadiness(project, checkout.root, {
+            status: "compatible", runtimeVersion: setup.runtimeVersion, configVersion: setup.setupContractVersion,
+            resolvedProfiles: [...new Set([this.adeProfile, deliveryPlan.implementationProfile, ...deliveryPlan.reviews.map(({ profile }) => profile)])],
+            resolvedRules: deliveryPlan.validationRuleIds, contextStatus: "fresh", missingRequiredCapabilityIds: [],
+          });
+          await this.options.persistence.v0Tasks.complete({
+            taskId: task.id, status: "SUCCESS", finishedAt: this.now().toISOString(),
+            adeProvenance: { adeRuntimeVersion: setup.runtimeVersion, adeSetupContractVersion: setup.setupContractVersion, adeConfigStatus: "validated" },
+          });
+          await this.log(task.id, "Read-only ADE setup and delivery capabilities were recorded for the default-branch runner checkout.");
+          return;
+        }
+        await this.recordIncompleteAdeReadiness(project, checkout.root, setup);
+        await this.log(task.id, "ADE setup remains incomplete; preparing a reviewable setup pull request.");
+      }
       if (!initialization) {
         deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
         if (deliveryPlan.action !== "develop") {
@@ -428,6 +452,40 @@ export class V0TaskExecutor {
     if ((await this.options.persistence.v0Tasks.getById(taskId))?.cancelRequested) {
       throw new V0CancelledError();
     }
+  }
+
+  private async recordAdeReadiness(
+    project: ProjectRecord,
+    cwd: string,
+    input: {
+      status: "compatible" | "incompatible" | "invalid";
+      runtimeVersion: string;
+      configVersion: string | null;
+      resolvedProfiles: readonly string[];
+      resolvedRules: readonly string[];
+      contextStatus: "fresh" | "stale" | "missing" | "unknown";
+      missingRequiredCapabilityIds: readonly string[];
+    },
+  ): Promise<void> {
+    const runnerCheckoutRef = (await this.git(cwd, ["rev-parse", "HEAD"])).stdout.trim();
+    await this.options.persistence.githubWork?.recordAdeReadiness({
+      projectId: project.id,
+      ...input,
+      runnerCheckoutRef: /^[0-9a-f]{40,64}$/iu.test(runnerCheckoutRef) ? runnerCheckoutRef : null,
+      observedAt: this.now().toISOString(),
+    });
+  }
+
+  private async recordIncompleteAdeReadiness(project: ProjectRecord, cwd: string, setup: AdeSetupEvaluation): Promise<void> {
+    await this.recordAdeReadiness(project, cwd, {
+      status: setup.readiness === "invalid" ? "invalid" : "incompatible",
+      runtimeVersion: setup.runtimeVersion,
+      configVersion: setup.setupContractVersion,
+      resolvedProfiles: [],
+      resolvedRules: [],
+      contextStatus: "unknown",
+      missingRequiredCapabilityIds: setup.missingRequiredIds,
+    });
   }
 
   private async assertCheckoutStillClean(cwd: string): Promise<void> {

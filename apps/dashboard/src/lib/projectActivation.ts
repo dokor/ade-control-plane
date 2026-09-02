@@ -2,7 +2,7 @@ import type { ControlPlanePersistence, ProjectRecord, V0TaskRecord } from "@ade-
 
 import { createTask } from "./tasks.js";
 import type { GithubRuntime } from "./githubRuntime.js";
-import { prepareProjectSetup, type SetupMutationResult } from "./projectSetup.js";
+import { inspectProjectSetup, prepareProjectSetup, type SetupMutationResult } from "./projectSetup.js";
 
 export interface ProjectActivationResult extends SetupMutationResult {
   initializationTask: V0TaskRecord | null;
@@ -18,6 +18,13 @@ export async function prepareProjectActivation(
   if (!result.readiness.ready) {
     return { ...result, initializationTask: null };
   }
+  const readiness = await inspectProjectSetup(
+    project,
+    runtime,
+    new Date().toISOString(),
+    await persistence.githubWork.getProfile(project.id),
+  );
+  if (readiness.ready) return { ...result, readiness, initializationTask: null };
   const initializationTask = await createTask(persistence, {
     projectId: project.id,
     source: { type: "ade-initialize" },
@@ -27,5 +34,5 @@ export async function prepareProjectActivation(
     projectId: project.id,
     signaledAt: new Date().toISOString(),
   });
-  return { ...result, initializationTask };
+  return { ...result, readiness, initializationTask };
 }

@@ -161,6 +161,43 @@ test("runs ADE initialization before validating the newly created configuration"
       /may not have ADE configuration yet/,
     );
     assert.equal(github.createdPullRequests.length, 1);
+    assert.deepEqual(context.readinessProofs[0], {
+      projectId: "11111111-1111-4111-8111-111111111111",
+      status: "incompatible",
+      configVersion: "ade.project-setup/v1",
+      runtimeVersion: "0.7.0",
+      resolvedProfiles: [],
+      resolvedRules: [],
+      contextStatus: "unknown",
+      missingRequiredCapabilityIds: ["config.file"],
+      runnerCheckoutRef: "0123456789012345678901234567890123456789",
+      observedAt: now,
+    });
+  } finally {
+    await context.close();
+  }
+});
+
+test("records a merged setup checkout only after its read-only ADE check succeeds", async () => {
+  const context = await setup();
+  try {
+    context.task.source = { type: "ade-initialize" };
+    context.task.prompt = "Verify ADE setup after merge";
+    const commands = new SuccessfulCommands(context.task);
+    const github = new DeterministicFakeGithubClient();
+
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github,
+      commands,
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "SUCCESS");
+    assert.equal(commands.calls.some(({ executable }) => executable === "codex"), false);
+    assert.equal(github.createdPullRequests.length, 0);
+    assert.equal((context.readinessProofs[0] as { status?: string } | undefined)?.status, "compatible");
   } finally {
     await context.close();
   }
@@ -270,7 +307,9 @@ class SuccessfulCommands implements CommandRunner {
       return result("ADE configuration is missing", 1);
     }
     if (input.executable === "ade" && input.args[0] === "review") return result("", this.adeReviewExitCode);
-    if (input.executable === "ade" && input.args[0] === "setup") return result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"ready","missingRequiredIds":[]}');
+    if (input.executable === "ade" && input.args[0] === "setup") return this.adeConfigMissingUntilCodex && !this.codexStarted
+      ? result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"incomplete","missingRequiredIds":["config.file"]}', 1)
+      : result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"ready","missingRequiredIds":[]}');
     if (input.executable === "codex") {
       this.codexStarted = true;
       await input.onOutput?.({ stream: "stdout", message: "implementation completed" });
@@ -317,6 +356,7 @@ async function setup() {
     updatedAt: now,
   };
   const logs: V0TaskLogRecord[] = [];
+  const readinessProofs: unknown[] = [];
   const persistence = {
     projects: { getById: async (id: string) => id === project.id ? project : null },
     v0Tasks: {
@@ -344,11 +384,18 @@ async function setup() {
         return task;
       },
     },
+    githubWork: {
+      recordAdeReadiness: async (input: unknown) => {
+        readinessProofs.push(input);
+        return null;
+      },
+    },
   };
   return {
     projectRoot,
     task,
     logs,
+    readinessProofs,
     persistence,
     close: () => rm(projectRoot, { recursive: true, force: true }),
   };

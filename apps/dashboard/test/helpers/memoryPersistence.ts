@@ -246,6 +246,7 @@ export function createMemoryPersistence(
         return state.githubWorkItems.filter((item) => projectIds.includes(item.projectId));
       },
       async reconcile(input) {
+        const previous = state.githubWorkProfiles.find((entry) => entry.projectId === input.profile.projectId);
         const profile: GithubWorkProfileRecord = {
           projectId: input.profile.projectId,
           repositoryGithubId: input.profile.repositoryGithubId,
@@ -255,6 +256,14 @@ export function createMemoryPersistence(
           skillPaths: input.profile.skillPaths ?? [],
           reason: input.profile.reason,
           observedAt: input.profile.observedAt,
+          adeStatus: input.profile.adeStatus ?? previous?.adeStatus ?? "setup-required",
+          adeConfigVersion: input.profile.adeStatus === undefined ? previous?.adeConfigVersion ?? null : input.profile.adeConfigVersion ?? null,
+          adeRuntimeVersion: input.profile.adeStatus === undefined ? previous?.adeRuntimeVersion ?? null : input.profile.adeRuntimeVersion ?? null,
+          resolvedProfiles: input.profile.adeStatus === undefined ? previous?.resolvedProfiles ?? [] : input.profile.resolvedProfiles ?? [],
+          resolvedRules: input.profile.adeStatus === undefined ? previous?.resolvedRules ?? [] : input.profile.resolvedRules ?? [],
+          contextStatus: input.profile.adeStatus === undefined ? previous?.contextStatus ?? "unknown" : input.profile.contextStatus ?? "unknown",
+          missingRequiredCapabilityIds: input.profile.adeStatus === undefined ? previous?.missingRequiredCapabilityIds ?? [] : input.profile.missingRequiredCapabilityIds ?? [],
+          runnerCheckoutRef: input.profile.adeStatus === undefined ? previous?.runnerCheckoutRef ?? null : input.profile.runnerCheckoutRef ?? null,
         };
         const profileIndex = state.githubWorkProfiles.findIndex((entry) => entry.projectId === profile.projectId);
         if (profileIndex >= 0) state.githubWorkProfiles[profileIndex] = profile;
@@ -281,6 +290,25 @@ export function createMemoryPersistence(
           else state.githubWorkItems.push(item);
         }
         return state.githubWorkItems.filter((item) => item.projectId === profile.projectId);
+      },
+      async recordAdeReadiness(input) {
+        const index = state.githubWorkProfiles.findIndex((entry) => entry.projectId === input.projectId);
+        const previous = state.githubWorkProfiles[index];
+        if (!previous) return null;
+        const profile: GithubWorkProfileRecord = {
+          ...previous,
+          adeStatus: input.status,
+          adeConfigVersion: input.configVersion ?? null,
+          adeRuntimeVersion: input.runtimeVersion ?? null,
+          resolvedProfiles: input.resolvedProfiles ?? [],
+          resolvedRules: input.resolvedRules ?? [],
+          contextStatus: input.contextStatus ?? "unknown",
+          missingRequiredCapabilityIds: input.missingRequiredCapabilityIds ?? [],
+          runnerCheckoutRef: input.runnerCheckoutRef ?? null,
+          observedAt: input.observedAt,
+        };
+        state.githubWorkProfiles[index] = profile;
+        return profile;
       },
     },
     githubBotComments: {
