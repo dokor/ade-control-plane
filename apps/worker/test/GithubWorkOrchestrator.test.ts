@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { ControlPlanePersistence, ExecutionRecord, GithubWorkItemRecord, GithubWorkProfileRecord, ProjectRecord } from "@ade-control-plane/database";
-import type { GithubWorkReader } from "@ade-control-plane/github";
+import { GithubWorkAdapterError, type GithubWorkReader } from "@ade-control-plane/github";
 
 import { GithubWorkOrchestrator, type GithubWorkDispatchRequest } from "../src/GithubWorkOrchestrator.js";
 
@@ -17,7 +17,7 @@ function work(projectId: string, number: number, state: GithubWorkItemRecord["st
   return { id: `${projectId}-${number}`, projectId, repositoryGithubId: `${projectId}-repo`, contractVersion: "ade.github-work/v1", issueNumber: number, issueUrl: `https://github.com/dokor/${projectId}/issues/${number}`, state, priority, dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: LATER, present: true };
 }
 
-function harness(items: readonly GithubWorkItemRecord[]) {
+function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partial<GithubWorkReader> = {}) {
   const projects = [...new Set(items.map(({ projectId }) => projectId))].map((id) => project(id, id));
   const profiles: GithubWorkProfileRecord[] = [];
   const persisted: GithubWorkItemRecord[] = [];
@@ -93,12 +93,13 @@ function harness(items: readonly GithubWorkItemRecord[]) {
         expiresAt: item.expiresAt,
       })),
     getWorkItem: async () => null,
+    ...readerOverrides,
   };
   const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, now: () => new Date(NOW), dispatcher: { execute: async (request) => { dispatches.push(request); return { status: "succeeded" }; } }, notifier: {
     waitingHuman: async (_project, item) => { notifications.push({ kind: "waiting", issueNumber: item.issueNumber }); },
     failure: async (_project, item) => { notifications.push({ kind: "failure", issueNumber: item.issueNumber }); },
   } });
-  return { orchestrator, dispatches, executions, notifications };
+  return { orchestrator, dispatches, executions, notifications, profiles };
 }
 
 function updateExecution(executions: ExecutionRecord[], id: string, status: ExecutionRecord["status"]): ExecutionRecord {
@@ -141,6 +142,19 @@ test("a stale GitHub work projection is never dispatched", async () => {
   const { orchestrator, dispatches } = harness([stale]);
   const result = await orchestrator.runCycle();
   assert.equal(result.outcome, "idle");
+  assert.equal(dispatches.length, 0);
+});
+
+test("defers a rate-limited project instead of scheduling its last known GitHub work", async () => {
+  const { orchestrator, dispatches, profiles } = harness(
+    [work("alpha", 9, "ready", 80)],
+    { detectRepository: async () => { throw new GithubWorkAdapterError(429, "read profile", "2026-08-28T10:01:00.000Z"); } },
+  );
+
+  const result = await orchestrator.runCycle({ reconcile: "full" });
+  assert.equal(result.outcome, "idle");
+  assert.equal(result.nextWakeUpAt, "2026-08-28T10:01:00.000Z");
+  assert.equal(profiles[0]?.reason, "reconciliation-deferred");
   assert.equal(dispatches.length, 0);
 });
 

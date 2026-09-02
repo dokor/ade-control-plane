@@ -210,7 +210,8 @@ export type GithubWorkProfileReason =
   | "compatible"
   | "missing-profile"
   | "invalid-profile"
-  | "unsupported-profile";
+  | "unsupported-profile"
+  | "reconciliation-deferred";
 export type AdeProjectCompatibilityState =
   | "setup-required"
   | "validating"
