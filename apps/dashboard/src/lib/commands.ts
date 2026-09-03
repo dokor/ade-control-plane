@@ -229,6 +229,19 @@ async function resolvePayload(
     return { ...payload, retryability: classifyRetryability(execution) };
   }
 
+  if (request.type === "execution.cancel") {
+    const executionId = payload.executionId;
+    if (typeof executionId !== "string") return payload;
+    const execution = await context.persistence.executions.getById(executionId);
+    if (!execution) {
+      throw new ControlError("NOT_FOUND", "Execution is unknown to the control plane.");
+    }
+    if (!["queued", "leased", "dispatched", "running"].includes(execution.status)) {
+      throw new ControlError("INVALID_COMMAND", "Only an active execution can be cancelled.");
+    }
+    return payload;
+  }
+
   if (request.type === "ade.decide") {
     const { projectId, decisionRef, option } = payload;
     if (
@@ -295,6 +308,21 @@ async function applyCommand(
     case "execution.safe-retry":
       // Durable intent only. The worker owns dispatch; no entry point does.
       return "Safe retry queued; the worker will pick it up on its next cycle.";
+    case "execution.cancel": {
+      const cancelled = await persistence.executions.requestCancel(
+        command.executionId,
+        context.now,
+      );
+      if (cancelled) {
+        await persistence.wakeups?.signal({
+          reason: "execution-cancel-requested",
+          projectId: cancelled.projectId,
+          signaledAt: context.now,
+        });
+        return "Cancellation requested; the worker will stop the active execution.";
+      }
+      return "Execution was already finished before cancellation could be applied.";
+    }
     case "ade.decide": {
       const resolved = await persistence.adeDecisions.resolve(
         command.projectId,

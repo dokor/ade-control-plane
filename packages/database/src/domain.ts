@@ -90,6 +90,8 @@ export interface ExecutionRecord {
   workRef: string | null;
   capability: string;
   status: ExecutionStatus;
+  /** Set by an authenticated operator; the owning worker performs the stop. */
+  cancelRequested?: boolean;
   attempt: number;
   requestedAt: string;
   startedAt: string | null;

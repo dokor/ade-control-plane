@@ -480,6 +480,8 @@ export interface ExecutionRepository {
   listByProjectId(projectId: string, limit: number): Promise<readonly ExecutionRecord[]>;
   markDispatched(executionId: string, startedAt: string): Promise<ExecutionRecord>;
   markRunning(executionId: string, startedAt: string): Promise<ExecutionRecord>;
+  /** Records cancellation intent for an active execution without completing it. */
+  requestCancel(executionId: string, requestedAt: string): Promise<ExecutionRecord | null>;
   scheduleWithLease(
     input: ScheduleExecutionWithLeaseInput,
   ): Promise<ScheduledExecutionRecord | null>;

@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { Shell } from "../../components/Shell.js";
+import { ControlButton } from "../../components/ControlButton.js";
 import { TaskCancelButton } from "../../components/TaskCancelButton.js";
 import { TaskComposer } from "../../components/TaskComposer.js";
 import { requireAuthenticatedContext } from "../../lib/auth.js";
@@ -96,7 +97,19 @@ export default async function TasksPage() {
                 <div><dt>Execution</dt><dd>{dashboard.activeGithubWork.executionStatus ?? "reconciling"}</dd></div>
               </dl>
               <div className="actions">
-                <a className="button task-open" href={dashboard.activeGithubWork.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a>
+                <Link className="button task-open" href={dashboard.activeGithubWork.detailHref}>Open workflow</Link>
+                <a className="button" href={dashboard.activeGithubWork.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a>
+                {dashboard.activeGithubWork.executionId ? (
+                  <ControlButton
+                    type="execution.cancel"
+                    payload={{ executionId: dashboard.activeGithubWork.executionId }}
+                    label={dashboard.activeGithubWork.cancelRequested ? "Stop requested" : "Stop Codex"}
+                    variant="danger"
+                    confirm="Stop the active Codex process for this GitHub issue?"
+                    disabled={dashboard.activeGithubWork.cancelRequested}
+                    disabledReason="Cancellation was already requested."
+                  />
+                ) : null}
               </div>
             </div>
           ) : (
@@ -127,7 +140,7 @@ export default async function TasksPage() {
                   <p>{work.executionStatus ? `Execution ${work.executionStatus}` : "Awaiting worker reconciliation"}</p>
                   {work.executionError ? <p className="task-history-result failed">{work.executionError}</p> : null}
                 </div>
-                <div className="task-history-action"><a href={work.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a></div>
+                <div className="task-history-action"><Link href={work.detailHref}>Details -&gt;</Link></div>
               </article>
             ))}
           </div>

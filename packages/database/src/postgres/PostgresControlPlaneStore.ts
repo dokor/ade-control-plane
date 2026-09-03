@@ -204,6 +204,7 @@ function mapExecution(row: TimestampRow): ExecutionRecord {
     workRef: row.work_ref === null ? null : String(row.work_ref),
     capability: String(row.capability),
     status: row.status as ExecutionRecord["status"],
+    cancelRequested: Boolean(row.cancel_requested),
     attempt: Number(row.attempt),
     requestedAt: toIsoString(row.requested_at) ?? "",
     startedAt: toIsoString(row.started_at),
@@ -1489,6 +1490,19 @@ class PostgresExecutionRepository implements ExecutionRepository {
         releasedLease: releasedLeaseRow !== null,
       };
     });
+  }
+
+  public async requestCancel(executionId: string, requestedAt: string): Promise<ExecutionRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      `UPDATE executions
+       SET cancel_requested = true, updated_at = $2
+       WHERE id = $1
+         AND status IN ('queued', 'leased', 'dispatched', 'running')
+       RETURNING *`,
+      [executionId, requestedAt],
+    );
+    return row ? mapExecution(row) : null;
   }
 
   public async listReconciliationCandidates(

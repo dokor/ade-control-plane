@@ -841,6 +841,7 @@ const TIMELINE_ACTION_LABELS: Readonly<Record<string, string>> = {
 const COMMAND_LABELS: Readonly<Record<string, string>> = {
   "ade.decide": "Resolve ADE decision",
   "execution.safe-retry": "Request safe retry",
+  "execution.cancel": "Cancel active execution",
   "global.pause": "Pause global scheduling",
   "global.resume": "Resume global scheduling",
   "global.safe-mode": "Enable safe mode",

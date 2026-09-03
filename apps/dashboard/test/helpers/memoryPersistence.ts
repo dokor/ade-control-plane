@@ -490,6 +490,14 @@ export function createMemoryPersistence(
       async markRunning() {
         return unsupported("executions.markRunning");
       },
+      async requestCancel(executionId, requestedAt) {
+        const index = state.executions.findIndex(({ id }) => id === executionId);
+        const current = state.executions[index];
+        if (index < 0 || !current || !["queued", "leased", "dispatched", "running"].includes(current.status)) return null;
+        const updated = { ...current, cancelRequested: true, updatedAt: requestedAt };
+        state.executions[index] = updated;
+        return updated;
+      },
       async scheduleWithLease() {
         return unsupported("executions.scheduleWithLease");
       },

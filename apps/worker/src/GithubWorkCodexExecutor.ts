@@ -60,6 +60,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     let branchName: string | null = null;
     let usage: AgentUsageMetrics | undefined;
     try {
+      throwIfAborted(request.signal);
       const workflows = this.options.persistence?.deliveryWorkflows;
       const workflow = workflows
         ? request.resumeDecision && request.work.executionRef
@@ -107,7 +108,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       }
       if (workflow?.stage === "publishing" && workflow.branchName && workflow.headSha) {
         const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
-        const remoteHead = await this.git(checkout.root, ["ls-remote", "origin", `refs/heads/${workflow.branchName}`]);
+        const remoteHead = await this.git(checkout.root, ["ls-remote", "origin", `refs/heads/${workflow.branchName}`], request.signal);
         const sha = remoteHead.stdout.trim().split(/\s+/u)[0] ?? "";
         if (sha === workflow.headSha) {
           const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
@@ -136,6 +137,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         updates: Omit<AdeDeliveryWorkflowTransitionInput, "workflowId" | "expectedStage" | "stage" | "attempt" | "reason" | "idempotencyKey" | "occurredAt"> = {},
       ): Promise<void> => {
         if (!workflows || !workflow || checkpointStage === stage) return;
+        request.onStage?.(stage);
         await workflows.transition({
           workflowId: workflow.id, ...(checkpointStage ? { expectedStage: checkpointStage } : {}), stage,
           attempt: workflow.attempt, reason, idempotencyKey: `${request.executionId}:${stage}:${workflow.attempt}`,
@@ -146,20 +148,20 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       await checkpoint("planning", "Preparing the ADE issue lifecycle plan.");
       const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
       branchName = request.work.branchName ?? `ade/issue-${request.work.issueNumber}`;
-      const remote = await this.git(checkout.root, ["remote", "get-url", "origin"]);
+      const remote = await this.git(checkout.root, ["remote", "get-url", "origin"], request.signal);
       if (!matchesGithubRemote(remote.stdout, request.project.repositoryOwner, request.project.repositoryName)) {
         throw new GithubWorkExecutionError("REMOTE_MISMATCH", "Checkout origin does not match the registered GitHub repository.");
       }
-      const initialStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+      const initialStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"], request.signal);
       if (initialStatus.stdout.trim()) {
         throw new GithubWorkExecutionError("CHECKOUT_DIRTY", "Checkout contains changes from another operation.");
       }
       await this.mustRun("git fetch", {
         executable: "git", args: ["fetch", "--prune", "origin", checkout.baseBranch], cwd: checkout.root, env: this.gitEnvironment,
-      });
+      }, request.signal);
       await this.mustRun("git branch preparation", {
         executable: "git", args: ["switch", "--force-create", branchName, `origin/${checkout.baseBranch}`], cwd: checkout.root, env: this.gitEnvironment,
-      });
+      }, request.signal);
       let issue = await this.options.github.getIssueDetails(
         { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName },
         request.work.issueNumber,
@@ -168,24 +170,24 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       if (issue.updatedAt !== request.work.sourceUpdatedAt) {
         throw new GithubWorkExecutionError("GITHUB_ISSUE_STALE", "The GitHub issue changed after it was scheduled; reconcile it before retrying.");
       }
-      let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue });
-      let lifecycle = await this.planIssueLifecycle(checkout.root, issue);
+      let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(request.signal ? { signal: request.signal } : {}) });
+      let lifecycle = await this.planIssueLifecycle(checkout.root, issue, request.signal);
       if (lifecycle.action === "enrich") {
         await checkpoint("enriching", "ADE requested issue enrichment before development.");
         if (!lifecycle.enrichmentPrompt) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
-        const enrichment = await this.agentExecutor.execute({ cwd: checkout.root, prompt: lifecycle.enrichmentPrompt });
+        const enrichment = await this.agentExecutor.execute({ cwd: checkout.root, prompt: lifecycle.enrichmentPrompt, ...(request.signal ? { signal: request.signal } : {}) });
         if (enrichment.exitCode !== 0) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_FAILED", "ADE issue enrichment failed.");
         const enrichedBody = extractAgentText(enrichment.stdout);
         if (!enrichedBody || new TextEncoder().encode(enrichedBody).byteLength > 24 * 1024) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_INVALID", "ADE issue enrichment did not return a valid issue body.");
-        const changed = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+        const changed = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"], request.signal);
         if (changed.stdout.trim()) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_DIRTY", "Issue enrichment must not modify the repository.");
         const metadata = readGithubWorkMetadata(issue.body) ?? DEFAULT_GITHUB_WORK_METADATA;
         issue = await this.options.github.updateIssueBody(
           { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, request.work.issueNumber,
           upsertGithubWorkMetadata(enrichedBody, metadata),
         );
-        lifecycle = await this.planIssueLifecycle(checkout.root, issue);
-        plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue });
+        lifecycle = await this.planIssueLifecycle(checkout.root, issue, request.signal);
+        plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(request.signal ? { signal: request.signal } : {}) });
       } else if (lifecycle.action === "wait" || lifecycle.action === "none") {
         const decisionRef = `issue-${request.work.issueNumber}-${issue.updatedAt.replace(/[^0-9]/gu, "").slice(0, 14)}`;
         await this.options.persistence?.adeDecisions.upsert({
@@ -224,18 +226,21 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       const prepared = await this.deliveryRuntime.prepare({
         cwd: checkout.root,
         work,
+        ...(request.signal ? { signal: request.signal } : {}),
         contextProfile: this.options.adeContextProfile ?? plan.implementationProfile,
       });
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
         prompt: buildGithubWorkPrompt(request, lifecycle.implementationHandoff),
+        ...(request.signal ? { signal: request.signal } : {}),
       });
       usage = agentResult.usage;
       if (agentResult.exitCode !== 0) {
         throw new GithubWorkExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
       await checkpoint("validating", "Provider execution completed; validating its repository changes.");
-      const finalStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"]);
+      throwIfAborted(request.signal);
+      const finalStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"], request.signal);
       if (!finalStatus.stdout.trim()) {
         throw new GithubWorkExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");
       }
@@ -246,7 +251,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         agentExecutor: this.agentExecutor,
         prepared,
         plan,
+        ...(request.signal ? { signal: request.signal } : {}),
       });
+      throwIfAborted(request.signal);
       if (!plan.publicationReady) {
         throw new GithubWorkExecutionError("ADE_PUBLICATION_BLOCKED", `ADE has not opened the publication gate: ${plan.reason}`);
       }
@@ -257,10 +264,11 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         executable: "git",
         args: ["-c", "user.name=ADE Control Plane", "-c", "user.email=ade-control-plane@localhost", "-c", "core.hooksPath=/dev/null", "commit", "-m", `feat: implement GitHub issue #${request.work.issueNumber}`],
         cwd: checkout.root, env: this.gitEnvironment,
-      });
-      await this.mustRun("git push", { executable: "git", args: ["push", "--set-upstream", "origin", branchName], cwd: checkout.root, env: this.gitEnvironment });
-      const headSha = (await this.git(checkout.root, ["rev-parse", "HEAD"])).stdout.trim();
+      }, request.signal);
+      await this.mustRun("git push", { executable: "git", args: ["push", "--set-upstream", "origin", branchName], cwd: checkout.root, env: this.gitEnvironment }, request.signal);
+      const headSha = (await this.git(checkout.root, ["rev-parse", "HEAD"], request.signal)).stdout.trim();
       await checkpoint("publishing", "Branch pushed; reconciling pull request creation.", { branchName, headSha: /^[0-9a-f]{40,64}$/iu.test(headSha) ? headSha : null });
+      throwIfAborted(request.signal);
       const pullRequest = await this.options.github.findPullRequest?.(
         { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, branchName, checkout.baseBranch,
       ) ?? await this.options.github.createPullRequest(
@@ -287,6 +295,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       });
       return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, ...AdeDeliveryRuntime.provenanceSummary(review.provenance) } };
     } catch (error) {
+      if (request.signal?.aborted || isAbortError(error)) {
+        return { status: "cancelled", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), ...(branchName ? { resultSummary: { branchName } } : {}) };
+      }
       const failure = classifyFailure(error);
       return { status: "failed", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), errorCode: failure.code, errorSummary: failure.summary, ...(branchName ? { resultSummary: { branchName } } : {}) };
     }
@@ -295,22 +306,22 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
   private get gitEnvironment(): Readonly<Record<string, string>> { return this.options.gitEnvironment ?? {}; }
   private get codexEnvironment(): Readonly<Record<string, string>> { return this.options.codexEnvironment ?? {}; }
 
-  private async git(cwd: string, args: readonly string[]) {
-    const result = await this.options.commands.run({ executable: "git", args: ["-c", "core.hooksPath=/dev/null", ...args], cwd, env: this.gitEnvironment });
+  private async git(cwd: string, args: readonly string[], signal?: AbortSignal) {
+    const result = await this.options.commands.run({ executable: "git", args: ["-c", "core.hooksPath=/dev/null", ...args], cwd, env: this.gitEnvironment, ...(signal ? { signal } : {}) });
     if (result.exitCode !== 0) throw new GithubWorkExecutionError("GIT_COMMAND_FAILED", "A required Git operation failed.");
     return result;
   }
 
-  private async mustRun(label: string, input: Parameters<CommandRunner["run"]>[0]) {
-    const result = await this.options.commands.run(input);
+  private async mustRun(label: string, input: Parameters<CommandRunner["run"]>[0], signal?: AbortSignal) {
+    const result = await this.options.commands.run({ ...input, ...(signal ? { signal } : {}) });
     if (result.exitCode !== 0) {
       throw new GithubWorkExecutionError(`${label.toUpperCase().replace(/[^A-Z0-9]+/gu, "_")}_FAILED`, `${label} failed.`);
     }
     return result;
   }
 
-  private async planIssueLifecycle(cwd: string, issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string; updatedAt: string }) {
-    const result = await this.options.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue }) });
+  private async planIssueLifecycle(cwd: string, issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string; updatedAt: string }, signal?: AbortSignal) {
+    const result = await this.options.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue }), ...(signal ? { signal } : {}) });
     if (result.exitCode !== 0) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_FAILED", "ADE could not resolve the issue lifecycle.");
     let parsed: unknown;
     try { parsed = JSON.parse(result.stdout); } catch { throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE returned invalid lifecycle JSON."); }
@@ -323,6 +334,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
   }
 
   private async updateLifecycle(body: string, request: GithubWorkDispatchRequest, change: Partial<import("@ade-control-plane/github").GithubWorkMetadata>): Promise<void> {
+    throwIfAborted(request.signal);
     const metadata = { ...(readGithubWorkMetadata(body) ?? DEFAULT_GITHUB_WORK_METADATA), ...change };
     const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
     await this.options.github.updateIssueBody(repository, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
@@ -348,6 +360,17 @@ function classifyFailure(error: unknown): { code: string; summary: string } {
   if (error instanceof ProjectCheckoutError) return { code: error.code, summary: error.safeSummary };
   if (error instanceof GithubWorkExecutionError) return { code: error.code, summary: error.safeSummary };
   return { code: "EXECUTION_FAILED", summary: "GitHub work execution failed." };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  const error = new Error("GitHub work execution was cancelled.");
+  error.name = "AbortError";
+  throw error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 export interface ImplementationHandoff {
