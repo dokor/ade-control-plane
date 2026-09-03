@@ -28,7 +28,7 @@ const HELP_BY_KEY: Readonly<Record<string, SetupHelpContent>> = {
   "ade-config": {
     title: "ADE configuration",
     explanation: "This file declares the ADE contract and capabilities that the repository supports.",
-    steps: ["The expected file is `.ade/control-plane.json`.", "For a new project, use “Prepare setup” to have Control Plane propose the file in a PR.", "If the file is invalid, correct it manually; existing invalid files are deliberately never overwritten."],
+    steps: ["The expected file is `.ade/control-plane.json`.", "For a new project, use “Create setup PR” to have Control Plane propose the file in a PR.", "If the file is invalid, correct it manually; existing invalid files are deliberately never overwritten."],
     readyWhen: "The file contains the supported `ade.github-work-profile/v1` version and valid capability and skill path arrays.",
   },
   runtime: {
@@ -46,7 +46,7 @@ const HELP_BY_KEY: Readonly<Record<string, SetupHelpContent>> = {
   instructions: {
     title: "Project instructions",
     explanation: "Agent instructions give Codex or another provider the project-specific rules it must follow.",
-    steps: ["Add `AGENTS.md` or `CLAUDE.md` at the repository root.", "Describe conventions, useful commands, validation steps and constraints that are not obvious from the code.", "Use “Prepare setup” to let Control Plane propose a safe starter file when none exists."],
+    steps: ["Add `AGENTS.md` or `CLAUDE.md` at the repository root.", "Describe conventions, useful commands, validation steps and constraints that are not obvious from the code.", "Use “Create setup PR” to let Control Plane propose a safe starter file when none exists."],
     readyWhen: "At least one supported instruction file is present in the default branch.",
   },
   context: {
@@ -58,13 +58,13 @@ const HELP_BY_KEY: Readonly<Record<string, SetupHelpContent>> = {
   "issue-template": {
     title: "ADE issue template",
     explanation: "The template helps people create issues with the metadata expected by the ADE workflow.",
-    steps: ["Add `.github/ISSUE_TEMPLATE/ade-work.yml` to the default branch.", "Use “Prepare setup” to let Control Plane propose a starter template in a PR.", "Review the generated template and adapt it to your team’s issue-writing habits."],
+    steps: ["Add `.github/ISSUE_TEMPLATE/ade-work.yml` to the default branch.", "Use “Create setup PR” to let Control Plane propose a starter template in a PR.", "Review the generated template and adapt it to your team’s issue-writing habits."],
     readyWhen: "The template exists; this item is optional and does not block readiness.",
   },
   "github-labels": {
     title: "GitHub workflow labels",
     explanation: "ADE uses standard labels to express issue workflow states consistently across projects.",
-    steps: ["The expected labels are `ready-for-dev`, `waiting-human` and `blocked`.", "Use “Prepare setup” to create missing labels directly through the GitHub App.", "If labels are managed centrally, create them yourself with the expected names and refresh the checks."],
+    steps: ["The expected labels are `ready-for-dev`, `waiting-human` and `blocked`.", "Use “Create setup PR” to create missing labels directly through the GitHub App.", "If labels are managed centrally, create them yourself with the expected names and refresh the checks."],
     readyWhen: "All three standard labels exist in the repository.",
   },
 };

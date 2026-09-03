@@ -158,6 +158,14 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
 }
 
 .setup-refresh-summary p { margin: 3px 0 0; }
+.setup-process { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+.setup-process-step { display: flex; gap: 9px; align-items: flex-start; min-width: 0; padding: 11px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--bg) 70%, var(--surface)); }
+.setup-process-step.current { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.setup-process-step.complete .setup-process-index { color: var(--ok); border-color: var(--ok); }
+.setup-process-step.pending { opacity: .7; }
+.setup-process-index { display: inline-grid; flex: 0 0 auto; width: 22px; height: 22px; place-items: center; border: 1px solid var(--muted); border-radius: 50%; color: var(--muted); font-size: 12px; font-weight: 700; }
+.setup-process-copy { display: grid; gap: 3px; min-width: 0; }
+.setup-process-copy .muted { line-height: 1.35; }
 .setup-requirement { align-items: flex-start; padding: 9px 0; }
 .setup-requirement-copy { display: grid; gap: 2px; min-width: 0; }
 .setup-requirement-label { display: inline-flex; align-items: center; gap: 7px; }
@@ -196,6 +204,7 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
 @media (max-width: 560px) {
   .setup-refresh-summary { display: grid; }
   .setup-refresh-summary button { width: 100%; }
+  .setup-process { grid-template-columns: 1fr; }
 }
 
 .row {

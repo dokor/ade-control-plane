@@ -4,6 +4,7 @@ import test from "node:test";
 import { DeterministicFakeGithubClient, GITHUB_WORK_PROFILE_PATH, GITHUB_WORK_PROFILE_VERSION } from "@ade-control-plane/github";
 
 import { inspectProjectSetup, prepareProjectSetup } from "../src/lib/projectSetup.js";
+import { projectSetupPhase } from "../src/lib/projectSetupPhase.js";
 import type { GithubRuntime } from "../src/lib/githubRuntime.js";
 
 const project = {
@@ -152,4 +153,21 @@ test("includes every missing custom skill directory in the setup PR", async () =
   const files = client.createdSetupPullRequests[0]?.input.files ?? {};
   assert.ok(files[".agents/skills/README.md"]);
   assert.ok(files["project/ade-skills/README.md"]);
+});
+
+test("maps repository setup and runner proof to clear onboarding phases", () => {
+  const baseRequirements = [
+    { key: "repository-access", state: "ready" as const },
+    { key: "ade-config", state: "ready" as const },
+    { key: "skills", state: "ready" as const },
+    { key: "profiles", state: "ready" as const },
+    { key: "instructions", state: "ready" as const },
+    { key: "github-labels", state: "ready" as const },
+  ];
+  assert.equal(projectSetupPhase({ ready: false, requirements: [
+    { key: "repository-access", state: "ready" },
+    { key: "skills", state: "missing" },
+  ] }), "repository");
+  assert.equal(projectSetupPhase({ ready: false, requirements: [...baseRequirements, { key: "runner-capability-check", state: "missing" }] }), "initialization");
+  assert.equal(projectSetupPhase({ ready: true, requirements: [...baseRequirements, { key: "runner-capability-check", state: "ready" }] }), "ready");
 });
