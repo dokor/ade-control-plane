@@ -2,7 +2,7 @@
 
 Control Plane production images pin an exact `@alelouet/ai-delivery-engine`
 version through the `ADE_VERSION` build argument. The current supported runtime
-is `0.8.0`; the image also publishes the value as `ADE_RUNTIME_VERSION`.
+is `0.11.0`; the image also publishes the value as `ADE_RUNTIME_VERSION`.
 
 The worker records the runtime version in the task execution log, and the
 authenticated Dashboard overview displays it for operators. A future upgrade
@@ -24,7 +24,7 @@ runtime/config/context status, rule-pack and selected-profile identifiers,
 review status and attempt count.
 Raw provider output and chain-of-thought are not persisted.
 
-The supported 0.8.0 contract used by Control Plane is:
+The supported 0.11.0 contract used by Control Plane is:
 
 - Node.js 22 or newer;
 - `ade config validate` before agent work;

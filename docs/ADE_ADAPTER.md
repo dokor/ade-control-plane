@@ -26,7 +26,7 @@ Every response is validated before it is normalized. Unknown fields, unsupported
 
 ## Current ADE Availability
 
-AI Delivery Engine `0.7.0` exposes the versioned local project-setup contract
+AI Delivery Engine `0.11.0` exposes the versioned local project-setup contract
 through `ade setup contract --json` and `ade setup check --json`. It also
 exposes `project:status`, which reports local workflow artifacts but does not
 provide the machine operations above. It therefore cannot yet be used as a
