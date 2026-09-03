@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { handleDashboardApi } from "../../../../../../lib/dashboardApi.js";
-import { buildGithubWorkDetail, safePullRequestUrl, type GithubWorkDetailModel } from "../../../../../../lib/taskReadModel.js";
+import { toGithubWorkApiView } from "../../../../../../lib/githubWorkApi.js";
+import { buildGithubWorkDetail } from "../../../../../../lib/taskReadModel.js";
 import { getPersistence } from "../../../../../../lib/persistence.js";
 
 export const runtime = "nodejs";
@@ -26,55 +27,4 @@ export async function GET(
     if (!detail) return { body: { detail: null }, status: 404 };
     return { body: { detail: toGithubWorkApiView(detail) } };
   });
-}
-
-export function toGithubWorkApiView(detail: GithubWorkDetailModel) {
-  const { project, work, workflow, execution } = detail;
-  return {
-    project: {
-      id: project.id,
-      name: project.name,
-      repositoryOwner: project.repositoryOwner,
-      repositoryName: project.repositoryName,
-    },
-    issue: {
-      number: work.issueNumber,
-      url: work.issueUrl,
-      sourceUpdatedAt: work.sourceUpdatedAt,
-    },
-    state: work.state,
-    stage: workflow?.stage ?? work.state,
-    stageLabel: detail.stageLabel,
-    nextAction: detail.nextAction,
-    execution: execution
-      ? {
-          id: execution.id,
-          status: execution.status,
-          attempt: execution.attempt,
-          errorCode: execution.errorCode,
-          errorSummary: execution.errorSummary,
-          cancelRequested: execution.cancelRequested,
-        }
-      : null,
-    workflow: workflow
-      ? {
-          id: workflow.id,
-          stage: workflow.stage,
-          branchName: workflow.branchName,
-          headSha: workflow.headSha,
-          pullRequestNumber: workflow.pullRequestNumber,
-          pullRequestUrl: safePullRequestUrl(workflow.pullRequestUrl),
-          reconciliationRequired: workflow.reconciliationRequired,
-        }
-      : null,
-    heartbeatAt: detail.heartbeatAt,
-    deadlineAt: detail.deadlineAt,
-    decision: detail.decision,
-    provenance: detail.provenance,
-    validationSummary: detail.validationSummary,
-    reviewSummary: detail.reviewSummary,
-    transitions: detail.transitions,
-    events: detail.events,
-    firstFailure: detail.firstFailure,
-  };
 }

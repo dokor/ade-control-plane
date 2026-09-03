@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { toGithubWorkApiView } from "../src/app/api/tasks/github/[projectId]/[issueNumber]/route.js";
+import { toGithubWorkApiView } from "../src/lib/githubWorkApi.js";
 
 test("GitHub workflow API projection excludes raw project and issue content", () => {
   const view = toGithubWorkApiView({
