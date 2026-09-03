@@ -103,6 +103,8 @@ application stack or the privileged host runner.
 
 ## E2E acceptance
 
+- [ ] `/srv/apps/ade-control-plane/deploy/bin/qualify-h24 --require-backup` passes.
+- [ ] `deploy/bin/qualify-github-work` passes against the dedicated real test repository; see [`RELEASE_GATE.md`](RELEASE_GATE.md).
 - [ ] Dashboard opened through real production URL.
 - [ ] Test task created from Dashboard.
 - [ ] Task reaches RUNNING.
@@ -112,6 +114,7 @@ application stack or the privileged host runner.
 - [ ] Real GitHub PR created.
 - [ ] Dashboard reaches SUCCESS and links PR.
 - [ ] Raspberry rebooted and history remains available.
+- [ ] Human merge is explicit and Dashboard reaches `completed` for the same workflow.
 
 ## Recovery / incident
 

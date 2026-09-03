@@ -71,7 +71,7 @@ jobs:
           ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
 
       - name: Validate operational scripts
-        run: bash -n deploy/bin/deploy deploy/bin/qualify-h24 deploy/bin/worker-entrypoint
+        run: bash -n deploy/bin/deploy deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/worker-entrypoint
 
       - name: Typecheck
         run: pnpm typecheck
