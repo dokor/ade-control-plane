@@ -48,6 +48,11 @@ host address. Register projects with a numeric GitHub repository ID and a relati
 under `V0_PROJECTS_HOST`; the worker rejects absolute paths, traversal and
 GitHub remotes that do not match the registered repository.
 
+For a GitHub issue admitted while its registered checkout is not present, the
+GitHub worker reuses this same allow-listed provisioning path before starting
+ADE planning. A failed clone or remote verification is recorded as a deferred
+safe failure; it never runs the issue against another checkout.
+
 ## Start and verify
 
 ```bash

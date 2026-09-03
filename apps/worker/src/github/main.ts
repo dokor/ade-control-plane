@@ -9,7 +9,7 @@ import { loadV0WorkerRuntime, type V0WorkerRuntimeConfig } from "../v0/runtime.j
 import { V0TaskExecutor } from "../v0/V0TaskExecutor.js";
 import { V0TaskWorker } from "../v0/V0TaskWorker.js";
 import { ProjectDeletionProcessor } from "../v0/ProjectDeletionProcessor.js";
-import { provisionRegisteredProjects } from "../v0/ProjectProvisioner.js";
+import { provisionProjectCheckout, provisionRegisteredProjects } from "../v0/ProjectProvisioner.js";
 import { GithubWorkCodexExecutor } from "../GithubWorkCodexExecutor.js";
 import { AdeDeliveryRuntime } from "../AdeDeliveryRuntime.js";
 import { GithubWorkOrchestrator } from "../GithubWorkOrchestrator.js";
@@ -74,6 +74,10 @@ async function main(): Promise<void> {
         deliveryRuntime,
         applyHumanDecision: (input) => deliveryRuntime.applyHumanDecision(input),
         persistence: store,
+        provisionCheckout: (project, signal) => provisionProjectCheckout({
+          persistence: { auditEvents: store.auditEvents }, commands, projectRoot: config.projectRoot,
+          gitEnvironment: config.gitEnvironment, project, ...(signal ? { signal } : {}),
+        }),
       }),
       provider: config.agentProvider,
       agentUsage: store.agentUsage,
