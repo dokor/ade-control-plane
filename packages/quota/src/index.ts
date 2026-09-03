@@ -330,12 +330,12 @@ export class QuotaRefreshCoordinator {
     this.now = options.now ?? (() => new Date());
   }
 
-  public async refresh(): Promise<QuotaRefreshResult> {
+  public async refresh(force = false): Promise<QuotaRefreshResult> {
     const asOf = this.now().toISOString();
     const policy = typeof this.options.policy === "function"
       ? await this.options.policy()
       : this.options.policy ?? DEFAULT_QUOTA_POLICY;
-    if (this.cached && !evaluateQuota(this.cached, policy, asOf).refreshRequired) {
+    if (!force && this.cached && !evaluateQuota(this.cached, policy, asOf).refreshRequired) {
       const decision = evaluateQuota(this.cached, policy, asOf);
       await this.recordTransition(decision);
       return {
