@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ControlPlanePersistence, ExecutionRecord, GithubWorkItemRecord, GithubWorkProfileRecord, ProjectRecord } from "@ade-control-plane/database";
+import type { ControlPlanePersistence, ExecutionRecord, GithubWorkItemRecord, GithubWorkProfileRecord, ProjectRecord, ReconciliationCandidate } from "@ade-control-plane/database";
 import { GithubWorkAdapterError, type GithubWorkReader } from "@ade-control-plane/github";
 
 import { GithubWorkOrchestrator, type GithubWorkDispatchRequest } from "../src/GithubWorkOrchestrator.js";
@@ -21,17 +21,20 @@ function harness(
   items: readonly GithubWorkItemRecord[],
   readerOverrides: Partial<GithubWorkReader> = {},
   thirdArgument?: { projectId: string; decisionRef: string; option: string } | ((request: GithubWorkDispatchRequest, executions: ExecutionRecord[]) => Promise<{ status: "succeeded" | "failed" | "cancelled" }>),
+  orchestratorOptions: Partial<ConstructorParameters<typeof GithubWorkOrchestrator>[0]> = {},
+  reconciliationCandidates: readonly ReconciliationCandidate[] = [],
 ) {
   const resolvedDecision = typeof thirdArgument === "function" ? undefined : thirdArgument;
   const dispatchOverride = typeof thirdArgument === "function" ? thirdArgument : undefined;
   const projects = [...new Set(items.map(({ projectId }) => projectId))].map((id) => project(id, id));
   const profiles: GithubWorkProfileRecord[] = [];
   const persisted: GithubWorkItemRecord[] = [];
-  const executions: ExecutionRecord[] = [];
+  const executions: ExecutionRecord[] = reconciliationCandidates.map(({ execution }) => ({ ...execution }));
   const activeKeys = new Set<string>();
   const leaseByExecution = new Map<string, string>();
   const dispatches: GithubWorkDispatchRequest[] = [];
   const notifications: { kind: "waiting" | "failure"; issueNumber: number }[] = [];
+  const leaseHeartbeats: string[] = [];
   const persistence = {
     settings: { get: async () => ({ schedulerMode: "running", quotaThrottledPercent: 70, quotaDrainingPercent: 85, quotaBlockedPercent: 95, quotaStaleAfterMs: 300_000, updatedAt: NOW, updatedBy: "test" }) },
     projects: { list: async () => projects },
@@ -73,13 +76,19 @@ function harness(
       },
       markDispatched: async (id: string) => updateExecution(executions, id, "dispatched"),
       markRunning: async (id: string) => updateExecution(executions, id, "running"),
-      complete: async (input: { executionId: string; status: ExecutionRecord["status"]; resultSummary?: ExecutionRecord["resultSummary"] }) => {
+      complete: async (input: { executionId: string; status: ExecutionRecord["status"]; resultSummary?: ExecutionRecord["resultSummary"]; errorCode?: string | null; errorSummary?: string | null }) => {
         const execution = updateExecution(executions, input.executionId, input.status);
         execution.resultSummary = input.resultSummary ?? null;
+        execution.errorCode = input.errorCode ?? null;
+        execution.errorSummary = input.errorSummary ?? null;
         const lease = leaseByExecution.get(input.executionId);
         if (lease) activeKeys.delete(lease);
         return { execution, applied: true, releasedLease: true };
       },
+      listReconciliationCandidates: async () => reconciliationCandidates,
+    },
+    executionLeases: {
+      heartbeat: async (executionId: string) => { leaseHeartbeats.push(executionId); return {}; },
     },
     auditEvents: { append: async () => ({}) },
   } as unknown as ControlPlanePersistence;
@@ -107,14 +116,14 @@ function harness(
     getWorkItem: async () => null,
     ...readerOverrides,
   };
-  const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, cancelPollMs: 5, now: () => new Date(NOW), dispatcher: { execute: async (request) => {
+  const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, cancelPollMs: 5, now: () => new Date(NOW), ...orchestratorOptions, dispatcher: { execute: async (request) => {
     dispatches.push(request);
     return dispatchOverride ? dispatchOverride(request, executions) : { status: "succeeded" };
   } }, notifier: {
     waitingHuman: async (_project, item) => { notifications.push({ kind: "waiting", issueNumber: item.issueNumber }); },
     failure: async (_project, item) => { notifications.push({ kind: "failure", issueNumber: item.issueNumber }); },
   } });
-  return { orchestrator, dispatches, executions, notifications, profiles };
+  return { orchestrator, dispatches, executions, notifications, profiles, leaseHeartbeats };
 }
 
 function updateExecution(executions: ExecutionRecord[], id: string, status: ExecutionRecord["status"]): ExecutionRecord {
@@ -170,6 +179,46 @@ test("cancels only the active GitHub execution and releases its lease", async ()
 
   assert.equal(dispatches[0]?.signal?.aborted, true);
   assert.equal(executions[0]?.status, "cancelled");
+});
+
+test("renews a long-running GitHub execution lease", async () => {
+  const context = harness(
+    [work("alpha", 9, "ready", 80)],
+    {},
+    async () => new Promise((resolve) => setTimeout(() => resolve({ status: "succeeded" }), 20)),
+    { heartbeatIntervalMs: 5, workflowTimeoutMs: 100 },
+  );
+  await context.orchestrator.runCycle();
+  assert.ok(context.leaseHeartbeats.length >= 1, `heartbeats=${context.leaseHeartbeats.length}`);
+});
+
+test("turns a deadline expiry into an unknown reconciliation candidate", async () => {
+  const context = harness(
+    [work("alpha", 9, "ready", 80)],
+    {},
+    async (request) => new Promise((resolve) => request.signal?.addEventListener("abort", () => resolve({ status: "cancelled" }), { once: true })),
+    { heartbeatIntervalMs: 50, workflowTimeoutMs: 5 },
+  );
+  await context.orchestrator.runCycle();
+  assert.equal(context.executions[0]?.status, "unknown");
+  assert.equal(context.executions[0]?.errorCode, "GITHUB_WORK_TIMEOUT");
+});
+
+test("reconciles stale GitHub executions before they can be retried", async () => {
+  const stale: ReconciliationCandidate = {
+    reason: "stale-lease",
+    lease: null,
+    execution: {
+      id: "stale-execution", projectId: "alpha", runnerId: "runner", adeExecutionRef: null,
+      workRef: "github:issue:9", capability: "github-work.codex", status: "running", attempt: 1,
+      requestedAt: NOW, startedAt: NOW, finishedAt: null, resultSummary: null, errorCode: null,
+      errorSummary: null, createdAt: NOW, updatedAt: NOW,
+    },
+  };
+  const context = harness([work("alpha", 9, "ready", 80)], {}, undefined, {}, [stale]);
+  await context.orchestrator.reconcileExecutions();
+  assert.equal(context.executions.find(({ id }) => id === "stale-execution")?.status, "unknown");
+  assert.equal(context.executions.find(({ id }) => id === "stale-execution")?.errorCode, "GITHUB_WORK_RECONCILIATION_REQUIRED");
 });
 
 test("a stale GitHub work projection is never dispatched", async () => {

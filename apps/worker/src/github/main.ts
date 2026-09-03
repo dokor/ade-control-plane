@@ -86,8 +86,12 @@ async function main(): Promise<void> {
         client: github,
         dashboardUrl: config.dashboardUrl,
       }),
+      heartbeatIntervalMs: config.heartbeatIntervalMs,
+      stageTimeoutMs: config.githubStageTimeoutMs,
+      workflowTimeoutMs: config.githubWorkflowTimeoutMs,
     });
     const runner = await ensureLocalRunner(store, config.agentProvider);
+    await orchestrator.reconcileExecutions();
     const workerStartedAt = new Date().toISOString();
     await recordWorkerAudit(store, "worker.started", { workerStartedAt, reconcileIntervalMs: config.fullReconcileIntervalMs }).catch(() => undefined);
     stopWakeups = await store.wakeups?.listen((event) => wake.wake(event));

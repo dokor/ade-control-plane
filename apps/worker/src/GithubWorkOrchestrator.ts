@@ -31,6 +31,8 @@ export interface GithubWorkDispatchRequest {
     option: string;
     resolvedBy: string;
   };
+  /** Internal stage notification used to renew the bounded stage deadline. */
+  onStage?(stage: string): void;
 }
 
 export interface GithubWorkDispatchResult {
@@ -65,6 +67,9 @@ export interface GithubWorkOrchestratorOptions {
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
   leaseDurationMs?: number;
   cancelPollMs?: number;
+  heartbeatIntervalMs?: number;
+  stageTimeoutMs?: number;
+  workflowTimeoutMs?: number;
   reconciliationBackoffBaseMs?: number;
   reconciliationBackoffMaxMs?: number;
   now?(): Date;
@@ -84,6 +89,9 @@ export class GithubWorkOrchestrator {
   private readonly now: () => Date;
   private readonly leaseDurationMs: number;
   private readonly cancelPollMs: number;
+  private readonly heartbeatIntervalMs: number;
+  private readonly stageTimeoutMs: number;
+  private readonly workflowTimeoutMs: number;
   private readonly reconciliationBackoffBaseMs: number;
   private readonly reconciliationBackoffMaxMs: number;
   private readonly reconciliationBackoff = new Map<string, { failures: number; retryAt: string }>();
@@ -92,6 +100,9 @@ export class GithubWorkOrchestrator {
     this.now = options.now ?? (() => new Date());
     this.leaseDurationMs = options.leaseDurationMs ?? 15 * 60 * 1_000;
     this.cancelPollMs = positiveDuration(options.cancelPollMs, 1_000);
+    this.heartbeatIntervalMs = positiveDuration(options.heartbeatIntervalMs, Math.max(1_000, Math.floor(this.leaseDurationMs / 3)));
+    this.stageTimeoutMs = positiveDuration(options.stageTimeoutMs, 15 * 60 * 1_000);
+    this.workflowTimeoutMs = positiveDuration(options.workflowTimeoutMs, 60 * 60 * 1_000);
     this.reconciliationBackoffBaseMs = positiveDuration(options.reconciliationBackoffBaseMs, 30_000);
     this.reconciliationBackoffMaxMs = Math.max(this.reconciliationBackoffBaseMs, positiveDuration(options.reconciliationBackoffMaxMs, 15 * 60 * 1_000));
   }
@@ -99,6 +110,31 @@ export class GithubWorkOrchestrator {
   public async reconcileAll(): Promise<void> {
     const projects = await this.options.persistence.projects.list();
     for (const project of projects) await this.reconcileProject(project);
+  }
+
+  /**
+   * Converts active GitHub-work ownership left by a crashed process into an
+   * explicit reconciliation candidate before new work can be scheduled.
+   * Unknown outcomes are never retried automatically.
+   */
+  public async reconcileExecutions(): Promise<void> {
+    const candidates = await this.options.persistence.executions.listReconciliationCandidates(this.now().toISOString());
+    for (const candidate of candidates) {
+      if (!candidate.execution.workRef?.startsWith("github:issue:")) continue;
+      await this.options.persistence.executions.complete({
+        executionId: candidate.execution.id,
+        status: "unknown",
+        finishedAt: this.now().toISOString(),
+        errorCode: "GITHUB_WORK_RECONCILIATION_REQUIRED",
+        errorSummary: "The previous worker stopped before GitHub work completion was confirmed.",
+        releaseReason: "github-work-startup-reconciliation",
+        auditEvent: {
+          occurredAt: this.now().toISOString(), category: "execution", severity: "warning", actorType: "system",
+          projectId: candidate.execution.projectId, executionId: candidate.execution.id, runnerId: candidate.execution.runnerId,
+          action: "github-work.startup-reconciliation", result: "unknown", metadata: { recoveryReason: candidate.reason },
+        },
+      });
+    }
   }
 
   public async runCycle(input: { reconcile?: "full" | "targeted" | "none"; projectId?: string } = {}): Promise<GithubWorkCycleResult> {
@@ -234,17 +270,23 @@ export class GithubWorkOrchestrator {
       }
     } catch (error) {
       const cancelled = error instanceof GithubExecutionCancelledError;
+      const timedOut = error instanceof GithubExecutionTimeoutError;
+      const leaseLost = error instanceof GithubLeaseLostError;
+      const unknown = timedOut || leaseLost;
+      const timeoutCode = timedOut && error.kind === "stage" ? "GITHUB_STAGE_TIMEOUT" : "GITHUB_WORK_TIMEOUT";
       await store.executions.complete({
-        executionId: scheduled.execution.id, status: cancelled ? "cancelled" : "failed", finishedAt: this.now().toISOString(),
-        errorCode: cancelled ? null : "AGENT_DISPATCH_FAILED", errorSummary: cancelled ? null : "The code-agent dispatch failed.",
-        releaseReason: cancelled ? "github-work-cancelled" : "github-work-dispatch-failed",
+        executionId: scheduled.execution.id, status: unknown ? "unknown" : cancelled ? "cancelled" : "failed", finishedAt: this.now().toISOString(),
+        errorCode: unknown ? (timedOut ? timeoutCode : "GITHUB_LEASE_LOST") : cancelled ? null : "AGENT_DISPATCH_FAILED",
+        errorSummary: unknown ? (timedOut ? "The GitHub-work deadline elapsed before completion was confirmed." : "The execution lease could not be renewed; reconcile before retrying.") : cancelled ? null : "The code-agent dispatch failed.",
+        releaseReason: unknown ? (timedOut ? "github-work-timeout" : "github-work-lease-lost") : cancelled ? "github-work-cancelled" : "github-work-dispatch-failed",
         auditEvent: {
           occurredAt: this.now().toISOString(), category: "execution", severity: cancelled ? "info" : "warning", actorType: "system",
           projectId: project.id, runnerId: decision.selected.runnerId,
-          action: cancelled ? "github-work.cancelled" : "github-work.dispatch-failed", result: cancelled ? "cancelled" : "failed", metadata: { issueNumber: selection.item.issueNumber },
+          action: unknown ? "github-work.reconciliation-required" : cancelled ? "github-work.cancelled" : "github-work.dispatch-failed",
+          result: unknown ? "unknown" : cancelled ? "cancelled" : "failed", metadata: { issueNumber: selection.item.issueNumber },
         },
       });
-      if (cancelled) return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
+      if (cancelled || unknown) return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
       await this.options.agentUsage?.record({
         executionId: scheduled.execution.id,
         projectId: project.id,
@@ -264,6 +306,8 @@ export class GithubWorkOrchestrator {
   private async dispatchWithCancellation(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult> {
     const controller = new AbortController();
     let checking = false;
+    let timedOut: "stage" | "workflow" | false = false;
+    let leaseLost = false;
     const checkCancellation = async (): Promise<void> => {
       if (checking || controller.signal.aborted) return;
       checking = true;
@@ -274,16 +318,59 @@ export class GithubWorkOrchestrator {
       }
     };
     await checkCancellation();
+    const renewLease = async (): Promise<void> => {
+      if (controller.signal.aborted) return;
+      try {
+        const heartbeatAt = this.now().toISOString();
+        await this.options.persistence.executionLeases.heartbeat(
+          request.executionId,
+          this.options.ownerId,
+          heartbeatAt,
+          new Date(this.now().getTime() + this.leaseDurationMs).toISOString(),
+        );
+      } catch {
+        leaseLost = true;
+        controller.abort();
+      }
+    };
+    const workflowTimeout = setTimeout(() => {
+      timedOut = "workflow";
+      controller.abort();
+    }, this.workflowTimeoutMs);
+    workflowTimeout.unref?.();
+    let stageTimeout: NodeJS.Timeout | undefined;
+    const armStageTimeout = (): void => {
+      if (stageTimeout) clearTimeout(stageTimeout);
+      stageTimeout = setTimeout(() => {
+        timedOut = "stage";
+        controller.abort();
+      }, this.stageTimeoutMs);
+      stageTimeout.unref?.();
+    };
+    armStageTimeout();
+    const heartbeat = setInterval(() => { void renewLease(); }, this.heartbeatIntervalMs);
+    heartbeat.unref?.();
     const interval = setInterval(() => { void checkCancellation(); }, this.cancelPollMs);
     interval.unref?.();
     try {
-      const result = await this.options.dispatcher.execute({ ...request, signal: controller.signal });
+      const result = await this.options.dispatcher.execute({
+        ...request,
+        signal: controller.signal,
+        onStage: () => armStageTimeout(),
+      });
+      if (timedOut) throw new GithubExecutionTimeoutError(timedOut);
+      if (leaseLost) throw new GithubLeaseLostError();
       if (controller.signal.aborted && result.status !== "cancelled") throw new GithubExecutionCancelledError();
       return result;
     } catch (error) {
+      if (timedOut) throw new GithubExecutionTimeoutError(timedOut);
+      if (leaseLost) throw new GithubLeaseLostError();
       if (controller.signal.aborted) throw new GithubExecutionCancelledError();
       throw error;
     } finally {
+      clearTimeout(workflowTimeout);
+      if (stageTimeout) clearTimeout(stageTimeout);
+      clearInterval(heartbeat);
       clearInterval(interval);
     }
   }
@@ -434,6 +521,20 @@ class GithubExecutionCancelledError extends Error {
   public constructor() {
     super("GitHub work execution was cancelled.");
     this.name = "GithubExecutionCancelledError";
+  }
+}
+
+class GithubExecutionTimeoutError extends Error {
+  public constructor(public readonly kind: "stage" | "workflow") {
+    super("GitHub work exceeded its deadline.");
+    this.name = "GithubExecutionTimeoutError";
+  }
+}
+
+class GithubLeaseLostError extends Error {
+  public constructor() {
+    super("GitHub work lost its execution lease.");
+    this.name = "GithubLeaseLostError";
   }
 }
 
