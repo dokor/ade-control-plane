@@ -137,6 +137,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         updates: Omit<AdeDeliveryWorkflowTransitionInput, "workflowId" | "expectedStage" | "stage" | "attempt" | "reason" | "idempotencyKey" | "occurredAt"> = {},
       ): Promise<void> => {
         if (!workflows || !workflow || checkpointStage === stage) return;
+        request.onStage?.(stage);
         await workflows.transition({
           workflowId: workflow.id, ...(checkpointStage ? { expectedStage: checkpointStage } : {}), stage,
           attempt: workflow.attempt, reason, idempotencyKey: `${request.executionId}:${stage}:${workflow.attempt}`,
