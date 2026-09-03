@@ -1,0 +1,71 @@
+{
+  "ignore": [
+    ".env*",
+    "dist/**",
+    "node_modules/**",
+    ".next/**",
+    "coverage/**",
+    "outputs/**"
+  ],
+  "sensitive": [
+    ".env*",
+    "**/*.pem",
+    "**/*.key",
+    "**/secrets.*"
+  ],
+  "tools": [
+    "typecheck",
+    "test"
+  ],
+  "packs": [
+    "development"
+  ],
+  "profiles": {
+    "ci": {
+      "mode": "deterministic",
+      "context": "compact",
+      "privacy": "strict"
+    },
+    "po-pm": {
+      "mode": "assisted",
+      "context": "compact",
+      "allowProvider": true,
+      "tokenBudget": 12000,
+      "privacy": "strict"
+    },
+    "normal": {
+      "mode": "assisted",
+      "context": "compact",
+      "allowProvider": true,
+      "tokenBudget": 12000,
+      "privacy": "strict"
+    }
+  },
+  "context": {
+    "docsDir": "docs",
+    "adrDir": "docs/DECISIONS",
+    "outputDir": "outputs/context"
+  },
+  "output": {
+    "formats": [
+      "markdown",
+      "json"
+    ]
+  },
+  "issueLifecycle": {
+    "enrichment": {
+      "enabled": true,
+      "profile": "po-pm",
+      "minimumAcceptanceCriteria": 3
+    },
+    "priority": 50,
+    "retryPolicy": "reconcile-first",
+    "deliveryPlan": {
+      "implementationProfile": "normal",
+      "reviewProfiles": [],
+      "validationRuleIds": [],
+      "maxCorrectionAttempts": 1,
+      "requireHumanApprovalBeforePublish": true
+    }
+  }
+}
