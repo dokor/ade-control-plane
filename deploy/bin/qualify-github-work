@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Production-like black-box qualification for one GitHub issue. This command
+# talks only to the public Dashboard API and GitHub CLI; it never reads issue
+# bodies, sends credentials to ADE, auto-merges a PR or changes scheduler state.
+
+readonly DASHBOARD_URL="${ADE_RELEASE_GATE_DASHBOARD_URL:-}"
+readonly PROJECT_ID="${ADE_RELEASE_GATE_PROJECT_ID:-}"
+readonly ISSUE_NUMBER="${ADE_RELEASE_GATE_ISSUE_NUMBER:-}"
+readonly REPOSITORY="${ADE_RELEASE_GATE_REPOSITORY:-}"
+operator_password="${ADE_RELEASE_GATE_OPERATOR_PASSWORD:-}"
+unset ADE_RELEASE_GATE_OPERATOR_PASSWORD
+readonly TIMEOUT_SECONDS="${ADE_RELEASE_GATE_TIMEOUT_SECONDS:-3600}"
+readonly POLL_SECONDS="${ADE_RELEASE_GATE_POLL_SECONDS:-10}"
+readonly WAIT_FOR_MERGE="${ADE_RELEASE_GATE_WAIT_FOR_MERGE:-false}"
+readonly ALLOW_EXISTING_PR="${ADE_RELEASE_GATE_ALLOW_EXISTING_PR:-false}"
+readonly ALLOW_HTTP="${ADE_RELEASE_GATE_ALLOW_HTTP:-false}"
+readonly EXPECTED_BRANCH="ade/issue-${ISSUE_NUMBER}"
+
+readonly WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ade-release-gate.XXXXXX")"
+readonly COOKIE_JAR="${WORK_DIR}/cookies"
+readonly RESPONSE="${WORK_DIR}/response"
+readonly DETAIL="${WORK_DIR}/detail"
+readonly STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+readonly REPORT_PATH="${ADE_RELEASE_GATE_REPORT:-/tmp/ade-release-gate-${ISSUE_NUMBER}-$(date -u +%Y%m%dT%H%M%SZ).md}"
+readonly BASE_URL="${DASHBOARD_URL%/}"
+
+stage="not-started"
+pr_url=""
+pr_number=""
+outcome="failed"
+health_ok=false
+auth_ok=false
+issue_ok=false
+admission_ok=false
+detail_ok=false
+branch_ok=false
+merge_ok=false
+
+cleanup() { rm -rf "$WORK_DIR"; }
+trap cleanup EXIT
+
+die() {
+  printf 'GitHub release gate failed: %s\n' "$1" >&2
+  write_report
+  exit 1
+}
+
+require_command() { command -v "$1" >/dev/null 2>&1 || die "$1 is unavailable"; }
+
+[[ -n "$DASHBOARD_URL" ]] || die "ADE_RELEASE_GATE_DASHBOARD_URL is required"
+[[ -n "$PROJECT_ID" ]] || die "ADE_RELEASE_GATE_PROJECT_ID is required"
+[[ -n "$ISSUE_NUMBER" && "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || die "ADE_RELEASE_GATE_ISSUE_NUMBER must be a positive integer"
+[[ -n "$REPOSITORY" && "$REPOSITORY" =~ ^[^/]+/[^/]+$ ]] || die "ADE_RELEASE_GATE_REPOSITORY must be owner/name"
+[[ -n "$operator_password" ]] || die "ADE_RELEASE_GATE_OPERATOR_PASSWORD is required"
+[[ "$PROJECT_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || die "ADE_RELEASE_GATE_PROJECT_ID must be a UUID"
+[[ "$TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "ADE_RELEASE_GATE_TIMEOUT_SECONDS must be positive"
+[[ "$POLL_SECONDS" =~ ^[1-9][0-9]*$ ]] || die "ADE_RELEASE_GATE_POLL_SECONDS must be positive"
+[[ "$WAIT_FOR_MERGE" == true || "$WAIT_FOR_MERGE" == false ]] || die "ADE_RELEASE_GATE_WAIT_FOR_MERGE must be true or false"
+[[ "$ALLOW_EXISTING_PR" == true || "$ALLOW_EXISTING_PR" == false ]] || die "ADE_RELEASE_GATE_ALLOW_EXISTING_PR must be true or false"
+
+if [[ "$DASHBOARD_URL" != https://* && "$ALLOW_HTTP" != true ]]; then
+  die "Dashboard URL must use HTTPS (set ADE_RELEASE_GATE_ALLOW_HTTP=true only for a controlled local test)"
+fi
+
+require_command curl
+require_command gh
+require_command jq
+
+write_report() {
+  local report_dir
+  report_dir="$(dirname "$REPORT_PATH")"
+  mkdir -p "$report_dir"
+  umask 077
+  {
+    printf '# ADE GitHub release gate\n\n'
+    printf -- '- Outcome: `%s`\n' "$outcome"
+    printf -- '- Started at: `%s`\n' "$STARTED_AT"
+    printf -- '- Dashboard: `%s`\n' "$BASE_URL"
+    printf -- '- Repository: `%s`\n' "$REPOSITORY"
+    printf -- '- Issue: `#%s`\n' "$ISSUE_NUMBER"
+    printf -- '- Last durable stage: `%s`\n' "$stage"
+    if [[ -n "$pr_url" ]]; then printf -- '- Pull request: [%s](%s)\n' "#${pr_number:-?}" "$pr_url"; fi
+    printf '\n## Checks\n\n'
+    printf -- '- Dashboard health endpoint: `%s`\n' "$health_ok"
+    printf -- '- Operator authentication: `%s` (password omitted from evidence)\n' "$auth_ok"
+    printf -- '- Open GitHub issue admission: `%s`\n' "$admission_ok"
+    printf -- '- Sanitized durable workflow detail: `%s`\n' "$detail_ok"
+    printf -- '- GitHub PR branch correlation: `%s` (`%s`)\n' "$branch_ok" "$EXPECTED_BRANCH"
+    printf -- '- Human merge and Dashboard completion: `%s`\n' "$merge_ok"
+    if [[ "$outcome" == passed* ]]; then
+      printf -- '- GitHub PR branch was verified as `%s`.\n' "$EXPECTED_BRANCH"
+      if [[ "$WAIT_FOR_MERGE" == true ]]; then printf -- '- Human merge was observed and Dashboard completion was verified.\n'; else printf -- '- PR reached the explicit human-review gate; merge was intentionally not automated.\n'; fi
+    fi
+    printf '\nThis report contains identifiers and bounded status evidence only; no issue body, prompt, source, log stream or credential is copied.\n'
+  } >"$REPORT_PATH"
+}
+
+health_status="$(curl -sS -o "$RESPONSE" -w '%{http_code}' "$BASE_URL/api/health" || true)"
+[[ "$health_status" == 200 ]] || die "Dashboard health check returned HTTP $health_status"
+health_ok=true
+
+# Keep the password on stdin of jq/curl rather than in either process's argv.
+login_payload="$(printf '%s' "$operator_password" | jq -Rs '{password: .}')"
+unset operator_password
+login_status="$(printf '%s' "$login_payload" | curl -sS -o "$RESPONSE" -w '%{http_code}' \
+  -c "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' --data-binary @- "$BASE_URL/api/session" || true)"
+unset login_payload
+[[ "$login_status" == 200 ]] || die "Dashboard authentication returned HTTP $login_status"
+jq -e '.status == "authenticated"' "$RESPONSE" >/dev/null || die "Dashboard authentication did not return an authenticated session"
+auth_ok=true
+
+issue_json="$(gh issue view "$ISSUE_NUMBER" --repo "$REPOSITORY" --json number,state,url)" || die "GitHub issue lookup failed"
+jq -e --argjson number "$ISSUE_NUMBER" '.number == $number and .state == "OPEN" and (.url | startswith("https://github.com/"))' <<<"$issue_json" >/dev/null \
+  || die "Selected GitHub issue is not open or is not a GitHub URL"
+issue_ok=true
+
+existing_prs="$(gh pr list --repo "$REPOSITORY" --head "$EXPECTED_BRANCH" --state all --json number,url,state)" || die "GitHub pull request lookup failed"
+if [[ "$ALLOW_EXISTING_PR" != true ]] && [[ "$(jq 'length' <<<"$existing_prs")" != 0 ]]; then
+  die "A pull request already exists for $EXPECTED_BRANCH; use a fresh issue or explicitly allow recovery"
+fi
+
+payload="$(jq -n --arg projectId "$PROJECT_ID" --argjson issueNumber "$ISSUE_NUMBER" '{projectId:$projectId,source:{type:"github-issue",issueNumber:$issueNumber}}')"
+admit_status="$(curl -sS -o "$RESPONSE" -w '%{http_code}' -b "$COOKIE_JAR" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
+  --data-binary "$payload" "$BASE_URL/api/tasks" || true)"
+[[ "$admit_status" == 202 ]] || die "Dashboard issue admission returned HTTP $admit_status"
+jq -e --argjson number "$ISSUE_NUMBER" '.githubWork.issueNumber == $number' "$RESPONSE" >/dev/null \
+  || die "Dashboard did not acknowledge the selected issue"
+admission_ok=true
+
+deadline=$((SECONDS + TIMEOUT_SECONDS))
+while (( SECONDS < deadline )); do
+  detail_status="$(curl -sS -o "$DETAIL" -w '%{http_code}' -b "$COOKIE_JAR" "$BASE_URL/api/tasks/github/$PROJECT_ID/$ISSUE_NUMBER" || true)"
+  if [[ "$detail_status" == 200 ]]; then
+    detail_ok=true
+    stage="$(jq -r '.detail.stage // "unknown"' "$DETAIL")"
+    pr_url="$(jq -r '.detail.workflow.pullRequestUrl // empty' "$DETAIL")"
+    pr_number="$(jq -r '.detail.workflow.pullRequestNumber // empty' "$DETAIL")"
+    printf 'GitHub release gate: stage=%s\n' "$stage"
+
+    case "$stage" in
+      failed|blocked|reconciling)
+        error_code="$(jq -r '.detail.execution.errorCode // "unknown"' "$DETAIL")"
+        die "workflow entered $stage ($error_code)"
+        ;;
+      waiting-human)
+        [[ "$pr_url" == https://github.com/*/*/pull/* ]] || die "waiting-human has no safe GitHub PR URL"
+        pr_json="$(gh pr view "$pr_url" --repo "$REPOSITORY" --json number,url,state,mergedAt,headRefName)" || die "GitHub PR lookup failed"
+        jq -e --arg branch "$EXPECTED_BRANCH" --arg url "$pr_url" '.url == $url and .headRefName == $branch and (.state == "OPEN" or .state == "MERGED")' <<<"$pr_json" >/dev/null \
+          || die "GitHub PR does not match the durable workflow branch"
+        branch_ok=true
+        if [[ "$WAIT_FOR_MERGE" != true ]]; then
+          outcome="passed-review-gate"
+          write_report
+          printf 'GitHub release gate passed at the explicit human-review gate. Evidence: %s\n' "$REPORT_PATH"
+          exit 0
+        fi
+        ;;
+      completed)
+        [[ "$WAIT_FOR_MERGE" == true ]] || die "workflow completed before PR review verification"
+        [[ -n "$pr_url" ]] || die "completed workflow has no PR URL"
+        pr_json="$(gh pr view "$pr_url" --repo "$REPOSITORY" --json state,mergedAt,headRefName)" || die "GitHub PR lookup failed"
+        jq -e --arg branch "$EXPECTED_BRANCH" '.state == "MERGED" and .mergedAt != null and .headRefName == $branch' <<<"$pr_json" >/dev/null \
+          || die "Dashboard reports completed but GitHub PR is not merged"
+        branch_ok=true
+        merge_ok=true
+        outcome="passed-merged"
+        write_report
+        printf 'GitHub release gate passed through human merge. Evidence: %s\n' "$REPORT_PATH"
+        exit 0
+        ;;
+    esac
+  elif [[ "$detail_status" != 404 ]]; then
+    die "Dashboard workflow detail returned HTTP $detail_status"
+  fi
+  sleep "$POLL_SECONDS"
+done
+
+die "workflow did not reach a qualifying stage within ${TIMEOUT_SECONDS}s"
