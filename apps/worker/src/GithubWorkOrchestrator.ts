@@ -337,7 +337,6 @@ export class GithubWorkOrchestrator {
       timedOut = "workflow";
       controller.abort();
     }, this.workflowTimeoutMs);
-    workflowTimeout.unref?.();
     let stageTimeout: NodeJS.Timeout | undefined;
     const armStageTimeout = (): void => {
       if (stageTimeout) clearTimeout(stageTimeout);
@@ -345,13 +344,10 @@ export class GithubWorkOrchestrator {
         timedOut = "stage";
         controller.abort();
       }, this.stageTimeoutMs);
-      stageTimeout.unref?.();
     };
     armStageTimeout();
     const heartbeat = setInterval(() => { void renewLease(); }, this.heartbeatIntervalMs);
-    heartbeat.unref?.();
     const interval = setInterval(() => { void checkCancellation(); }, this.cancelPollMs);
-    interval.unref?.();
     try {
       const result = await this.options.dispatcher.execute({
         ...request,
