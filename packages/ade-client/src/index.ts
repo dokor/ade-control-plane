@@ -5,5 +5,7 @@ export * from "./LocalProcessAdeClient.js";
 export {
   parseAdeAdvanceResult,
   parseAdeExecutionReconciliation,
+  parseAdeHumanDecisionResult,
   parseAdeRunnableWork,
+  parseEnvelope,
 } from "./validation.js";

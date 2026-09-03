@@ -110,6 +110,25 @@ test("blocks an incompatible ADE delivery contract with its precise reason", asy
   assert.deepEqual(JSON.parse(commands.deliveryPlanStdin ?? "{}").negotiation.requiredCapabilities, ["implementation-context", "deterministic-validation", "specialist-review", "profile-invocations", "correction-and-rereview", "human-publication-gate"]);
 });
 
+test("applies a resolved human decision through the versioned ADE contract", async () => {
+  const commands = new FakeCommands();
+  commands.decisionStdout = JSON.stringify({
+    protocolVersion: "1",
+    operation: "apply-decision",
+    value: { decisionRef: "decision-1", state: "applied", summary: "Continuing." },
+  });
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0" });
+  const result = await runtime.applyHumanDecision({
+    cwd: "C:/checkout",
+    projectRef: "alpha",
+    decision: { actorRef: "github:dokor", decisionRef: "decision-1", option: "resume" },
+  });
+  assert.equal(result.state, "applied");
+  assert.deepEqual(JSON.parse(commands.decisionArgs?.at(-1)?.at(-1) ?? "{}"), {
+    actorRef: "github:dokor", decisionRef: "decision-1", option: "resume",
+  });
+});
+
 function deliveryPlan(profiles: readonly string[], maximumCorrectionAttempts = 1): AdeDeliveryPlan {
   return {
     version: "ade.delivery-plan/v1", action: "develop", reason: "ADE has admitted this work.", implementationProfile: "implementation",
@@ -127,6 +146,8 @@ class FakeCommands implements CommandRunner {
   public reviewExitCode = 0;
   public deliveryPlanStdout = "";
   public deliveryPlanStdin: string | undefined;
+  public decisionStdout = "";
+  public decisionArgs: string[][] = [];
 
   public async run(input: CommandInput): Promise<CommandResult> {
     if (input.executable === "ade") {
@@ -138,6 +159,10 @@ class FakeCommands implements CommandRunner {
       if (input.args[0] === "delivery") {
         this.deliveryPlanStdin = input.stdin;
         return result(this.deliveryPlanStdout);
+      }
+      if (input.args[0] === "control-plane") {
+        this.decisionArgs.push([...input.args]);
+        return result(this.decisionStdout);
       }
     }
     if (input.executable === "git" && input.args.includes("--name-only")) return result("README.md\n");

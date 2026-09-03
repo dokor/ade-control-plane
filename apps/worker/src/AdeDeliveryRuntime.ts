@@ -1,3 +1,4 @@
+import { parseAdeHumanDecisionResult, parseEnvelope, type AdeHumanDecision, type AdeHumanDecisionResult } from "@ade-control-plane/ade-client";
 import type { AgentUsageMetrics, JsonObject, ProjectRecord } from "@ade-control-plane/database";
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./v0/CommandRunner.js";
@@ -11,6 +12,8 @@ export type AdeDeliveryFailureCode =
   | "ADE_SETUP_INCOMPLETE"
   | "ADE_SETUP_INVALID"
   | "ADE_DELIVERY_PLAN_UNSUPPORTED"
+  | "ADE_DECISION_FAILED"
+  | "ADE_DECISION_INVALID"
   | "ADE_DETERMINISTIC_REVIEW_FAILED"
   | "ADE_PROFILE_REVIEW_BLOCKED"
   | "ADE_PROFILE_REVIEW_FAILED";
@@ -190,6 +193,40 @@ export class AdeDeliveryRuntime {
       throw new AdeDeliveryError("ADE_DELIVERY_PLAN_UNSUPPORTED", deliveryPlanCompatibilityReason(result.stdout) ?? "The installed ADE runtime does not provide the required delivery-plan contract.");
     }
     return plan;
+  }
+
+  /** Applies a previously resolved decision through ADE's versioned control-plane contract. */
+  public async applyHumanDecision(input: {
+    cwd: string;
+    projectRef: string;
+    decision: AdeHumanDecision;
+    signal?: AbortSignal;
+  }): Promise<AdeHumanDecisionResult> {
+    let result: CommandResult;
+    try {
+      result = await this.runCommand(
+        { cwd: input.cwd, work: {} as AdeDeliveryWorkContext, ...(input.signal ? { signal: input.signal } : {}) },
+        "ADE human decision",
+        {
+          executable: this.executable,
+          args: [
+            "control-plane", "apply-decision", "--project", input.projectRef, "--json",
+            "--input-json", JSON.stringify(input.decision),
+          ],
+        },
+      );
+    } catch (error) {
+      if (error instanceof AdeDeliveryError && error.code === "ADE_CONFIG_INVALID") {
+        throw new AdeDeliveryError("ADE_DECISION_FAILED", "ADE could not apply the resolved human decision.");
+      }
+      throw error;
+    }
+    try {
+      return parseAdeHumanDecisionResult(parseEnvelope(JSON.parse(result.stdout), "apply-decision"));
+    } catch (error) {
+      if (error instanceof AdeDeliveryError) throw error;
+      throw new AdeDeliveryError("ADE_DECISION_INVALID", "ADE returned an invalid human decision result.");
+    }
   }
 
   public async runPostAgentGates(input: {
