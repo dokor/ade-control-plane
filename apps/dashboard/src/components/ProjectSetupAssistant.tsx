@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 
 import { dashboardErrorMessage, requestDashboardJson } from "../lib/apiClient.js";
 import type { ProjectSetupReadiness } from "../lib/projectSetup.js";
+import { projectSetupPhase } from "../lib/projectSetupPhase.js";
 import { formatInstant } from "../lib/format.js";
 import { ProjectSetupRequirementHelp } from "./ProjectSetupRequirementHelp.js";
 import { StatusBadge } from "./StatusBadge.js";
@@ -21,13 +22,16 @@ export function ProjectSetupAssistant({
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [setupPullRequestUrl, setSetupPullRequestUrl] = useState<string | null>(null);
   const [refreshing, startRefresh] = useTransition();
+  const phase = projectSetupPhase(readiness);
   const repairable = readiness.requirements.some((requirement) => requirement.repairable);
   const automaticRefreshSeconds = Math.max(5, Math.ceil(refreshIntervalMs / 1_000));
 
   async function prepare(): Promise<void> {
     setPending(true);
     setMessage(null);
+    setSetupPullRequestUrl(null);
     try {
       const body = await requestDashboardJson<{
         result?: { labelsCreated?: readonly string[]; pullRequestUrl?: string | null; initializationTask?: { id: string } | null };
@@ -45,7 +49,8 @@ export function ProjectSetupAssistant({
         router.push(`/tasks/${body.result.initializationTask.id}`);
         return;
       }
-      setMessage(`${labels}${body.result.pullRequestUrl ? "Setup PR opened; merge it, then refresh readiness. The page will also check automatically while it is open." : "Setup is up to date."}`);
+      setSetupPullRequestUrl(body.result.pullRequestUrl ?? null);
+      setMessage(`${labels}${body.result.pullRequestUrl ? "Setup PR opened. Merge it, then refresh readiness; the page also checks automatically while it is open." : "Setup is up to date."}`);
       router.refresh();
     } catch (reason) {
       setMessage(dashboardErrorMessage(reason, "The Dashboard could not reach the setup API."));
@@ -53,6 +58,18 @@ export function ProjectSetupAssistant({
       setPending(false);
     }
   }
+
+  const actionLabel = phase === "repository" ? "Create setup PR" : phase === "initialization" ? "Start ADE initialization" : "ADE ready";
+  const actionDetail = phase === "repository"
+    ? "Step 1: create a reviewable PR with the missing ADE repository files. Merge it before continuing."
+    : phase === "initialization"
+      ? "Step 2: start a worker task that prepares and validates this project’s ADE configuration, including ade.config.json."
+      : "All onboarding checks passed. Use Refresh checks to verify the latest repository state.";
+  const processSteps: readonly { label: string; detail: string; state: "complete" | "current" | "pending" }[] = [
+    { label: "Prepare repository", detail: "Create and merge the ADE setup PR.", state: phase === "repository" ? "current" : "complete" },
+    { label: "Initialize ADE", detail: "Prepare and validate ade.config.json in a worker task.", state: phase === "initialization" ? "current" : phase === "repository" ? "pending" : "complete" },
+    { label: "Ready for work", detail: "Runner capabilities are verified against the default branch.", state: phase === "ready" ? "complete" : "pending" },
+  ];
 
   function refreshChecks(): void {
     startRefresh(() => router.refresh());
@@ -79,6 +96,14 @@ export function ProjectSetupAssistant({
           {refreshing ? "Refreshing..." : "Refresh checks"}
         </button>
       </div>
+      <div className="setup-process" aria-label="ADE onboarding process">
+        {processSteps.map((step, index) => (
+          <div className={`setup-process-step ${step.state}`} key={step.label}>
+            <span className="setup-process-index" aria-hidden="true">{step.state === "complete" ? "✓" : index + 1}</span>
+            <span className="setup-process-copy"><strong>{step.label}</strong><span className="muted">{step.detail}</span></span>
+          </div>
+        ))}
+      </div>
       <div className="list">
         {readiness.requirements.map((requirement) => (
           <div className="row setup-requirement" key={requirement.key}>
@@ -94,10 +119,10 @@ export function ProjectSetupAssistant({
         ))}
       </div>
       <div className="actions">
-        <button className="button primary" type="button" onClick={prepare} disabled={pending}>
-          {pending ? "Preparing..." : readiness.ready ? "Prepare ADE" : "Prepare repository setup"}
+        <button className="button primary" type="button" onClick={prepare} disabled={pending || phase === "ready"}>
+          {pending ? "Preparing..." : actionLabel}
         </button>
-        <span className="muted">Repository changes remain reviewable; when the repository is ready, this action starts ADE initialization.</span>
+        <span className="muted">{actionDetail}</span>
       </div>
       {repairable ? (
         <div className="actions">
@@ -110,6 +135,9 @@ export function ProjectSetupAssistant({
           Planned labels: {readiness.missingLabels.map(({ name }) => name).join(", ") || "none"}<br />
           Existing invalid files are preserved and require manual correction.
         </p>
+      ) : null}
+      {setupPullRequestUrl ? (
+        <p className="detail"><a href={setupPullRequestUrl} rel="noreferrer noopener" target="_blank">Open the setup PR</a> to review and merge the proposed repository changes.</p>
       ) : null}
       {message ? <p className="detail">{message}</p> : null}
     </section>

@@ -511,6 +511,10 @@ export class DeterministicFakeGithubClient
     repository: GithubRepositoryRef;
     input: GithubPullRequestInput;
   }[] = [];
+  public readonly createdSetupPullRequests: {
+    repository: GithubRepositoryRef;
+    input: GithubSetupPullRequestInput;
+  }[] = [];
 
   private nextId = 1;
 
@@ -600,6 +604,7 @@ export class DeterministicFakeGithubClient
   }
 
   public async createSetupPullRequest(repository: GithubRepositoryRef, input: GithubSetupPullRequestInput): Promise<GithubPullRequest> {
+    this.createdSetupPullRequests.push({ repository, input });
     const pullRequest = await this.createPullRequest(repository, { title: input.title, body: input.body, head: "ade/setup/fake", base: input.baseBranch ?? "main" });
     this.setupPullRequests.set(input.title, pullRequest);
     return pullRequest;

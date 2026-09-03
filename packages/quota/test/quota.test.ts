@@ -199,6 +199,31 @@ test("reuses a fresh snapshot and falls back to persisted quota on read failure"
   assert.equal(reads, 1);
 });
 
+test("forces a provider read when explicitly requested", async () => {
+  let reads = 0;
+  const coordinator = new QuotaRefreshCoordinator({
+    accountRef: "codex",
+    provider: "openai",
+    source: {
+      read: async () => {
+        reads += 1;
+        return { ...snapshot(reads === 1 ? 20 : 21), expiresAt: "2026-08-27T08:05:00.000Z" };
+      },
+    },
+    persistence: {
+      append: async () => undefined,
+      getLatest: async () => null,
+    },
+    now: () => new Date(at),
+  });
+
+  await coordinator.refresh();
+  const forced = await coordinator.refresh(true);
+  assert.equal(forced.refreshed, true);
+  assert.equal(forced.snapshot.usedPercent, 21);
+  assert.equal(reads, 2);
+});
+
 test("fails closed for invalid observations and empty reset headers", () => {
   const invalid = { ...snapshot(10), observedAt: "not-a-date" };
   assert.equal(evaluateQuota(invalid, undefined, at).state, "unknown");

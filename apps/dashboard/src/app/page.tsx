@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { ControlButton } from "../components/ControlButton.js";
+import { QuotaRefreshButton } from "../components/QuotaRefreshButton.js";
 import { Shell } from "../components/Shell.js";
 import { requireAuthenticatedContext } from "../lib/auth.js";
 import { formatAge, formatInstant, formatPercent } from "../lib/format.js";
@@ -78,6 +79,7 @@ export default async function OverviewPage() {
           </p>
           <p className="detail">{overview.quota.reason}</p>
           <p className="detail">Dispatch allowed: {overview.quota.canStartWork ? "yes" : "no"}</p>
+          <QuotaRefreshButton />
         </article>
 
         <article className="card">

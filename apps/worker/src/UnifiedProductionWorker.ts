@@ -7,7 +7,7 @@ export interface UnifiedProductionWorkerOptions {
   wake: Pick<WorkerWakeCoordinator, "wait">;
   manual: { recoverInterruptedTask(): Promise<void>; runOnce(signal?: AbortSignal): Promise<boolean> };
   github: { runCycle(input: { reconcile: "full" | "targeted" | "none"; projectId?: string }): Promise<GithubWorkCycleResult> };
-  quota?: { refresh(): Promise<QuotaRefreshResult> };
+  quota?: { refresh(force?: boolean): Promise<QuotaRefreshResult> };
   fullReconcileIntervalMs: number;
   onCycle?(event: WorkerWakeEvent, outcome: string): Promise<void>;
   now?(): Date;
@@ -38,7 +38,9 @@ export class UnifiedProductionWorker {
   }
 
   public async runOnce(event: WorkerWakeEvent, signal?: AbortSignal): Promise<string> {
-    const quota = this.options.quota ? await this.options.quota.refresh() : null;
+    const quota = this.options.quota
+      ? await this.options.quota.refresh(event.reason === "quota-refresh")
+      : null;
     if (quota && !quota.decision.canStartWork) {
       this.quotaWakeUpAt = quotaWakeUpAt(quota.decision.resetsAt, this.now(), this.random());
       await this.options.onCycle?.(event, "quota-blocked");
