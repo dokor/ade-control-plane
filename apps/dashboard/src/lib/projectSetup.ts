@@ -57,6 +57,9 @@ const SETUP_PATHS = {
   context: ".ade/context.md",
 } as const;
 
+const DEFAULT_SKILL_PATHS = [".agents/skills"] as const;
+const SKILL_SETUP_FILE = "README.md";
+
 export async function inspectProjectSetup(
   project: ProjectRecord,
   runtime: GithubRuntime | null,
@@ -95,19 +98,20 @@ export async function inspectProjectSetup(
   requirements.push({ key: "repository-access", label: "Repository accessible", state: "ready", detail: "Repository contents and labels can be read.", repairable: false, source: "repository" });
   requirements.push(profile.requirement);
   requirements.push({ key: "runtime", label: "ADE runtime compatible", state: "ready", detail: `Using the shared ADE contract ${GITHUB_WORK_PROFILE_VERSION}.`, repairable: false, source: "runtime" });
-  const missingSkillPaths = profile.valid
-    ? (await Promise.all(profile.skillPaths.map(async (path) => [path, await setupClient.getRepositoryPathType(repository, path)] as const)))
-      .filter(([, type]) => type !== "directory").map(([path]) => path)
-    : [];
+  const declaredSkillPaths = profile.valid ? profile.skillPaths : profile.state === "missing" ? DEFAULT_SKILL_PATHS : [];
+  const skillPathTypes = await Promise.all(declaredSkillPaths.map(async (path) => [path, await setupClient.getRepositoryPathType(repository, path)] as const));
+  const missingSkillPaths = skillPathTypes.filter(([, type]) => type === null).map(([path]) => path);
+  const conflictingSkillPaths = skillPathTypes.filter(([, type]) => type === "file").map(([path]) => path);
+  const unresolvedSkillPaths = [...missingSkillPaths, ...conflictingSkillPaths];
   requirements.push({
     key: "skills",
     label: "Declared ADE skills",
-    state: !profile.valid ? profile.state === "missing" ? "missing" : "invalid" : profile.skillPaths.length === 0 || missingSkillPaths.length > 0 ? "missing" : "ready",
-    detail: !profile.valid ? "Skill paths cannot be verified until the ADE profile is valid." : profile.skillPaths.length === 0 ? "Declare at least one contained skill path in .ade/control-plane.json." : missingSkillPaths.length > 0 ? `Create the declared skill directories in the repository: ${missingSkillPaths.join(", ")}.` : "Every declared ADE skill path exists in the repository.",
-    repairable: profile.valid && missingSkillPaths.length > 0,
+    state: !profile.valid ? profile.state === "missing" ? "missing" : "invalid" : profile.skillPaths.length === 0 || unresolvedSkillPaths.length > 0 ? "missing" : "ready",
+    detail: !profile.valid ? "Skill paths cannot be verified until the ADE profile is valid." : profile.skillPaths.length === 0 ? "Declare at least one contained skill path in .ade/control-plane.json." : unresolvedSkillPaths.length > 0 ? `${missingSkillPaths.length > 0 ? `Create the declared skill directories: ${missingSkillPaths.join(", ")}.` : ""}${conflictingSkillPaths.length > 0 ? ` Correct the paths currently occupied by files: ${conflictingSkillPaths.join(", ")}.` : ""}` : "Every declared ADE skill path exists in the repository.",
+    repairable: missingSkillPaths.length > 0,
     source: "repository",
   });
-  requirements.push({ key: "profiles", label: "Profiles and rules available", state: profile.valid && profile.skillPaths.length > 0 && missingSkillPaths.length === 0 ? "ready" : profile.state === "invalid" ? "invalid" : "missing", detail: profile.valid && profile.skillPaths.length > 0 && missingSkillPaths.length === 0 ? "The repository profile and its declared ADE skills can be resolved." : "Profiles and rules remain blocked until the ADE profile and declared skill paths are executable.", repairable: profile.state === "missing" || missingSkillPaths.length > 0, source: "repository" });
+  requirements.push({ key: "profiles", label: "Profiles and rules available", state: profile.valid && profile.skillPaths.length > 0 && unresolvedSkillPaths.length === 0 ? "ready" : profile.state === "invalid" ? "invalid" : "missing", detail: profile.valid && profile.skillPaths.length > 0 && unresolvedSkillPaths.length === 0 ? "The repository profile and its declared ADE skills can be resolved." : "Profiles and rules remain blocked until the ADE profile and declared skill paths are executable.", repairable: profile.state === "missing" || missingSkillPaths.length > 0, source: "repository" });
 
   const hasInstructions = Boolean(fileMap.get(SETUP_PATHS.instructions) ?? fileMap.get(SETUP_PATHS.alternativeInstructions));
   if (!hasInstructions) {
@@ -121,6 +125,7 @@ export async function inspectProjectSetup(
   const issueTemplate = fileMap.get(SETUP_PATHS.issueTemplate);
   requirements.push({ key: "issue-template", label: "ADE issue template", state: issueTemplate ? "ready" : "optional", detail: issueTemplate ? "The supported ADE issue template is present." : "Optional: provide the ADE issue template for consistent issue metadata.", repairable: true, source: "github" });
   plannedFiles.push(...missingFiles);
+  plannedFiles.push(...missingSkillPaths.map(skillPath => `${skillPath}/${SKILL_SETUP_FILE}`));
   if (!issueTemplate) plannedFiles.push(SETUP_PATHS.issueTemplate);
 
   const existingLabels = new Set(labels.map(({ name }) => name));
@@ -175,13 +180,16 @@ export async function prepareProjectSetup(
 
   const files: Record<string, string> = {};
   if (before.missingFiles.includes(GITHUB_WORK_PROFILE_PATH)) {
-    files[GITHUB_WORK_PROFILE_PATH] = `${JSON.stringify({ version: GITHUB_WORK_PROFILE_VERSION, capabilities: ["github-work-items"], skillPaths: [".agents/skills"] }, null, 2)}\n`;
+    files[GITHUB_WORK_PROFILE_PATH] = `${JSON.stringify({ version: GITHUB_WORK_PROFILE_VERSION, capabilities: ["github-work-items"], skillPaths: DEFAULT_SKILL_PATHS }, null, 2)}\n`;
   }
   if (before.missingFiles.includes(SETUP_PATHS.instructions)) {
     files[SETUP_PATHS.instructions] = "# Agent instructions\n\nUse the repository's existing documentation and tests. Keep changes focused on the requested ADE issue and leave generated changes reviewable in a pull request.\n";
   }
   if (before.requirements.some(({ key, state }) => key === "issue-template" && state === "optional")) {
     files[SETUP_PATHS.issueTemplate] = "name: ADE work\ndescription: Create an issue that can be scheduled by ADE\nbody:\n  - type: markdown\n    attributes:\n      value: |\n        Describe the desired change and its acceptance criteria.\n";
+  }
+  for (const path of before.plannedFiles.filter(isSkillSetupFile)) {
+    files[path] = "# ADE project skills\n\nThis directory is declared by .ade/control-plane.json for ADE project work. Add reviewed, self-contained skill directories here as needed.\n";
   }
 
   let pullRequestUrl: string | null = null;
@@ -237,4 +245,8 @@ function isStringArray(value: unknown): value is string[] {
 
 function isSafeSkillPaths(value: unknown): value is string[] {
   return isStringArray(value) && value.every((path) => /^(?:[A-Za-z0-9._-]+)(?:\/[A-Za-z0-9._-]+)*$/u.test(path) && !path.includes("..") && !path.split("/").some((segment) => segment === "." || segment === ""));
+}
+
+function isSkillSetupFile(path: string): boolean {
+  return path.endsWith(`/${SKILL_SETUP_FILE}`) && path.length > SKILL_SETUP_FILE.length + 1;
 }

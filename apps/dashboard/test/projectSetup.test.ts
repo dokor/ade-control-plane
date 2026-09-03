@@ -132,3 +132,24 @@ test("prepares only missing pieces and reuses the open setup PR on retry", async
   assert.equal(first.pullRequestNumber, second.pullRequestNumber);
   assert.equal(client.createdPullRequests.length, 1);
 });
+
+test("includes the default declared skill directory in the setup PR", async () => {
+  const client = new DeterministicFakeGithubClient();
+  await prepareProjectSetup(project, runtime(client));
+  const files = client.createdSetupPullRequests[0]?.input.files ?? {};
+  assert.ok(files[".agents/skills/README.md"]);
+  assert.match(files[".agents/skills/README.md"] ?? "", /\.ade\/control-plane\.json/);
+});
+
+test("includes every missing custom skill directory in the setup PR", async () => {
+  const client = new DeterministicFakeGithubClient();
+  putFile(client, GITHUB_WORK_PROFILE_PATH, {
+    version: GITHUB_WORK_PROFILE_VERSION,
+    capabilities: ["github-work-items"],
+    skillPaths: [".agents/skills", "project/ade-skills"],
+  });
+  await prepareProjectSetup(project, runtime(client));
+  const files = client.createdSetupPullRequests[0]?.input.files ?? {};
+  assert.ok(files[".agents/skills/README.md"]);
+  assert.ok(files["project/ade-skills/README.md"]);
+});
