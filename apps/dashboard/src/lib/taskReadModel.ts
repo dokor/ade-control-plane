@@ -3,6 +3,9 @@ import type {
   ExecutionRecord,
   GithubWorkItemRecord,
   ProjectRecord,
+  AdeDecisionRecord,
+  AdeDeliveryStageTransitionRecord,
+  AdeDeliveryWorkflowRecord,
   V0TaskLogRecord,
   V0TaskRecord,
 } from "@ade-control-plane/database";
@@ -10,7 +13,7 @@ import type { GithubIssueReader } from "@ade-control-plane/github";
 
 import { sanitizeText } from "./sanitize.js";
 
-type TaskPersistence = Pick<ControlPlanePersistence, "projects" | "v0Tasks" | "githubWork" | "executions">;
+type TaskPersistence = Pick<ControlPlanePersistence, "projects" | "v0Tasks" | "githubWork" | "executions" | "deliveryWorkflows" | "adeDecisions" | "executionLeases" | "auditEvents">;
 
 export interface TaskProjectOption {
   id: string;
@@ -46,6 +49,50 @@ export interface GithubWorkListItem {
   cancelRequested: boolean;
   executionError: string | null;
   pullRequestNumber: number | null;
+  detailHref: string;
+}
+
+export interface GithubWorkDetailModel {
+  project: ProjectRecord;
+  work: GithubWorkItemRecord;
+  workflow: AdeDeliveryWorkflowRecord | null;
+  transitions: readonly GithubWorkStageView[];
+  execution: ExecutionRecord | null;
+  heartbeatAt: string | null;
+  deadlineAt: string | null;
+  decision: GithubDecisionView | null;
+  provenance: Readonly<Record<string, string>>;
+  validationSummary: string | null;
+  reviewSummary: string | null;
+  events: readonly GithubWorkEvent[];
+  firstFailure: GithubWorkEvent | null;
+  stageLabel: string;
+  nextAction: string;
+}
+
+export interface GithubWorkStageView {
+  stage: string;
+  label: string;
+  attempt: number;
+  reason: string;
+  occurredAt: string;
+}
+
+export interface GithubWorkEvent {
+  id: string;
+  occurredAt: string;
+  kind: "stage" | "audit" | "error";
+  title: string;
+  detail: string;
+  status: "success" | "running" | "warning" | "failed" | "info";
+}
+
+export interface GithubDecisionView {
+  decisionRef: string;
+  prompt: string;
+  options: readonly string[];
+  status: AdeDecisionRecord["status"];
+  observedAt: string;
 }
 
 export interface TaskDetailModel {
@@ -156,7 +203,137 @@ function githubWorkListItem(
     cancelRequested: execution?.cancelRequested === true,
     executionError: execution?.errorSummary ? sanitizeText(execution.errorSummary) : null,
     pullRequestNumber: work.pullRequestNumber,
+    detailHref: `/tasks/github/${work.projectId}/${work.issueNumber}`,
   };
+}
+
+export async function buildGithubWorkDetail(
+  persistence: TaskPersistence,
+  projectId: string,
+  issueNumber: number,
+): Promise<GithubWorkDetailModel | null> {
+  const project = await persistence.projects.getById(projectId);
+  if (!project) return null;
+  const work = (await persistence.githubWork.listForProject(projectId)).find((item) => item.present && item.issueNumber === issueNumber);
+  if (!work) return null;
+  const executions = await persistence.executions.listByProjectId(projectId, 100);
+  const execution = work.executionRef
+    ? executions.find(({ id }) => id === work.executionRef) ?? null
+    : executions.find(({ workRef }) => workRef === `github:issue:${issueNumber}`) ?? null;
+  const workflow = work.executionRef && persistence.deliveryWorkflows
+    ? await persistence.deliveryWorkflows.getByExecutionId(work.executionRef)
+    : null;
+  const transitions = workflow && persistence.deliveryWorkflows
+    ? await persistence.deliveryWorkflows.listTransitions(workflow.id)
+    : [];
+  const decisionRecord = workflow?.humanDecisionRef
+    ? await persistence.adeDecisions.getByRef(projectId, workflow.humanDecisionRef)
+    : work.humanDecisionRef
+      ? await persistence.adeDecisions.getByRef(projectId, work.humanDecisionRef)
+      : null;
+  const lease = execution ? await persistence.executionLeases.getActiveByLeaseKey(`github-work:${projectId}:${issueNumber}`) : null;
+  const audits = await persistence.auditEvents.listForProject(projectId, 100);
+  const stageViews = transitions.map(toGithubWorkStageView);
+  const events: GithubWorkEvent[] = stageViews.map((stage) => ({
+    id: `stage:${stage.occurredAt}:${stage.stage}`,
+    occurredAt: stage.occurredAt,
+    kind: "stage",
+    title: stage.label,
+    detail: stage.reason,
+    status: stage.stage === "completed" ? "success" : stage.stage === "waiting-human" ? "warning" : "info",
+  }));
+  for (const audit of audits.filter((entry) => !execution || entry.executionId === execution.id)) {
+    events.push({
+      id: `audit:${audit.id}`,
+      occurredAt: audit.occurredAt,
+      kind: audit.result === "failed" || audit.result === "unknown" ? "error" : "audit",
+      title: safeLabel(audit.action),
+      detail: sanitizeText(audit.reason ?? audit.result ?? "Workflow event.", 500),
+      status: audit.result === "failed" ? "failed" : audit.result === "unknown" ? "warning" : "info",
+    });
+  }
+  if (execution?.errorCode) {
+    events.push({
+      id: `execution-error:${execution.id}`,
+      occurredAt: execution.finishedAt ?? execution.updatedAt,
+      kind: "error",
+      title: execution.errorCode,
+      detail: sanitizeText(execution.errorSummary ?? "Execution failed.", 500),
+      status: "failed",
+    });
+  }
+  events.sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+  const currentStage = workflow?.reconciliationRequired || execution?.status === "unknown"
+    ? "reconciling"
+    : workflow?.stage ?? work.state;
+  return {
+    project,
+    work,
+    workflow,
+    transitions: stageViews,
+    execution,
+    heartbeatAt: lease?.heartbeatAt ?? null,
+    deadlineAt: lease?.expiresAt ?? null,
+    decision: decisionRecord ? toGithubDecisionView(decisionRecord) : null,
+    provenance: provenanceView(workflow?.provenance),
+    validationSummary: summaryView(workflow?.validationSummary),
+    reviewSummary: summaryView(workflow?.reviewSummary),
+    events,
+    firstFailure: events.find((event) => event.status === "failed") ?? null,
+    stageLabel: githubWorkStageLabel(currentStage),
+    nextAction: nextActionFor(currentStage, decisionRecord, execution),
+  };
+}
+
+function toGithubDecisionView(decision: AdeDecisionRecord): GithubDecisionView {
+  return {
+    decisionRef: decision.decisionRef,
+    prompt: sanitizeText(decision.prompt, 500),
+    options: decision.options,
+    status: decision.status,
+    observedAt: decision.observedAt,
+  };
+}
+
+function toGithubWorkStageView(transition: AdeDeliveryStageTransitionRecord): GithubWorkStageView {
+  return {
+    stage: transition.stage,
+    label: githubWorkStageLabel(transition.stage),
+    attempt: transition.attempt,
+    reason: sanitizeText(transition.reason, 500),
+    occurredAt: transition.occurredAt,
+  };
+}
+
+function githubWorkStageLabel(stage: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    admitted: "Admitted", planning: "Planning", enriching: "Enriching", "ready-for-dev": "Ready for development",
+    implementing: "Developing", validating: "Validating", reviewing: "Reviewing", correcting: "Correcting",
+    publishing: "Publishing", "waiting-human": "Waiting for human", completed: "Completed", reconciling: "Reconciling",
+    ready: "Ready for development", running: "Developing", blocked: "Blocked", failed: "Failed",
+  };
+  return labels[stage] ?? "Reconciling";
+}
+
+function provenanceView(value: Record<string, unknown> | null | undefined): Readonly<Record<string, string>> {
+  if (!value) return {};
+  return Object.fromEntries(Object.entries(value).slice(0, 20).map(([key, item]) => [key, sanitizeText(typeof item === "string" ? item : JSON.stringify(item), 500)]));
+}
+
+function summaryView(value: Record<string, unknown> | null | undefined): string | null {
+  if (!value) return null;
+  return sanitizeText(JSON.stringify(value), 1_000);
+}
+
+function safeLabel(value: string): string { return value.replace(/[^a-z0-9._ -]/giu, " ").slice(0, 120); }
+
+function nextActionFor(stage: string, decision: AdeDecisionRecord | null, execution: ExecutionRecord | null): string {
+  if (decision?.status === "open") return "Resolve the ADE decision using one of the allowed options.";
+  if (stage === "reconciling" || execution?.status === "unknown") return "Reconcile the external execution before retrying.";
+  if (stage === "waiting-human") return "Review the blocking reason and choose the ADE-provided action.";
+  if (stage === "completed") return "Review and merge the pull request when satisfied.";
+  if (execution?.cancelRequested) return "Cancellation requested; wait for the worker to confirm the stop.";
+  return "Wait for the worker to advance the durable workflow.";
 }
 
 function githubWorkRank(work: GithubWorkListItem): number {
