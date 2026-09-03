@@ -7,6 +7,7 @@ import type { CommandRunner } from "./v0/CommandRunner.js";
 import { CodexAgentExecutor, type AgentExecutor } from "./AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime } from "./AdeDeliveryRuntime.js";
 import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
+import { ProjectProvisioningError } from "./v0/ProjectProvisioner.js";
 
 export interface GithubWorkCodexExecutorOptions {
   github: GithubPullRequestClient & GithubIssueLifecycleClient;
@@ -29,6 +30,8 @@ export interface GithubWorkCodexExecutorOptions {
   }) => Promise<AdeHumanDecisionResult>;
   /** Optional while non-PostgreSQL test doubles are being retired. */
   persistence?: Pick<ControlPlanePersistence, "deliveryWorkflows" | "adeDecisions">;
+  /** Provision the selected registered repository when its checkout is not present yet. */
+  provisionCheckout?: (project: ProjectRecord, signal?: AbortSignal) => Promise<void>;
 }
 
 /**
@@ -77,7 +80,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         if (!this.options.applyHumanDecision) {
           throw new GithubWorkExecutionError("ADE_DECISION_UNAVAILABLE", "The worker has no compatible ADE decision contract.");
         }
-        const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
+        const checkout = await this.ensureCheckout(request.project, request.signal);
         await workflows.transition({
           workflowId: workflow.id, expectedStage: "waiting-human", stage: "planning", attempt: workflow.attempt,
           reason: "ADE decision resolved; resuming the existing delivery workflow.",
@@ -107,7 +110,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         };
       }
       if (workflow?.stage === "publishing" && workflow.branchName && workflow.headSha) {
-        const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
+        const checkout = await this.ensureCheckout(request.project, request.signal);
         const remoteHead = await this.git(checkout.root, ["ls-remote", "origin", `refs/heads/${workflow.branchName}`], request.signal);
         const sha = remoteHead.stdout.trim().split(/\s+/u)[0] ?? "";
         if (sha === workflow.headSha) {
@@ -146,7 +149,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         checkpointStage = stage;
       };
       await checkpoint("planning", "Preparing the ADE issue lifecycle plan.");
-      const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
+      const checkout = await this.ensureCheckout(request.project, request.signal);
       branchName = request.work.branchName ?? `ade/issue-${request.work.issueNumber}`;
       const remote = await this.git(checkout.root, ["remote", "get-url", "origin"], request.signal);
       if (!matchesGithubRemote(remote.stdout, request.project.repositoryOwner, request.project.repositoryName)) {
@@ -306,6 +309,18 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
   private get gitEnvironment(): Readonly<Record<string, string>> { return this.options.gitEnvironment ?? {}; }
   private get codexEnvironment(): Readonly<Record<string, string>> { return this.options.codexEnvironment ?? {}; }
 
+  private async ensureCheckout(project: ProjectRecord, signal?: AbortSignal) {
+    try {
+      return await resolveProjectCheckout(this.options.projectRoot, project);
+    } catch (error: unknown) {
+      if (!(error instanceof ProjectCheckoutError) || error.code !== "CHECKOUT_NOT_FOUND" || !this.options.provisionCheckout) throw error;
+      throwIfAborted(signal);
+      await this.options.provisionCheckout(project, signal);
+      throwIfAborted(signal);
+      return resolveProjectCheckout(this.options.projectRoot, project);
+    }
+  }
+
   private async git(cwd: string, args: readonly string[], signal?: AbortSignal) {
     const result = await this.options.commands.run({ executable: "git", args: ["-c", "core.hooksPath=/dev/null", ...args], cwd, env: this.gitEnvironment, ...(signal ? { signal } : {}) });
     if (result.exitCode !== 0) throw new GithubWorkExecutionError("GIT_COMMAND_FAILED", "A required Git operation failed.");
@@ -358,6 +373,7 @@ class GithubWorkExecutionError extends Error {
 function classifyFailure(error: unknown): { code: string; summary: string } {
   if (error instanceof AdeDeliveryError) return { code: error.code, summary: error.safeSummary };
   if (error instanceof ProjectCheckoutError) return { code: error.code, summary: error.safeSummary };
+  if (error instanceof ProjectProvisioningError) return { code: error.code, summary: error.safeSummary };
   if (error instanceof GithubWorkExecutionError) return { code: error.code, summary: error.safeSummary };
   return { code: "EXECUTION_FAILED", summary: "GitHub work execution failed." };
 }

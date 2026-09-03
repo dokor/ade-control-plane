@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { ProjectRecord } from "@ade-control-plane/database";
@@ -92,6 +95,26 @@ test("persists admission and planning before touching the checkout", async () =>
   const result = await executor.execute(request);
   assert.equal(result.errorCode, "CHECKOUT_UNAVAILABLE");
   assert.deepEqual(stages, ["planning"]);
+});
+
+test("provisions a missing registered checkout before executing GitHub work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "ade-github-checkout-recovery-"));
+  let provisioned: string | undefined;
+  const executor = new GithubWorkCodexExecutor({
+    projectRoot: root,
+    commands: { run: async () => ({ exitCode: 0, signal: null, stdout: "git@github.com:someone/other-repository.git", stderr: "" }) },
+    github: {} as never,
+    provisionCheckout: async (selectedProject) => {
+      provisioned = selectedProject.id;
+      await mkdir(join(root, "missing-checkout"), { recursive: true });
+    },
+  });
+
+  const result = await executor.execute(request);
+
+  assert.equal(provisioned, project.id);
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorCode, "REMOTE_MISMATCH");
 });
 
 test("restarts a waiting-human workflow without replaying the provider", async () => {
