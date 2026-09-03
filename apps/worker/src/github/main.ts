@@ -11,6 +11,7 @@ import { V0TaskWorker } from "../v0/V0TaskWorker.js";
 import { ProjectDeletionProcessor } from "../v0/ProjectDeletionProcessor.js";
 import { provisionRegisteredProjects } from "../v0/ProjectProvisioner.js";
 import { GithubWorkCodexExecutor } from "../GithubWorkCodexExecutor.js";
+import { AdeDeliveryRuntime } from "../AdeDeliveryRuntime.js";
 import { GithubWorkOrchestrator } from "../GithubWorkOrchestrator.js";
 import { GithubWorkNotifier } from "../GithubWorkNotifier.js";
 import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
@@ -39,7 +40,13 @@ async function main(): Promise<void> {
     const commands = new NodeCommandRunner();
     const agentExecutor = config.agentProvider === "claude-code"
       ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
-      : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment });
+        : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment });
+    const deliveryRuntime = new AdeDeliveryRuntime({
+      commands,
+      executable: config.adeExecutable,
+      expectedVersion: config.adeRuntimeVersion,
+      environment: config.gitEnvironment,
+    });
     const manual = new V0TaskWorker({
       persistence: store,
       executor: new V0TaskExecutor({
@@ -64,6 +71,8 @@ async function main(): Promise<void> {
         adeContextProfile: config.adeProfile,
         gitEnvironment: config.gitEnvironment,
         agentExecutor,
+        deliveryRuntime,
+        applyHumanDecision: (input) => deliveryRuntime.applyHumanDecision(input),
         persistence: store,
       }),
       provider: config.agentProvider,

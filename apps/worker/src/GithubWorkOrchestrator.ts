@@ -24,6 +24,13 @@ export interface GithubWorkDispatchRequest {
   project: ProjectRecord;
   work: GithubWorkItemRecord;
   skillPaths: readonly string[];
+  signal?: AbortSignal;
+  /** A resolved ADE decision is a continuation of the existing workflow. */
+  resumeDecision?: {
+    decisionRef: string;
+    option: string;
+    resolvedBy: string;
+  };
 }
 
 export interface GithubWorkDispatchResult {
@@ -116,9 +123,27 @@ export class GithubWorkOrchestrator {
     );
     const activeByProject = new Set(active.map(({ projectId }) => projectId));
     const historyByProject = new Map(projects.map((project, index) => [project.id, histories[index] ?? []]));
-    const selections = new Map(projects.map((project) => [project.id,
-      selectProjectWork(profilesByProject.get(project.id) ?? null, itemsByProject.get(project.id) ?? [], now),
-    ]));
+    const resolvedDecisions = new Map<string, { decisionRef: string; option: string; resolvedBy: string }>();
+    for (const project of projects) {
+      const item = (itemsByProject.get(project.id) ?? []).find((candidate) => candidate.present && candidate.state === "waiting-human" && candidate.humanDecisionRef);
+      if (!item?.humanDecisionRef) continue;
+      const decision = await store.adeDecisions.getByRef(project.id, item.humanDecisionRef);
+      const history = historyByProject.get(project.id) ?? [];
+      const alreadyResumed = history.some((execution) =>
+        ["succeeded", "failed", "cancelled", "unknown"].includes(execution.status) &&
+        execution.resultSummary?.resumeDecisionRef === decision?.decisionRef,
+      );
+      if (!alreadyResumed && decision?.status === "resolved" && decision.resolvedOption && decision.resolvedBy) {
+        resolvedDecisions.set(project.id, { decisionRef: decision.decisionRef, option: decision.resolvedOption, resolvedBy: decision.resolvedBy });
+      }
+    }
+    const selections = new Map(projects.map((project) => {
+      const selection = selectProjectWork(profilesByProject.get(project.id) ?? null, itemsByProject.get(project.id) ?? [], now);
+      const resume = resolvedDecisions.get(project.id);
+      return [project.id, resume && selection.item
+        ? { availability: "ready" as const, item: selection.item, reason: "An ADE human decision was resolved; the workflow can resume." }
+        : selection];
+    }));
     const decision = evaluateSchedule({
       mode: settings.schedulerMode,
       now,
@@ -128,6 +153,7 @@ export class GithubWorkOrchestrator {
         selections.get(project.id)!,
         activeByProject.has(project.id),
         historyByProject.get(project.id) ?? [],
+        resolvedDecisions.has(project.id),
       )),
       runners: runners.map(toRunner),
     });
@@ -170,11 +196,13 @@ export class GithubWorkOrchestrator {
     await store.executions.markDispatched(scheduled.execution.id, now);
     await store.executions.markRunning(scheduled.execution.id, now);
     try {
+      const resumeDecision = resolvedDecisions.get(project.id);
       const result = await this.options.dispatcher.execute({
         executionId: scheduled.execution.id,
         project,
         work,
         skillPaths: profile.skillPaths,
+        ...(resumeDecision ? { resumeDecision } : {}),
       });
       await store.executions.complete({
         executionId: scheduled.execution.id,
@@ -184,6 +212,7 @@ export class GithubWorkOrchestrator {
           ...(result.resultSummary ?? {}),
           sourceUpdatedAt: selection.item.sourceUpdatedAt,
           issueNumber: selection.item.issueNumber,
+          ...(resumeDecision ? { resumeDecisionRef: resumeDecision.decisionRef } : {}),
         },
         errorCode: result.errorCode ?? null,
         errorSummary: result.errorSummary ?? null,
@@ -331,10 +360,10 @@ function selectProjectWork(profile: GithubWorkProfileRecord | null, items: reado
   return selectGithubWork(items, now);
 }
 
-function toCandidate(project: ProjectRecord, selection: GithubWorkSelection, hasActiveLease: boolean, history: readonly ExecutionRecord[]): SchedulerCandidate {
+function toCandidate(project: ProjectRecord, selection: GithubWorkSelection, hasActiveLease: boolean, history: readonly ExecutionRecord[], resumeEligible = false): SchedulerCandidate {
   const labels = Array.isArray(project.runnerPolicy.labels) ? project.runnerPolicy.labels.map(String) : [];
   const lastSuccess = history.find(({ status }) => status === "succeeded")?.finishedAt ?? undefined;
-  const sameRevisionAttempt = selection.item !== null && history.some((execution) =>
+  const sameRevisionAttempt = !resumeEligible && selection.item !== null && history.some((execution) =>
     execution.workRef === githubWorkRef(selection.item!.issueNumber) &&
     ["succeeded", "failed", "cancelled", "unknown"].includes(execution.status) &&
     execution.resultSummary?.sourceUpdatedAt === selection.item!.sourceUpdatedAt,

@@ -1,3 +1,4 @@
+import type { AdeHumanDecisionResult } from "@ade-control-plane/ade-client";
 import type { AdeDeliveryWorkflowStage, AdeDeliveryWorkflowTransitionInput, AgentUsageMetrics, ControlPlanePersistence, ProjectRecord } from "@ade-control-plane/database";
 import { DEFAULT_GITHUB_WORK_METADATA, labelsForGithubWorkState, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient, type GithubPullRequestClient } from "@ade-control-plane/github";
 
@@ -19,6 +20,13 @@ export interface GithubWorkCodexExecutorOptions {
   adeContextProfile?: string;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
+  /** The typed ADE boundary used to consume a resolved human decision. */
+  applyHumanDecision?: (input: {
+    cwd: string;
+    projectRef: string;
+    decision: { actorRef: string; decisionRef: string; option: string };
+    signal?: AbortSignal;
+  }) => Promise<AdeHumanDecisionResult>;
   /** Optional while non-PostgreSQL test doubles are being retired. */
   persistence?: Pick<ControlPlanePersistence, "deliveryWorkflows" | "adeDecisions">;
 }
@@ -53,11 +61,44 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     let usage: AgentUsageMetrics | undefined;
     try {
       const workflows = this.options.persistence?.deliveryWorkflows;
-      const workflow = workflows ? await workflows.start({
-        executionId: request.executionId, projectId: request.project.id, issueNumber: request.work.issueNumber,
-        sourceUpdatedAt: request.work.sourceUpdatedAt, occurredAt: new Date().toISOString(), branchName: request.work.branchName,
-      }) : null;
-      if ((workflow?.stage === "waiting-human" || workflow?.stage === "completed") && workflow.pullRequestNumber && workflow.pullRequestUrl) {
+      const workflow = workflows
+        ? request.resumeDecision && request.work.executionRef
+          ? await workflows.getByExecutionId(request.work.executionRef)
+          : await workflows.start({
+              executionId: request.executionId, projectId: request.project.id, issueNumber: request.work.issueNumber,
+              sourceUpdatedAt: request.work.sourceUpdatedAt, occurredAt: new Date().toISOString(), branchName: request.work.branchName,
+            })
+        : null;
+      if (request.resumeDecision) {
+        if (!workflow || !workflows || workflow.stage !== "waiting-human" || workflow.humanDecisionRef !== request.resumeDecision.decisionRef) {
+          throw new GithubWorkExecutionError("DECISION_RESUME_STALE", "The resolved ADE decision no longer matches the durable workflow checkpoint.");
+        }
+        if (!this.options.applyHumanDecision) {
+          throw new GithubWorkExecutionError("ADE_DECISION_UNAVAILABLE", "The worker has no compatible ADE decision contract.");
+        }
+        const checkout = await resolveProjectCheckout(this.options.projectRoot, request.project);
+        await workflows.transition({
+          workflowId: workflow.id, expectedStage: "waiting-human", stage: "planning", attempt: workflow.attempt,
+          reason: "ADE decision resolved; resuming the existing delivery workflow.",
+          idempotencyKey: `${workflow.id}:decision-resume:${request.resumeDecision.decisionRef}`,
+          occurredAt: new Date().toISOString(),
+          details: { decisionRef: request.resumeDecision.decisionRef, option: request.resumeDecision.option },
+        });
+        const decisionResult = await this.options.applyHumanDecision({
+          cwd: checkout.root,
+          projectRef: configuredProjectRef(request.project),
+          decision: {
+            actorRef: request.resumeDecision.resolvedBy,
+            decisionRef: request.resumeDecision.decisionRef,
+            option: request.resumeDecision.option,
+          },
+          ...(request.signal ? { signal: request.signal } : {}),
+        });
+        if (decisionResult.decisionRef !== request.resumeDecision.decisionRef || decisionResult.state !== "applied") {
+          throw new GithubWorkExecutionError("ADE_DECISION_REJECTED", "ADE rejected the resolved human decision; reconciliation is required.");
+        }
+      }
+      if (!request.resumeDecision && (workflow?.stage === "waiting-human" || workflow?.stage === "completed") && workflow.pullRequestNumber && workflow.pullRequestUrl) {
         return {
           status: "succeeded",
           provider: this.agentExecutor.provider,
@@ -88,7 +129,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           return { status: "succeeded", provider: this.agentExecutor.provider, resultSummary: { branchName: workflow.branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url } };
         }
       }
-      let checkpointStage: AdeDeliveryWorkflowStage | null = workflow?.stage ?? null;
+      let checkpointStage: AdeDeliveryWorkflowStage | null = request.resumeDecision ? "planning" : workflow?.stage ?? null;
       const checkpoint = async (
         stage: AdeDeliveryWorkflowStage,
         reason: string,
@@ -155,6 +196,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           observedAt: new Date().toISOString(),
         });
         await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName, humanDecisionRef: decisionRef });
+        await checkpoint("waiting-human", "ADE requires a human decision before continuing.", { humanDecisionRef: decisionRef });
         return { status: "succeeded", provider: this.agentExecutor.provider, resultSummary: { humanDecisionRef: decisionRef, waitingReason: lifecycle.reason.slice(0, 500) } };
       }
       if (lifecycle.action !== "develop" || !lifecycle.implementationHandoff) {
@@ -286,6 +328,15 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     await this.options.github.updateIssueBody(repository, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
     await this.options.github.syncAdeWorkflowLabels(repository, request.work.issueNumber, labelsForGithubWorkState(metadata.state, metadata.pullRequestNumber));
   }
+}
+
+function configuredProjectRef(project: ProjectRecord): string {
+  const ade = project.configuration.ade;
+  if (typeof ade === "object" && ade !== null && !Array.isArray(ade) && typeof (ade as { projectRef?: unknown }).projectRef === "string") {
+    const value = (ade as { projectRef: string }).projectRef.trim();
+    if (/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(value)) return value;
+  }
+  return project.slug;
 }
 
 class GithubWorkExecutionError extends Error {

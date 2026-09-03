@@ -17,7 +17,7 @@ function work(projectId: string, number: number, state: GithubWorkItemRecord["st
   return { id: `${projectId}-${number}`, projectId, repositoryGithubId: `${projectId}-repo`, contractVersion: "ade.github-work/v1", issueNumber: number, issueUrl: `https://github.com/dokor/${projectId}/issues/${number}`, state, priority, dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: LATER, present: true };
 }
 
-function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partial<GithubWorkReader> = {}) {
+function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partial<GithubWorkReader> = {}, resolvedDecision?: { projectId: string; decisionRef: string; option: string }) {
   const projects = [...new Set(items.map(({ projectId }) => projectId))].map((id) => project(id, id));
   const profiles: GithubWorkProfileRecord[] = [];
   const persisted: GithubWorkItemRecord[] = [];
@@ -47,6 +47,11 @@ function harness(items: readonly GithubWorkItemRecord[], readerOverrides: Partia
         }
         return persisted.filter((entry) => entry.projectId === input.profile.projectId);
       },
+    },
+    adeDecisions: {
+      getByRef: async (projectId: string, decisionRef: string) => resolvedDecision && resolvedDecision.projectId === projectId && resolvedDecision.decisionRef === decisionRef
+        ? { id: "decision-1", projectId, decisionRef, prompt: "Continue?", options: [resolvedDecision.option], status: "resolved", resolvedOption: resolvedDecision.option, resolvedBy: "operator:dokor", observedAt: NOW, resolvedAt: NOW }
+        : null,
     },
     executions: {
       listActive: async () => executions.filter((entry) => ["queued", "leased", "dispatched", "running"].includes(entry.status)),
@@ -164,4 +169,16 @@ test("notifies only once for an unchanged waiting-human GitHub revision", async 
   await orchestrator.runCycle();
   await orchestrator.runCycle();
   assert.deepEqual(notifications, [{ kind: "waiting", issueNumber: 12 }]);
+});
+
+test("schedules a resolved ADE decision as a continuation of the existing work item", async () => {
+  const waiting = { ...work("alpha", 12, "waiting-human", 80), humanDecisionRef: "D12", executionRef: "execution-original" };
+  const { orchestrator, dispatches, executions } = harness([waiting], {}, { projectId: "alpha", decisionRef: "D12", option: "resume" });
+  const result = await orchestrator.runCycle();
+  assert.equal(result.outcome, "dispatched");
+  assert.equal(dispatches[0]?.work.executionRef, "execution-original");
+  assert.deepEqual(dispatches[0]?.resumeDecision, { decisionRef: "D12", option: "resume", resolvedBy: "operator:dokor" });
+  assert.equal(executions.length, 1);
+  await orchestrator.runCycle();
+  assert.equal(dispatches.length, 1);
 });
