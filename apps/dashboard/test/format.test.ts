@@ -1,14 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatDuration, formatHistoryDate } from "../src/lib/format.js";
+import { formatAge, formatDuration, formatHistoryDate, formatInstant } from "../src/lib/format.js";
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z");
 
-test("formats recent task history timestamps as relative human-readable dates", () => {
-  assert.equal(formatHistoryDate("2026-09-01T11:58:00.000Z", NOW), "2 min ago");
-  assert.equal(formatHistoryDate("2026-09-01T10:00:00.000Z", NOW), "2 hr ago");
-  assert.match(formatHistoryDate("2026-08-30T18:30:00.000Z", NOW), /^yesterday at /);
+test("formats absolute timestamps as French dates", () => {
+  assert.equal(formatInstant("2026-09-04T08:43:57.000Z"), "04/09/2026 08:43:57");
+  assert.equal(formatInstant(null), "never");
+  assert.equal(formatInstant("not-a-date"), "unknown");
+});
+
+test("formats recent task history timestamps as relative French dates", () => {
+  assert.equal(formatHistoryDate("2026-09-01T11:58:00.000Z", NOW), "il y a 2 min");
+  assert.equal(formatHistoryDate("2026-09-01T10:00:00.000Z", NOW), "il y a 2 h");
+  assert.equal(formatHistoryDate("2026-08-30T18:30:00.000Z", NOW), "hier à 18:30");
+  assert.equal(formatHistoryDate("2026-08-29T18:30:00.000Z", NOW), "29 août 2026, 18:30");
+});
+
+test("formats runner ages in French", () => {
+  assert.equal(formatAge(12_000), "il y a 12 s");
+  assert.equal(formatAge(120_000), "il y a 2 min");
+  assert.equal(formatAge(7_200_000), "il y a 2 h");
+  assert.equal(formatAge(172_800_000), "il y a 2 j");
 });
 
 test("formats invalid or missing task history timestamps safely", () => {
