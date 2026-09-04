@@ -19,7 +19,7 @@ function runtime(client: DeterministicFakeGithubClient): GithubRuntime {
   return { webhookSecret: null, policy: { allowedActorIds: [], allowedInstallationIds: [] }, dashboardUrl: "https://control.example", quotaProvider: "openai", quotaAccountRef: "main", client, workReader: undefined, issueReader: undefined };
 }
 
-test("Prepare ADE queues initialization once repository setup is already ready", async () => {
+test("Start ADE initialization queues a worker check once repository setup is ready", async () => {
   const current = project({ configuration: {} });
   const client = new DeterministicFakeGithubClient();
   const githubRuntime = runtime(client);

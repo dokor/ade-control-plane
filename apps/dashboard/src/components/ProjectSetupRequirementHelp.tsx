@@ -67,6 +67,12 @@ const HELP_BY_KEY: Readonly<Record<string, SetupHelpContent>> = {
     steps: ["The expected labels are `ready-for-dev`, `waiting-human` and `blocked`.", "Use “Create setup PR” to create missing labels directly through the GitHub App.", "If labels are managed centrally, create them yourself with the expected names and refresh the checks."],
     readyWhen: "All three standard labels exist in the repository.",
   },
+  "runner-capability-check": {
+    title: "Runner ADE capability check",
+    explanation: "This confirms that the worker’s runner checkout can load the merged ADE setup and resolve the workflows required to execute work. Checking GitHub files alone is not enough: the verification must run in the checkout used by the worker.",
+    steps: ["Merge the setup PR into the repository’s default branch, if one was created.", "Click “Start ADE initialization” above to queue the ADE initialization task for the worker.", "When the task succeeds, refresh the checks. Control Plane records the runner commit and the ADE capabilities it resolved."],
+    readyWhen: "A successful initialization was run from the current default-branch commit and resolved the required ADE setup and delivery capabilities.",
+  },
 };
 
 const FALLBACK_HELP: SetupHelpContent = {
