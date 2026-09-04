@@ -1,21 +1,31 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { formatAge, formatDuration, formatHistoryDate, formatInstant } from "../src/lib/format.js";
+import { formatAge, formatDuration, formatFutureDistance, formatHistoryDate, formatInstant } from "../src/lib/format.js";
 
 const NOW = Date.parse("2026-09-01T12:00:00.000Z");
 
-test("formats absolute timestamps as French dates", () => {
-  assert.equal(formatInstant("2026-09-04T08:43:57.000Z"), "04/09/2026 08:43:57");
+test("formats absolute timestamps in the Europe/Paris timezone", () => {
+  assert.equal(formatInstant("2026-09-04T13:43:21.000Z"), "04/09/2026 15:43:21");
+  assert.equal(formatInstant("2026-01-15T13:43:21.000Z"), "15/01/2026 14:43:21");
   assert.equal(formatInstant(null), "never");
   assert.equal(formatInstant("not-a-date"), "unknown");
+});
+
+test("formats future quota reset distance in hours and minutes", () => {
+  const now = Date.parse("2026-09-04T12:31:00.000Z");
+  assert.equal(formatFutureDistance("2026-09-04T13:43:21.000Z", now), "dans 1 h 12 min");
+  assert.equal(formatFutureDistance("2026-09-04T12:51:00.000Z", now), "dans 20 min");
+  assert.equal(formatFutureDistance("2026-09-04T12:31:30.000Z", now), "dans moins d’1 min");
+  assert.equal(formatFutureDistance("2026-09-04T12:30:00.000Z", now), "maintenant");
+  assert.equal(formatFutureDistance("not-a-date", now), "unknown");
 });
 
 test("formats recent task history timestamps as relative French dates", () => {
   assert.equal(formatHistoryDate("2026-09-01T11:58:00.000Z", NOW), "il y a 2 min");
   assert.equal(formatHistoryDate("2026-09-01T10:00:00.000Z", NOW), "il y a 2 h");
-  assert.equal(formatHistoryDate("2026-08-30T18:30:00.000Z", NOW), "hier à 18:30");
-  assert.equal(formatHistoryDate("2026-08-29T18:30:00.000Z", NOW), "29 août 2026, 18:30");
+  assert.equal(formatHistoryDate("2026-08-30T18:30:00.000Z", NOW), "hier à 20:30");
+  assert.equal(formatHistoryDate("2026-08-29T18:30:00.000Z", NOW), "29 août 2026, 20:30");
 });
 
 test("formats runner ages in French", () => {
