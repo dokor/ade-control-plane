@@ -3,6 +3,7 @@ import { evaluateQuota, type QuotaDecision } from "@ade-control-plane/quota";
 
 import { loadDashboardConfig } from "../lib/config.js";
 import { getPersistence } from "../lib/persistence.js";
+import { quotaCapacityTone } from "../lib/quotaPresentation.js";
 import { StatusBadge } from "./StatusBadge.js";
 
 interface HeaderQuotaView {
@@ -18,7 +19,7 @@ export async function HeaderQuotaIndicator() {
 
   return (
     <Link href="/#capacity" aria-label={`AI quota: ${label}, ${quota.state}`}>
-      Quota <StatusBadge status={quota.state}>{label}</StatusBadge>
+      Quota <StatusBadge status={quotaCapacityTone(quota.state)}>{label}</StatusBadge>
     </Link>
   );
 }
