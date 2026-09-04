@@ -1,5 +1,10 @@
 # V0 Raspberry deployment
 
+For the current immutable-image CI/CD path, required one-time host cutover,
+GHCR retention and manual local-build fallback, see [CI/CD](CI_CD.md).
+The historical one-argument wrapper commands below apply only before that cutover;
+the new wrapper requires two image digests or the explicit `--local` option.
+
 This is the short deployment procedure for issue #26 and the V0 path from
 issue #1. It runs the Dashboard, the V0 Codex task worker and PostgreSQL. The
 worker is the only container with access to the registered project checkout and

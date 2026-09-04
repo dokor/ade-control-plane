@@ -1,0 +1,80 @@
+name: Build immutable ARM64 image
+on:
+  workflow_call:
+    inputs:
+      sha:
+        type: string
+        required: true
+      runtime:
+        type: string
+        required: true
+      source_key:
+        type: string
+        required: true
+    outputs:
+      image:
+        value: ${{ jobs.build.outputs.image }}
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    outputs:
+      image: ${{ steps.identity.outputs.image }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: existing
+        env:
+          RUNTIME: ${{ inputs.runtime }}
+          SOURCE_KEY: ${{ inputs.source_key }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$RUNTIME" == dashboard || "$RUNTIME" == worker ]]
+          [[ "$SOURCE_KEY" =~ ^[0-9a-f]{64}$ ]]
+          image="ghcr.io/dokor/ade-control-plane-$RUNTIME"
+          echo "repository=$image" >> "$GITHUB_OUTPUT"
+          if docker buildx imagetools inspect "$image:source-$SOURCE_KEY" >/dev/null 2>&1; then
+            echo 'found=true' >> "$GITHUB_OUTPUT"
+          fi
+      - id: build
+        if: steps.existing.outputs.found != 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: ${{ inputs.runtime }}-runtime
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.existing.outputs.repository }}:sha-${{ inputs.sha }}
+            ${{ steps.existing.outputs.repository }}:source-${{ inputs.source_key }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/dokor/ade-control-plane
+            org.opencontainers.image.revision=${{ inputs.sha }}
+            org.ade.source-key=${{ inputs.source_key }}
+          cache-from: type=gha,scope=${{ inputs.runtime }}-arm64
+          cache-to: type=gha,scope=${{ inputs.runtime }}-arm64,mode=max
+      - id: identity
+        env:
+          IMAGE: ${{ steps.existing.outputs.repository }}
+          SOURCE_KEY: ${{ inputs.source_key }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          digest="$(docker buildx imagetools inspect "$IMAGE:source-$SOURCE_KEY" --format '{{.Manifest.Digest}}')"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+          echo "### $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Immutable image: $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"

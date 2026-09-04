@@ -1,33 +1,80 @@
 name: Deploy production
-
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
-
 permissions:
   contents: read
-
-# A deployment runner must never process two releases at the same time.
+# Serialization includes image preparation so releases cannot overtake one another.
 concurrency:
   group: production-deploy
   cancel-in-progress: false
-
 jobs:
-  deploy:
+  plan:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scope: ${{ steps.plan.outputs.scope }}
+      dashboard: ${{ steps.plan.outputs.dashboard }}
+      worker: ${{ steps.plan.outputs.worker }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        run: |
+          set -Eeuo pipefail
+          scope="$(bash deploy/bin/deployment-scope scope HEAD^ HEAD)"
+          dashboard="$(bash deploy/bin/deployment-scope key dashboard HEAD)"
+          worker="$(bash deploy/bin/deployment-scope key worker HEAD)"
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+          echo "dashboard=$dashboard" >> "$GITHUB_OUTPUT"
+          echo "worker=$worker" >> "$GITHUB_OUTPUT"
+  dashboard-image:
+    needs: plan
+    if: needs.plan.outputs.scope != 'none'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-image.yml
+    with:
+      sha: ${{ github.event.workflow_run.head_sha }}
+      runtime: dashboard
+      source_key: ${{ needs.plan.outputs.dashboard }}
+  worker-image:
+    needs: plan
+    if: needs.plan.outputs.scope != 'none'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-image.yml
+    with:
+      sha: ${{ github.event.workflow_run.head_sha }}
+      runtime: worker
+      source_key: ${{ needs.plan.outputs.worker }}
+  deploy:
+    needs: [plan, dashboard-image, worker-image]
     runs-on: [self-hosted, linux, arm64, ade-deploy]
-    timeout-minutes: 30
+    timeout-minutes: 10
     environment:
       name: production
-
     steps:
-      - name: Deploy the validated main commit
+      - name: Require reviewed host bootstrap
+        env:
+          READY: ${{ vars.ADE_PREBUILT_DEPLOY_READY }}
+        run: |
+          test "$READY" = true || { echo 'Install the reviewed v2 deploy wrapper and configure GHCR pull access, then set ADE_PREBUILT_DEPLOY_READY=true. No automatic local fallback.' >&2; exit 1; }
+      - name: Pull and deploy validated immutable images
         env:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: sudo -n /usr/local/sbin/ade-control-plane-deploy "$DEPLOY_SHA"
+          DASHBOARD_IMAGE: ${{ needs.dashboard-image.outputs.image }}
+          WORKER_IMAGE: ${{ needs.worker-image.outputs.image }}
+        run: sudo -n /usr/local/sbin/ade-control-plane-deploy "$DEPLOY_SHA" "$DASHBOARD_IMAGE" "$WORKER_IMAGE"

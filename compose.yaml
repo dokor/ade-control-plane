@@ -27,6 +27,7 @@ services:
     # that documented bootstrap sequence; Dashboard and worker stay cap-less.
 
   dashboard:
+    image: ${ADE_DASHBOARD_IMAGE:-ade-control-plane-dashboard:local}
     build:
       context: .
       dockerfile: deploy/Dockerfile
@@ -93,6 +94,7 @@ services:
       - ALL
 
   worker:
+    image: ${ADE_WORKER_IMAGE:-ade-control-plane-worker:local}
     build:
       context: .
       dockerfile: deploy/Dockerfile
