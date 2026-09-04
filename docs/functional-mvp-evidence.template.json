@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 2,
+  "gateIssue": 153,
+  "scope": "functional-mvp",
+  "runId": "replace-with-run-id",
+  "operator": "replace-with-operator",
+  "environment": {
+    "deployedSha": "replace-with-deployed-sha",
+    "defaultBranchSha": "replace-with-default-branch-sha",
+    "runtimeVersion": "replace-with-runtime-version",
+    "dashboardUrl": "https://dashboard.example.test",
+    "repository": "owner/repository",
+    "projectId": "replace-with-project-id"
+  },
+  "verdict": "not-ready",
+  "scenarios": [
+    {
+      "id": "F01",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F02",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F03",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F04",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F05",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F06",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F07",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F08",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    },
+    {
+      "id": "F09",
+      "status": "not-run",
+      "executedAt": null,
+      "evidence": [],
+      "notes": ""
+    }
+  ]
+}

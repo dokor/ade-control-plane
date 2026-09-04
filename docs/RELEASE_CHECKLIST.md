@@ -1,5 +1,9 @@
 # Production Release Qualification Checklist
 
+Scope note: this historical checklist includes extended operational qualification.
+The current #153 functional MVP gate uses F01–F09 in [RELEASE_GATE.md](RELEASE_GATE.md).
+H24/48h+ soak and advanced topology/hardening remain separate (#88/#9/#10).
+
 ## Purpose
 
 Turn issue #10 security gates and the deployment acceptance criteria into one checklist that can be executed before calling the Raspberry deployment production-ready.
