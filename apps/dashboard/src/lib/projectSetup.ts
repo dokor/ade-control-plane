@@ -34,6 +34,13 @@ export interface ProjectSetupReadiness {
   plannedFiles: readonly string[];
   invalidFiles: readonly string[];
   checkedAt: string;
+  setupPullRequestUrl?: string | null;
+  setupPullRequestLookupFailed?: boolean;
+  capabilitySnapshot?: {
+    status: "fresh" | "stale" | "incompatible" | "unknown";
+    observedAt: string | null;
+    checkoutRef: string | null;
+  };
 }
 
 export interface SetupMutationResult {
@@ -146,21 +153,45 @@ export async function inspectProjectSetup(
     requirements.push({
       key: "runner-capability-check",
       label: "Runner ADE capability check",
-      state: verified ? "ready" : "missing",
+      state: verified ? "ready" : compatibility?.runnerCheckoutRef && compatibility.adeStatus !== "compatible" ? "invalid" : "missing",
       detail: verified
         ? `Runner checkout ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} matches the default branch and passed ADE ${compatibility?.adeRuntimeVersion ?? "runtime"} setup and delivery checks.`
-        : compatibility?.adeStatus === "compatible"
+        : compatibility?.adeStatus === "compatible" && compatibility.runnerCheckoutRef
           ? "Runner checkout is stale relative to the repository default branch; refresh it before scheduling."
         : missing.length > 0
           ? `Runner checkout is missing required ADE capabilities: ${missing.join(", ")}.`
-          : "After merging the setup PR, click “Start ADE initialization” to verify that the worker checkout can resolve ADE workflows.",
+          : compatibility?.runnerCheckoutRef
+            ? "Runner capability validation failed. Review ADE configuration and initialization task logs before retrying."
+            : "After merging the setup PR, click “Start ADE initialization” to verify that the worker checkout can resolve ADE workflows.",
       repairable: false,
       source: "runtime",
     });
   }
 
   const mandatory = requirements.filter((requirement) => requirement.key !== "context" && requirement.key !== "issue-template");
-  return { ready: mandatory.every(({ state }) => state === "ready"), requirements, missingLabels, missingFiles, plannedFiles: [...new Set(plannedFiles)], invalidFiles, checkedAt: now };
+  // Read-only discovery keeps the pending PR visible after a page reload. A PR
+  // lookup failure must not turn successful repository checks into failures.
+  let setupPullRequestUrl: string | null = null;
+  let setupPullRequestLookupFailed = false;
+  if (compatibility !== undefined && mandatory.some(({ key, state }) => key !== "runner-capability-check" && state !== "ready")) {
+    try {
+      setupPullRequestUrl = (await setupClient.findOpenSetupPullRequest(repository, "chore(ade): prepare project setup"))?.url ?? null;
+    } catch {
+      setupPullRequestLookupFailed = true;
+    }
+  }
+  const hasRunnerResult = Boolean(compatibility?.runnerCheckoutRef);
+  return {
+    ready: mandatory.every(({ state }) => state === "ready"), requirements, missingLabels, missingFiles,
+    plannedFiles: [...new Set(plannedFiles)], invalidFiles, checkedAt: now,
+    setupPullRequestUrl, setupPullRequestLookupFailed,
+    capabilitySnapshot: {
+      status: !hasRunnerResult ? "unknown" : compatibility?.adeStatus === "compatible"
+        ? compatibility.runnerCheckoutRef === defaultBranchHead ? "fresh" : "stale" : "incompatible",
+      observedAt: hasRunnerResult ? compatibility?.observedAt ?? null : null,
+      checkoutRef: compatibility?.runnerCheckoutRef ?? null,
+    },
+  };
 }
 
 export async function prepareProjectSetup(

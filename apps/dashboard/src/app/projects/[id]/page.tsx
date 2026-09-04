@@ -8,7 +8,7 @@ import { ProjectSetupAssistant } from "../../../components/ProjectSetupAssistant
 import { Shell } from "../../../components/Shell.js";
 import { StatusBadge } from "../../../components/StatusBadge.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
-import { formatAge, formatInstant } from "../../../lib/format.js";
+import { formatInstant } from "../../../lib/format.js";
 import { getPersistence } from "../../../lib/persistence.js";
 import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { inspectProjectSetup } from "../../../lib/projectSetup.js";
@@ -59,112 +59,7 @@ export default async function ProjectPage({
         <Link href="/">← Overview</Link>
       </p>
 
-      <ProjectSetupAssistant projectId={project.id} readiness={setupReadiness} refreshIntervalMs={config.refreshIntervalMs} />
-
-      <div className="cards">
-        <article className="card">
-          <h2>Control state</h2>
-          <p className="value">
-            <StatusBadge status={project.status} />
-          </p>
-          <p className="detail">
-            {project.controlState} · priority {project.priority}
-          </p>
-          <p className="detail">
-            <a href={project.repositoryUrl} rel="noreferrer noopener" target="_blank">
-              {project.repositoryUrl.replace("https://github.com/", "")}
-            </a>
-          </p>
-        </article>
-
-        <article className="card">
-          <h2>ADE compatibility</h2>
-          <p className="value"><StatusBadge status={project.adeStatus} /></p>
-          <p className="detail">Runtime {project.adeRuntimeVersion}</p>
-          <p className="detail">Config {project.adeConfigVersion ?? "missing or not validated"}</p>
-          <p className="detail">Profiles {project.resolvedProfiles.join(", ") || "—"}</p>
-          <p className="detail">Rules {project.resolvedRules.join(", ") || "—"}</p>
-        </article>
-
-        <article className="card">
-          <h2>ADE snapshot</h2>
-          <p className="value">
-            <StatusBadge status={project.snapshotFresh ? "fresh" : "stale"}>
-              {project.snapshotFresh ? "fresh" : "stale"}
-            </StatusBadge>
-          </p>
-          <p className="detail">
-            Observed {formatAge(project.snapshotAgeMs)} ({formatInstant(project.snapshotObservedAt)})
-          </p>
-          <p className="detail">
-            Stage {project.stage ?? "unknown"} · {project.milestone ?? "no milestone"}
-          </p>
-        </article>
-
-        <article className="card">
-          <h2>Current work</h2>
-          <p className="detail">{project.currentWorkSummary ?? "None reported by ADE."}</p>
-          <h2>Next work</h2>
-          <p className="detail">{project.nextWorkSummary ?? "None reported by ADE."}</p>
-        </article>
-
-        <article className="card">
-          <h2>Waiting reason</h2>
-          <p className="detail">{project.waitingReason ?? "Not waiting."}</p>
-          {project.compatibleRunnerIds.length === 0 ? (
-            <p className="detail">No compatible runner is currently online.</p>
-          ) : null}
-        </article>
-      </div>
-
-      <section>
-        <h2>Controls</h2>
-        <div className="actions">
-          <ControlButton
-            type="project.pause"
-            payload={{ projectId: project.id }}
-            label="Pause project"
-            disabled={!availableActions.canPause}
-            disabledReason="The project is not currently enabled."
-          />
-          <ControlButton
-            type="project.resume"
-            payload={{ projectId: project.id }}
-            label="Resume project"
-            variant="primary"
-            disabled={!availableActions.canResume}
-            disabledReason="The project is already enabled."
-          />
-          <ControlButton
-            type="execution.safe-retry"
-            payload={{ executionId: safeRetry?.id ?? latestExecution?.id ?? "" }}
-            label="Safe retry"
-            confirm="Request a safe retry of the last failed execution?"
-            disabled={availableActions.safeRetryExecutionId === null}
-            disabledReason={
-              latestExecution
-                ? retryabilityExplanation(latestExecution.retryability)
-                : "There is no execution to retry."
-            }
-          />
-        </div>
-        {availableActions.safeRetryExecutionId === null && latestExecution ? (
-          <p className="muted">{retryabilityExplanation(latestExecution.retryability)}</p>
-        ) : null}
-        <div className="actions">
-          <PriorityForm
-            projectId={project.id}
-            priority={project.priority}
-            disabled={!availableActions.canReprioritize}
-          />
-        </div>
-      </section>
-
-      <section>
-        <h2>Danger zone</h2>
-        <p className="detail">This permanently removes the managed local checkout and all ADE Control Plane records. It never deletes the GitHub repository.</p>
-        <ProjectDeleteButton projectId={project.id} projectName={project.name} />
-      </section>
+      <ProjectSetupAssistant project={project} work={detail.work} readiness={setupReadiness} refreshIntervalMs={config.refreshIntervalMs} />
 
       {detail.openDecisions.length > 0 ? (
         <section>
@@ -188,28 +83,27 @@ export default async function ProjectPage({
                         option,
                       }}
                       label={option}
-                      variant="primary"
                       confirm={`Apply the \"${option}\" decision for ${decision.decisionRef}?`}
                     />
                   ))}
                 </div>
-                <p className="detail">
-                  You can also resolve it from the linked issue or pull request with one of:
-                </p>
-                <ul className="detail">
-                  {decision.githubCommands.map((command) => (
-                    <li key={command}>
-                      <code>{command}</code>
-                    </li>
-                  ))}
-                </ul>
+                <details className="project-disclosure">
+                  <summary>Resolve from GitHub instead</summary>
+                  <ul className="detail">
+                    {decision.githubCommands.map((command) => (
+                      <li key={command}>
+                        <code>{command}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
               </article>
             ))}
           </div>
         </section>
       ) : null}
 
-      {detail.humanDecisions.length > 0 ? (
+      {detail.humanDecisions.length > 0 && detail.openDecisions.length === 0 ? (
         <section>
           <h2>Human decisions</h2>
           <div className="list">
@@ -224,8 +118,52 @@ export default async function ProjectPage({
         </section>
       ) : null}
 
-      <section>
-        <h2>Executions</h2>
+      <details className="panel project-disclosure" id="project-controls">
+        <summary>Project controls</summary>
+        <p className="muted">Pause or resume scheduling and adjust project priority.</p>
+        <div className="actions">
+          <ControlButton
+            type="project.pause"
+            payload={{ projectId: project.id }}
+            label="Pause project"
+            disabled={!availableActions.canPause}
+            disabledReason="The project is not currently enabled."
+          />
+          <ControlButton
+            type="project.resume"
+            payload={{ projectId: project.id }}
+            label="Resume project"
+            disabled={!availableActions.canResume}
+            disabledReason="The project is already enabled."
+          />
+          <ControlButton
+            type="execution.safe-retry"
+            payload={{ executionId: safeRetry?.id ?? latestExecution?.id ?? "" }}
+            label="Safe retry"
+            confirm="Request a safe retry of the last failed execution?"
+            disabled={availableActions.safeRetryExecutionId === null}
+            disabledReason={
+              latestExecution
+                ? retryabilityExplanation(latestExecution.retryability)
+                : "There is no execution to retry."
+            }
+          />
+        </div>
+        {availableActions.safeRetryExecutionId === null && latestExecution ? (
+          <p className="muted">{retryabilityExplanation(latestExecution.retryability)}</p>
+        ) : null}
+        <div className="actions">
+          <PriorityForm
+            projectId={project.id}
+            priority={project.priority}
+            variant="default"
+            disabled={!availableActions.canReprioritize}
+          />
+        </div>
+      </details>
+
+      <details className="panel project-disclosure">
+        <summary>Execution history</summary>
         {detail.executions.length === 0 ? (
           <p className="muted">No execution has been recorded for this project.</p>
         ) : (
@@ -249,10 +187,10 @@ export default async function ProjectPage({
             ))}
           </div>
         )}
-      </section>
+      </details>
 
-      <section>
-        <h2>Timeline</h2>
+      <details className="panel project-disclosure">
+        <summary>Timeline</summary>
         {detail.timeline.length === 0 ? (
           <p className="muted">No persisted event yet.</p>
         ) : (
@@ -273,7 +211,12 @@ export default async function ProjectPage({
             ))}
           </div>
         )}
-      </section>
+      </details>
+      <details className="panel project-disclosure">
+        <summary>Danger zone</summary>
+        <p className="detail">This permanently removes the managed local checkout and all ADE Control Plane records. It never deletes the GitHub repository.</p>
+        <ProjectDeleteButton projectId={project.id} projectName={project.name} />
+      </details>
     </Shell>
   );
 }
