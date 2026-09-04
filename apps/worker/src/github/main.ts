@@ -5,6 +5,7 @@ import { GithubAppTokenProvider, HttpGithubClient, HttpGithubIssueAdapter, HttpG
 import { CodexAppServerQuotaSource, QuotaRefreshCoordinator } from "@ade-control-plane/quota";
 
 import { NodeCommandRunner } from "../v0/CommandRunner.js";
+import { GithubAppGitRunner } from "../v0/GithubAppGitRunner.js";
 import { loadV0WorkerRuntime, type V0WorkerRuntimeConfig } from "../v0/runtime.js";
 import { V0TaskExecutor } from "../v0/V0TaskExecutor.js";
 import { V0TaskWorker } from "../v0/V0TaskWorker.js";
@@ -37,7 +38,8 @@ async function main(): Promise<void> {
     await store.migrate();
     const tokens = new GithubAppTokenProvider({ credentials: config.github });
     const github = new HttpGithubClient({ tokens, installationId: config.github.installationId });
-    const commands = new NodeCommandRunner();
+    const commands = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
+      projectRoot: config.projectRoot, installationId: config.github.installationId, tokens });
     const agentExecutor = config.agentProvider === "claude-code"
       ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
         : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment });

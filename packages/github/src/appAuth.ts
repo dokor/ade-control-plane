@@ -28,8 +28,8 @@ const JWT_LIFETIME_SECONDS = 540;
  * Mints short-lived GitHub App installation tokens.
  *
  * The App private key never leaves this process, tokens are cached only in
- * memory, and nothing here is ever handed to the runner: runner Git credentials
- * stay separate from the control-plane integration credential.
+ * memory. Repository-scoped tokens can also authenticate worker-owned Git HTTPS
+ * operations; the App private key and tokens must never reach agent processes.
  */
 export class GithubAppTokenProvider implements InstallationTokenProvider {
   private readonly cache = new Map<string, CachedToken>();
@@ -45,28 +45,40 @@ export class GithubAppTokenProvider implements InstallationTokenProvider {
   }
 
   public async getToken(installationId: string): Promise<string> {
-    const cached = this.cache.get(installationId);
+    return this.tokenFor(installationId);
+  }
+
+  public async getRepositoryToken(installationId: string, repository: string): Promise<string> {
+    if (!/^[A-Za-z0-9_.-]+$/.test(repository)) throw new Error("Invalid repository name.");
+    return this.tokenFor(installationId, repository);
+  }
+
+  private async tokenFor(installationId: string, repository?: string): Promise<string> {
+    const key = `${installationId}:${repository ?? "*"}`;
+    const cached = this.cache.get(key);
     if (cached && cached.expiresAt - RENEW_MARGIN_MS > this.now()) {
       return cached.token;
     }
 
-    const pending = this.pending.get(installationId);
+    const pending = this.pending.get(key);
     if (pending) return pending;
 
-    const request = this.mintToken(installationId).finally(() => {
-      this.pending.delete(installationId);
+    const request = this.mintToken(installationId, key, repository).finally(() => {
+      this.pending.delete(key);
     });
-    this.pending.set(installationId, request);
+    this.pending.set(key, request);
     return request;
   }
 
-  private async mintToken(installationId: string): Promise<string> {
+  private async mintToken(installationId: string, key: string, repository?: string): Promise<string> {
     const response = await this.fetchImplementation(
       `${this.baseUrl}/app/installations/${installationId}/access_tokens`,
       {
         method: "POST",
+        ...(repository ? { body: JSON.stringify({ repositories: [repository], permissions: { contents: "write" } }) } : {}),
         headers: {
           accept: "application/vnd.github+json",
+          "content-type": "application/json",
           authorization: `Bearer ${this.createAppJwt()}`,
           "user-agent": "ade-control-plane",
           "x-github-api-version": "2022-11-28",
@@ -87,7 +99,7 @@ export class GithubAppTokenProvider implements InstallationTokenProvider {
 
     const expiresAt =
       typeof parsed.expires_at === "string" ? Date.parse(parsed.expires_at) : Number.NaN;
-    this.cache.set(installationId, {
+    this.cache.set(key, {
       token: parsed.token,
       expiresAt: Number.isNaN(expiresAt) ? this.now() + RENEW_MARGIN_MS : expiresAt,
     });
