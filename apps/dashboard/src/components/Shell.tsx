@@ -22,8 +22,8 @@ export function Shell({
       <header className="top">
         <h1>{title}</h1>
         <nav className="primary">
+          <Link href="/">Dashboard</Link>
           <Link href="/tasks">Tasks</Link>
-          <Link href="/">Overview</Link>
           <Link href="/runners">Runners</Link>
           <Link href="/analytics">Analytics</Link>
           <Link href="/settings">Settings</Link>
