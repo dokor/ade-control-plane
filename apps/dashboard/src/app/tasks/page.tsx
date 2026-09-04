@@ -7,15 +7,28 @@ import { TaskComposer } from "../../components/TaskComposer.js";
 import { requireAuthenticatedContext } from "../../lib/auth.js";
 import { formatHistoryDate, formatInstant } from "../../lib/format.js";
 import { loadGithubRuntime } from "../../lib/githubRuntime.js";
+import { paginate, parsePageParam } from "../../lib/pagination.js";
 import { getPersistence } from "../../lib/persistence.js";
 import { buildTaskDashboard, safePullRequestUrl } from "../../lib/taskReadModel.js";
 
 export const dynamic = "force-dynamic";
 
-export default async function TasksPage() {
+const TASK_HISTORY_PAGE_SIZE = 10;
+
+export default async function TasksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ taskPage?: string | string[] }>;
+}) {
   const { session, config } = await requireAuthenticatedContext("/tasks");
   const github = await loadGithubRuntime();
   const dashboard = await buildTaskDashboard(await getPersistence(), github?.issueReader);
+  const params = await searchParams;
+  const taskHistory = paginate(
+    dashboard.tasks,
+    parsePageParam(params.taskPage),
+    TASK_HISTORY_PAGE_SIZE,
+  );
 
   return (
     <Shell
@@ -153,48 +166,65 @@ export default async function TasksPage() {
             <p className="task-kicker">Recent delivery trail</p>
             <h2>Task history</h2>
           </div>
-          <span>{dashboard.tasks.length} shown</span>
+          <span>{taskHistory.totalItems} total · page {taskHistory.page}/{taskHistory.totalPages}</span>
         </div>
         {dashboard.tasks.length === 0 ? (
           <div className="task-history-empty">No task has been submitted yet.</div>
         ) : (
-          <div className="task-history">
-            {dashboard.tasks.map((task) => {
-              const pullRequestUrl = safePullRequestUrl(task.pullRequestUrl);
-              return (
-                <article key={task.id} className="task-history-row">
-                  <div className="task-history-status">
-                    <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
-                    <time dateTime={task.createdAt} title={formatInstant(task.createdAt)}>{formatHistoryDate(task.createdAt)}</time>
-                  </div>
-                  <div className="task-history-main">
-                    <span className="badge badge-neutral task-history-project">{task.projectName}</span>
-                    <h3><Link href={`/tasks/${task.id}`}>{task.title}</Link></h3>
-                    <p>{task.source.type === "github-issue"
-                      ? `GitHub issue #${task.source.issueNumber}`
-                      : task.source.type === "ade-initialize" ? "Initialisation ADE" : "Prompt libre"}</p>
-                    <p className={`task-history-result ${task.status.toLowerCase()}`}>
-                      {task.status === "SUCCESS"
-                        ? task.pullRequestNumber ? `Completed successfully · PR #${task.pullRequestNumber}` : "Completed successfully"
-                        : task.status === "FAILED"
-                          ? `${task.errorCode ?? "Execution failed"}: ${task.errorSummary ?? "Review task details for the failure point."}`
-                          : task.status === "CANCELLED"
-                            ? "Cancelled before successful delivery"
-                            : task.status === "RUNNING" ? "Execution in progress" : "Waiting for the worker"}
-                    </p>
-                    <small>{task.repository} / {task.id.slice(0, 8)}</small>
-                  </div>
-                  <div className="task-history-action">
-                    {pullRequestUrl ? (
-                      <a href={pullRequestUrl} target="_blank" rel="noreferrer noopener">PR #{task.pullRequestNumber}</a>
-                    ) : (
-                      <Link href={`/tasks/${task.id}`}>Details -&gt;</Link>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          <>
+            <div className="task-history">
+              {taskHistory.items.map((task) => {
+                const pullRequestUrl = safePullRequestUrl(task.pullRequestUrl);
+                return (
+                  <article key={task.id} className="task-history-row">
+                    <div className="task-history-status">
+                      <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
+                      <time dateTime={task.createdAt} title={formatInstant(task.createdAt)}>{formatHistoryDate(task.createdAt)}</time>
+                    </div>
+                    <div className="task-history-main">
+                      <span className="badge badge-neutral task-history-project">{task.projectName}</span>
+                      <h3><Link href={`/tasks/${task.id}`}>{task.title}</Link></h3>
+                      <p>{task.source.type === "github-issue"
+                        ? `GitHub issue #${task.source.issueNumber}`
+                        : task.source.type === "ade-initialize" ? "Initialisation ADE" : "Prompt libre"}</p>
+                      <p className={`task-history-result ${task.status.toLowerCase()}`}>
+                        {task.status === "SUCCESS"
+                          ? task.pullRequestNumber ? `Completed successfully · PR #${task.pullRequestNumber}` : "Completed successfully"
+                          : task.status === "FAILED"
+                            ? `${task.errorCode ?? "Execution failed"}: ${task.errorSummary ?? "Review task details for the failure point."}`
+                            : task.status === "CANCELLED"
+                              ? "Cancelled before successful delivery"
+                              : task.status === "RUNNING" ? "Execution in progress" : "Waiting for the worker"}
+                      </p>
+                      <small>{task.repository} / {task.id.slice(0, 8)}</small>
+                    </div>
+                    <div className="task-history-action">
+                      {pullRequestUrl ? (
+                        <a href={pullRequestUrl} target="_blank" rel="noreferrer noopener">PR #{task.pullRequestNumber}</a>
+                      ) : (
+                        <Link href={`/tasks/${task.id}`}>Details -&gt;</Link>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+            {taskHistory.totalPages > 1 ? (
+              <nav className="actions" aria-label="Task history pagination">
+                {taskHistory.hasPreviousPage ? (
+                  <Link className="button" href={`/tasks?taskPage=${taskHistory.page - 1}`}>Précédent</Link>
+                ) : (
+                  <span className="button" aria-disabled="true">Précédent</span>
+                )}
+                <span>Page {taskHistory.page} sur {taskHistory.totalPages}</span>
+                {taskHistory.hasNextPage ? (
+                  <Link className="button" href={`/tasks?taskPage=${taskHistory.page + 1}`}>Suivant</Link>
+                ) : (
+                  <span className="button" aria-disabled="true">Suivant</span>
+                )}
+              </nav>
+            ) : null}
+          </>
         )}
       </section>
     </Shell>
