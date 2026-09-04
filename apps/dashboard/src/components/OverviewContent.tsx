@@ -3,13 +3,14 @@ import Link from "next/link";
 import { StatusBadge } from "./StatusBadge.js";
 import { formatAge, formatDuration, formatFutureDistance, formatInstant, formatPercent } from "../lib/format.js";
 import { summarizeOverview } from "../lib/overview.js";
+import type { OverviewProjectReadinessPresentation } from "../lib/overviewReadiness.js";
 import { quotaCapacityColor } from "../lib/quotaPresentation.js";
 import type { OverviewViewModel } from "../lib/readModel.js";
 
-export function OverviewContent({ overview, controls, quotaControl }: {
-  overview: OverviewViewModel; controls?: ReactNode; quotaControl?: ReactNode;
+export function OverviewContent({ overview, projectReadiness = [], controls, quotaControl }: {
+  overview: OverviewViewModel; projectReadiness?: readonly OverviewProjectReadinessPresentation[]; controls?: ReactNode; quotaControl?: ReactNode;
 }) {
-  const summary = summarizeOverview(overview);
+  const summary = summarizeOverview(overview, projectReadiness);
   const { quota, workerHealth } = overview;
   return <div className="overview">
     <section className="overview-hero" aria-labelledby="health-title">
@@ -44,7 +45,7 @@ export function OverviewContent({ overview, controls, quotaControl }: {
         <div className="panel">
           <p className="overview-metric">{overview.unavailableSections.includes("Project readiness") ? "Readiness unavailable" : `${summary.ready} of ${overview.projects.length} ADE-ready`}</p>
           {summary.readiness.length === 0 ? <p className="muted">Your repositories will appear here after registration.</p>
-            : <ul className="overview-projects">{summary.readiness.map((project) => <li key={project.id}><Link href={`/projects/${project.id}`}>{project.name}</Link><span><StatusBadge status={project.readiness} />{project.controlState === "paused" && <> <StatusBadge status="paused" /></>}</span></li>)}</ul>}
+            : <ul className="overview-projects">{summary.readiness.map((project) => <li key={project.id}><Link href={`/projects/${project.id}`}>{project.name}</Link><span><StatusBadge status={project.badgeStatus}>{project.badgeLabel}</StatusBadge>{project.controlState === "paused" && project.badgeStatus !== "paused" && <> <StatusBadge status="paused" /></>}</span></li>)}</ul>}
         </div>
       </section>
 

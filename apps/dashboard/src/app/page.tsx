@@ -5,7 +5,10 @@ import { OverviewContent, OverviewLoading, OverviewUnavailable } from "../compon
 import { Shell } from "../components/Shell.js";
 import { requireAuthenticatedContext } from "../lib/auth.js";
 import type { DashboardConfig } from "../lib/config.js";
+import { loadGithubRuntime } from "../lib/githubRuntime.js";
+import { presentOverviewProjectReadiness, type OverviewProjectReadinessPresentation } from "../lib/overviewReadiness.js";
 import { getPersistence } from "../lib/persistence.js";
+import { inspectProjectSetup } from "../lib/projectSetup.js";
 import { buildOverview, type OverviewViewModel } from "../lib/readModel.js";
 
 export const dynamic = "force-dynamic";
@@ -19,17 +22,41 @@ export default async function OverviewPage() {
 
 async function OverviewData({ config }: { config: DashboardConfig }) {
   let overview: OverviewViewModel | null = null;
+  let projectReadiness: OverviewProjectReadinessPresentation[] = [];
   try {
+    const persistence = await getPersistence();
     overview = await buildOverview({
-      persistence: await getPersistence(), quotaProvider: config.quotaProvider,
+      persistence, quotaProvider: config.quotaProvider,
       quotaAccountRef: config.quotaAccountRef, adeRuntimeVersion: config.adeRuntimeVersion,
       tolerateUnavailable: true,
     });
+    const runtime = await loadGithubRuntime();
+    const records = await persistence.projects.list();
+    const projectById = new Map(overview.projects.map((project) => [project.id, project]));
+    projectReadiness = (await Promise.all(records.map(async (record) => {
+      const project = projectById.get(record.id);
+      if (!project) return null;
+      try {
+        const readiness = await inspectProjectSetup(
+          record,
+          runtime,
+          undefined,
+          await persistence.githubWork.getProfile(record.id),
+        );
+        return presentOverviewProjectReadiness(
+          project,
+          readiness,
+          overview!.work.filter((item) => item.projectId === record.id),
+        );
+      } catch {
+        return null;
+      }
+    }))).filter((item): item is OverviewProjectReadinessPresentation => item !== null);
   } catch {
     // Never serialize a database connection error into the page.
     console.error("Overview read model unavailable");
   }
-  return overview ? <OverviewContent overview={overview} quotaControl={<QuotaRefreshButton />} controls={<div className="actions">
+  return overview ? <OverviewContent overview={overview} projectReadiness={projectReadiness} quotaControl={<QuotaRefreshButton />} controls={<div className="actions">
       <ControlButton type={overview.schedulerMode === "running" ? "global.pause" : "global.resume"}
         label={overview.schedulerMode === "running" ? "Pause globally" : "Resume scheduling"}
         confirm={overview.schedulerMode === "running" ? "Pause all scheduling?" : "Resume global scheduling?"} />
