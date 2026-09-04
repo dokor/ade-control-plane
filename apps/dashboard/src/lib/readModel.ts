@@ -871,6 +871,7 @@ function buildTimeline(
         event.executionId ? `Execution ${shortReference(event.executionId)}` : null,
         event.runnerId ? `Runner ${shortReference(event.runnerId)}` : null,
         event.reason ? sanitizeText(event.reason) : null,
+        event.action === "project.checkout.failed" ? provisioningDiagnostic(event) : null,
       ].filter((value): value is string => value !== null).join(" · ") || null,
       severity: normalizeSeverity(event.severity),
     })),
@@ -907,6 +908,17 @@ const TIMELINE_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   session: "Session",
   worker: "Worker",
 };
+
+function provisioningDiagnostic(event: AuditEventRecord): string | null {
+  const reason = event.metadata.reason;
+  const action = event.metadata.action;
+  const parts = [
+    typeof reason === "string" && /^[A-Z][A-Z0-9_]{0,79}$/.test(reason) ? `Reason: ${reason}` : null,
+    event.metadata.host === "github.com" ? "Host: github.com" : null,
+    typeof action === "string" ? `Action: ${sanitizeText(action, 400)}` : null,
+  ];
+  return parts.filter(Boolean).join(" · ") || null;
+}
 
 const TIMELINE_ACTION_LABELS: Readonly<Record<string, string>> = {
   "command.applied": "Command applied",

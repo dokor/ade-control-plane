@@ -244,3 +244,16 @@ test("returns null for an unknown project", async () => {
   });
   assert.equal(detail, null);
 });
+
+test("project timeline exposes only bounded safe provisioning guidance without host terminal access", async () => {
+  const state = twoProjectState();
+  state.auditEvents = [{ id: "provisioning", occurredAt: NOW, category: "project-onboarding", action: "project.checkout.failed", severity: "warning", actorType: "system", actorRef: "v0-worker", projectId: project().id,
+    executionId: null, runnerId: null, correlationId: null, reason: null, result: "deferred",
+    metadata: { reason: "GIT_AUTH_FAILED", host: "github.com", action: "Check SSH identity. token=private-value", stderr: "do-not-display-raw", privateKey: "do-not-display-key" } }];
+  const detail = await buildProjectDetail({ ...input(state), projectId: project().id });
+  const entry = detail!.timeline.find((item) => item.id === "audit:provisioning")!;
+  assert.match(entry.detail!, /Reason: GIT_AUTH_FAILED/);
+  assert.match(entry.detail!, /Host: github.com/);
+  assert.match(entry.detail!, /Check SSH identity/);
+  assert.doesNotMatch(entry.detail!, /private-value|do-not-display/);
+});
