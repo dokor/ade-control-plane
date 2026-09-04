@@ -189,6 +189,9 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
 .badge-danger { --badge-color: var(--danger); }
 .badge-neutral { --badge-color: var(--muted); }
 
+.execution-diagnostic pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
+.execution-diagnostic summary { cursor: pointer; }
+.execution-diagnostic :is(p, dd) { overflow-wrap: anywhere; }
 .project-detail { display: grid; gap: 20px; min-width: 0; }
 .project-detail :is(a, button, summary):focus-visible, .project-disclosure summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .project-detail :is(h2, h3, h4) { text-transform: none; letter-spacing: normal; }

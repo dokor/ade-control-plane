@@ -15,6 +15,9 @@ const MAX_SUMMARY_LENGTH = 240;
  * a lost detail is cheaper than a leaked credential or host path.
  */
 const REDACTIONS: readonly (readonly [RegExp, string])[] = [
+  [/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^-]*PRIVATE KEY-----|$)/g, "[redacted-key]"],
+  [/\b(?:Bearer|Basic)\s+[^\s"']+/gi, "[redacted-auth]"],
+  [/\b[\w-]*(?:password|secret|token|authorization|api[_-]?key)[\w-]*["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,}]+)/gi, "[redacted-secret]"],
   [/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{10,}/g, "[redacted-token]"],
   [/\bsk-[A-Za-z0-9-_]{10,}/g, "[redacted-token]"],
   [/\b(?:eyJ[A-Za-z0-9_-]{10,}\.){2}[A-Za-z0-9_-]{10,}/g, "[redacted-token]"],

@@ -1,5 +1,6 @@
 import type { CommandOutput, CommandResult, CommandRunner } from "./v0/CommandRunner.js";
 import type { AgentUsageMetrics } from "@ade-control-plane/database";
+import { observeCommand } from "./v0/ExecutionDiagnostics.js";
 
 export type AgentProvider = "codex" | "claude-code";
 
@@ -35,7 +36,7 @@ abstract class CommandBackedAgentExecutor implements AgentExecutor {
   public abstract commandArguments(): readonly string[];
 
   public async execute(request: AgentExecutionRequest): Promise<AgentExecutionResult> {
-    const result = await this.options.commands.run({
+    const result = await observeCommand(this.options.commands, {
       executable: this.options.executable,
       args: this.commandArguments(),
       cwd: request.cwd,

@@ -5,6 +5,7 @@ import type { AuditEventRepository, ProjectRecord, ProjectRepository } from "@ad
 
 import type { CommandRunner } from "./CommandRunner.js";
 import { matchesGithubRemote } from "./ProjectCheckout.js";
+import { observeCommand } from "./ExecutionDiagnostics.js";
 
 const GIT_REF = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/u;
 
@@ -77,12 +78,12 @@ async function provisionProject(input: {
   const existing = await lstat(target).catch(() => null);
   if (existing) {
     if (!existing.isDirectory()) throw new ProjectProvisioningError("CHECKOUT_PATH_INVALID", "The registered project checkout path is not a directory.");
-    const remote = await input.commands.run({ executable: "git", args: ["-C", target, "remote", "get-url", "origin"], cwd: input.projectRoot, env: input.gitEnvironment, ...(input.signal ? { signal: input.signal } : {}) });
+    const remote = await observeCommand(input.commands, { executable: "git", args: ["-C", target, "remote", "get-url", "origin"], cwd: input.projectRoot, env: input.gitEnvironment, ...(input.signal ? { signal: input.signal } : {}) });
     if (remote.exitCode !== 0 || !matchesGithubRemote(remote.stdout, input.project.repositoryOwner, input.project.repositoryName)) throw new ProjectProvisioningError("CHECKOUT_REMOTE_MISMATCH", "The project checkout origin does not match the registered repository.");
   } else {
-    const clone = await input.commands.run({ executable: "git", args: ["clone", "--branch", baseBranch, "--single-branch", `git@github.com:${input.project.repositoryOwner}/${input.project.repositoryName}.git`, target], cwd: input.projectRoot, env: input.gitEnvironment, ...(input.signal ? { signal: input.signal } : {}) });
+    const clone = await observeCommand(input.commands, { executable: "git", args: ["clone", "--branch", baseBranch, "--single-branch", `git@github.com:${input.project.repositoryOwner}/${input.project.repositoryName}.git`, target], cwd: input.projectRoot, env: input.gitEnvironment, ...(input.signal ? { signal: input.signal } : {}) });
     if (clone.exitCode !== 0) throw new ProjectProvisioningError("GIT_CLONE_FAILED", "The worker could not provision the project checkout.");
-    const remote = await input.commands.run({ executable: "git", args: ["-C", target, "remote", "get-url", "origin"], cwd: input.projectRoot, env: input.gitEnvironment, ...(input.signal ? { signal: input.signal } : {}) });
+    const remote = await observeCommand(input.commands, { executable: "git", args: ["-C", target, "remote", "get-url", "origin"], cwd: input.projectRoot, env: input.gitEnvironment, ...(input.signal ? { signal: input.signal } : {}) });
     if (remote.exitCode !== 0 || !matchesGithubRemote(remote.stdout, input.project.repositoryOwner, input.project.repositoryName)) throw new ProjectProvisioningError("CHECKOUT_REMOTE_MISMATCH", "The project checkout origin does not match the registered repository.");
   }
   await input.persistence.auditEvents.append({
