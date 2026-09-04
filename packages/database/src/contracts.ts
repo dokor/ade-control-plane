@@ -151,6 +151,7 @@ export interface LeaseAcquisitionInput {
 }
 
 export interface ScheduleExecutionWithLeaseInput {
+  expectedGithubWorkId?: string;
   execution: ExecutionIntentInput;
   lease: LeaseAcquisitionInput;
 }
@@ -316,6 +317,9 @@ export interface GithubWorkReconciliationInput {
  * Reconciliation replaces presence atomically; it does not copy issue prose.
  */
 export interface GithubWorkRepository {
+  remove(input: { projectId: string; issueNumber: number; workId: string; actorRef: string; occurredAt: string }): Promise<"removed" | "already-removed" | "not-found" | "active" | "ambiguous">;
+  getRemoval(projectId: string, issueNumber: number): Promise<string | null>;
+  readmit(input: { projectId: string; issueNumber: number; removedAt: string; actorRef: string; occurredAt: string }): Promise<boolean>;
   getProfile(projectId: string): Promise<GithubWorkProfileRecord | null>;
   listForProject(projectId: string): Promise<readonly GithubWorkItemRecord[]>;
   listForProjects(projectIds: readonly string[]): Promise<readonly GithubWorkItemRecord[]>;

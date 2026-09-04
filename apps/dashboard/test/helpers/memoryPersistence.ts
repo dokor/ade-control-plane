@@ -236,6 +236,9 @@ export function createMemoryPersistence(
       },
     },
     githubWork: {
+      async remove() { throw new Error("Use PostgreSQL integration tests for transactional work removal."); },
+      async getRemoval() { return null; },
+      async readmit() { return false; },
       async getProfile(projectId) {
         return state.githubWorkProfiles.find((profile) => profile.projectId === projectId) ?? null;
       },

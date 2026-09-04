@@ -212,6 +212,7 @@ export class GithubWorkOrchestrator {
     }
     const executionId = randomUUID();
     const scheduled = await store.executions.scheduleWithLease({
+      expectedGithubWorkId: work.id,
       execution: {
         id: executionId,
         projectId: project.id,
