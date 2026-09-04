@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 
 import type { ProjectSetupRequirement } from "../lib/projectSetup.js";
 import { StatusBadge } from "./StatusBadge.js";

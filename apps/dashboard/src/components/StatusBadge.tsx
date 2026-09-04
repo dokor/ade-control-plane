@@ -24,7 +24,9 @@ const TONE_BY_STATUS: Readonly<Record<string, BadgeTone>> = {
   degraded: "warning",
   "degraded-github": "warning",
   draining: "warning",
-  optional: "warning",
+  optional: "neutral",
+  initializing: "warning",
+  missing: "warning",
   reconciling: "warning",
   "setup-required": "warning",
   stale: "warning",
@@ -39,7 +41,6 @@ const TONE_BY_STATUS: Readonly<Record<string, BadgeTone>> = {
   failed: "danger",
   incompatible: "danger",
   invalid: "danger",
-  missing: "danger",
 
   cancelled: "neutral",
   disabled: "neutral",

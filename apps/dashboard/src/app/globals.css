@@ -189,6 +189,53 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
 .badge-danger { --badge-color: var(--danger); }
 .badge-neutral { --badge-color: var(--muted); }
 
+.project-detail { display: grid; gap: 20px; min-width: 0; }
+.project-detail :is(a, button, summary):focus-visible, .project-disclosure summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.project-detail :is(h2, h3, h4) { text-transform: none; letter-spacing: normal; }
+.project-detail h2 { font-size: 21px; margin: 0 0 12px; }
+.project-detail h3 { font-size: 16px; margin: 0 0 14px; }
+.project-detail h4 { font-size: 14px; margin: 0 0 10px; }
+.project-headline { padding: 8px 0 0; }
+.project-headline h2 { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.project-headline p { margin: 8px 0; max-width: 85ch; }
+.project-detail .setup-process { list-style: none; padding: 0; margin: 18px 0 28px; }
+.project-detail .setup-process-step { padding: 16px; }
+.project-detail .setup-process-step.current { border-width: 2px; }
+.project-detail .setup-process-copy { gap: 10px; }
+.project-detail .setup-process-copy .badge { justify-self: start; }
+.project-detail .setup-process-copy .button { text-align: center; }
+.project-detail .setup-process-copy p { margin: 0; }
+.project-checks { scroll-margin-top: 24px; }
+.project-checks h3 .muted { font-size: 13px; font-weight: 400; margin-left: 8px; }
+.project-check-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.project-check-groups section { margin: 0; }
+.project-check-groups ul, .project-work-list { list-style: none; margin: 0; padding: 0; }
+.project-check { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border); }
+.project-check summary { cursor: pointer; font-size: 13px; overflow-wrap: anywhere; }
+.project-check.needs-action summary { font-weight: 650; }
+.project-check .badge { font-size: 10px; }
+.project-check p { font-size: 12px; overflow-wrap: anywhere; }
+.project-disclosure { margin-top: 18px; }
+.project-disclosure > summary { cursor: pointer; font-weight: 600; }
+.project-disclosure[open] > summary { margin-bottom: 18px; }
+.project-disclosure:target { outline: 2px solid var(--accent); outline-offset: 4px; }
+.project-detail > .project-disclosure { margin-top: 0; }
+.project-state-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px; }
+.project-metadata { display: grid; grid-template-columns: minmax(100px, auto) minmax(0, 1fr); gap: 10px 18px; font-size: 13px; }
+.project-metadata dt { color: var(--muted); }
+.project-metadata dd { margin: 0; overflow-wrap: anywhere; }
+.project-work-list li + li { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.project-detail p, .project-detail a { overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .project-check-groups { grid-template-columns: 1fr; gap: 20px; }
+  .project-detail .setup-process { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .project-state-columns { grid-template-columns: 1fr; gap: 24px; }
+  .project-detail .setup-process-copy { flex: 1; }
+  .project-detail .setup-process-copy :is(button, .button) { width: 100%; }
+}
+
 .setup-refresh-summary {
   display: flex;
   align-items: flex-start;

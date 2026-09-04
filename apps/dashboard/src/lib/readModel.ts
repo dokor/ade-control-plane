@@ -156,6 +156,7 @@ export interface OverviewViewModel {
 }
 
 export interface OverviewWorkItem {
+  initialization?: boolean;
   id: string;
   projectId: string;
   projectName: string;
@@ -192,6 +193,7 @@ export interface DecisionView {
 
 export interface ProjectDetailViewModel {
   project: ProjectView;
+  work: readonly OverviewWorkItem[];
   schedulerMode: SchedulerMode;
   executions: readonly ExecutionView[];
   timeline: readonly TimelineEntry[];
@@ -339,6 +341,7 @@ export async function buildOverview(
   const tasks = await read("Manual tasks", () => persistence.v0Tasks.list(30), []);
   for (const task of tasks.filter(({ status }) => ["PENDING", "RUNNING", "FAILED"].includes(status))) {
     work.push({
+      initialization: task.source.type === "ade-initialize",
       id: task.id, projectId: task.projectId, projectName: projectNames.get(task.projectId) ?? "Unknown project",
       title: task.source.type === "ade-initialize" ? "Prepare ADE"
         : task.source.type === "github-issue" ? `GitHub issue #${task.source.issueNumber}` : "Manual task",
@@ -445,6 +448,7 @@ export async function buildProjectDetail(
 
   return {
     project: view,
+    work: overview.work.filter((item) => item.projectId === project.id),
     schedulerMode: overview.schedulerMode,
     executions: executionViews,
     timeline: buildTimeline(executionViews, auditEvents, commands),

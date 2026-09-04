@@ -10,10 +10,12 @@ export function PriorityForm({
   projectId,
   priority,
   disabled,
+  variant = "primary",
 }: {
   projectId: string;
   priority: number;
   disabled: boolean;
+  variant?: "primary" | "default";
 }) {
   const router = useRouter();
   const helpId = `priority-help-${projectId}`;
@@ -59,7 +61,7 @@ export function PriorityForm({
         onChange={(event) => setValue(event.target.value)}
         disabled={disabled}
       />
-      <button type="submit" className="primary" disabled={disabled || pending}>
+      <button type="submit" className={variant === "primary" ? "primary" : undefined} disabled={disabled || pending}>
         {pending ? "…" : "Update priority"}
       </button>
       {message ? <p className="muted">{message}</p> : null}

@@ -67,6 +67,26 @@ test("reports an empty repository as setup-required with repairable items", asyn
   assert.ok(readiness.plannedFiles.includes(".github/ISSUE_TEMPLATE/ade-work.yml"));
 });
 
+test("restores an existing setup PR on a fresh read without writing to GitHub", async () => {
+  const client = new DeterministicFakeGithubClient();
+  const created = await prepareProjectSetup(project, runtime(client));
+  client.createSetupPullRequest = async () => { throw new Error("Read must not create a PR"); };
+  client.createLabel = async () => { throw new Error("Read must not create labels"); };
+  const reloaded = await inspectProjectSetup(project, runtime(client), undefined, null);
+  assert.equal(reloaded.setupPullRequestUrl, created.pullRequestUrl);
+  assert.equal(reloaded.capabilitySnapshot?.status, "unknown");
+  assert.equal(reloaded.capabilitySnapshot?.observedAt, null);
+});
+
+test("isolates pending PR lookup errors from repository readiness and hides raw failures", async () => {
+  const client = new DeterministicFakeGithubClient();
+  client.findOpenSetupPullRequest = async () => { throw new Error("private server detail"); };
+  const readiness = await inspectProjectSetup(project, runtime(client), undefined, null);
+  assert.equal(readiness.setupPullRequestLookupFailed, true);
+  assert.equal(readiness.requirements.find((item) => item.key === "repository-access")?.state, "ready");
+  assert.doesNotMatch(JSON.stringify(readiness), /private server detail/);
+});
+
 test("distinguishes invalid configuration from missing configuration", async () => {
   const client = new DeterministicFakeGithubClient();
   putFile(client, GITHUB_WORK_PROFILE_PATH, { version: "wrong", capabilities: [] });
@@ -114,6 +134,25 @@ test("blocks a stale runner proof until its checkout matches the default branch"
   });
   assert.equal(readiness.ready, false);
   assert.match(readiness.requirements.find(({ key }) => key === "runner-capability-check")?.detail ?? "", /stale/);
+  assert.equal(readiness.capabilitySnapshot?.status, "stale");
+  assert.equal(readiness.capabilitySnapshot?.observedAt, "2026-08-27T10:00:00.000Z");
+});
+
+test("distinguishes a failed runner check from missing setup and validates matching revisions", async () => {
+  const client = new DeterministicFakeGithubClient();
+  putReadyProfile(client);
+  putFile(client, "AGENTS.md", "Instructions");
+  putRequiredLabels(client);
+  for (const adeStatus of ["compatible", "incompatible", "invalid"] as const) {
+    const readiness = await inspectProjectSetup(project, runtime(client), undefined, {
+      projectId: project.id, repositoryGithubId: "123", compatible: adeStatus === "compatible", adeStatus,
+      contractVersion: GITHUB_WORK_PROFILE_VERSION, capabilities: ["github-work-items"], skillPaths: [".agents/skills"],
+      reason: "compatible", observedAt: "2026-08-27T10:00:00.000Z", runnerCheckoutRef: client.defaultBranchHead,
+    });
+    assert.equal(readiness.ready, adeStatus === "compatible");
+    assert.equal(readiness.capabilitySnapshot?.status, adeStatus === "compatible" ? "fresh" : "incompatible");
+    assert.equal(readiness.requirements.find((item) => item.key === "runner-capability-check")?.state, adeStatus === "compatible" ? "ready" : "invalid");
+  }
 });
 
 test("points the missing runner proof to the visible initialization action", async () => {
@@ -126,6 +165,13 @@ test("points the missing runner proof to the visible initialization action", asy
   assert.equal(runnerCheck?.state, "missing");
   assert.match(runnerCheck?.detail ?? "", /Start ADE initialization/);
   assert.doesNotMatch(runnerCheck?.detail ?? "", /Prepare ADE/);
+  const unverified = await inspectProjectSetup(project, runtime(client), undefined, {
+    projectId: project.id, repositoryGithubId: "123", compatible: true, adeStatus: "compatible",
+    contractVersion: GITHUB_WORK_PROFILE_VERSION, capabilities: ["github-work-items"], skillPaths: [".agents/skills"],
+    reason: "compatible", observedAt: "2026-08-27T10:00:00.000Z",
+  });
+  assert.equal(unverified.capabilitySnapshot?.status, "unknown");
+  assert.doesNotMatch(unverified.requirements.find((item) => item.key === "runner-capability-check")?.detail ?? "", /stale/);
 });
 
 test("reports GitHub App permission failures without claiming setup is ready", async () => {

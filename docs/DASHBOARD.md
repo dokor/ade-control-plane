@@ -52,18 +52,32 @@ project state, ADE readiness, quota, runner compatibility, or safety gates.
 
 ### `/projects/[id]` — Project detail
 
-Show:
+The project page starts with its repository, dominant status and reason. The
+three-step ADE Setup interaction stays central: **Prepare repository → Initialize
+ADE → Ready for work**, with one primary action inside the current step. A pending
+setup PR is rediscovered from GitHub after reload; a persisted queued/running
+initialization task links to progress instead of offering another initialization.
+If PR discovery fails, refresh is offered without claiming no PR exists.
 
-- repository link;
-- control-plane state and priority;
-- latest ADE snapshot freshness;
-- ADE stage/milestone/current work/next work summary;
-- current waiting reason;
-- recent executions;
-- scheduler decisions affecting this project;
-- human decisions requiring action;
-- relevant GitHub issue/PR links;
-- recent audit-safe timeline.
+Required checks are grouped into Repository setup, ADE capabilities and GitHub
+integration, with unresolved checks first. Per-check disclosures retain detailed
+reasons and fix help. Optional context and issue-template improvements are folded
+away and do not block readiness.
+
+**Project state** combines ADE environment and current/available work with direct
+task/workflow links and scheduling reasons. Runner capability freshness is based
+on the checked Git revision, not the age of a GitHub work observation. No runner
+result means **Not yet evaluated**, never stale. Missing setup and older revisions
+are amber; invalid/incompatible results and failed work are red; optional,
+disabled and unevaluated states are neutral; ready results are green. Labels and
+explanations accompany color. ADE readiness does not imply a runner is online or
+that queued work has no blocking decision.
+
+Technical details retain timestamps, checkout revision, planned files/labels,
+manual corrections, control state, priority and work observation metadata.
+Controls, deletion, execution history and the audit-safe timeline remain available
+in disclosures; human decisions remain actionable. Setup mutation, scheduler,
+single-active-task enforcement and human-reviewed PR semantics are unchanged.
 
 Timeline entries use operator-facing titles with the event type, status,
 execution/work reference, and bounded sanitized context. Warning and error
