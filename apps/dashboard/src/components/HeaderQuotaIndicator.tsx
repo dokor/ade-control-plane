@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { evaluateQuota, type QuotaDecision } from "@ade-control-plane/quota";
 
 import { loadDashboardConfig } from "../lib/config.js";
@@ -18,9 +17,7 @@ export async function HeaderQuotaIndicator() {
     : `${quota.availablePercent}% available`;
 
   return (
-    <Link href="/#capacity" aria-label={`AI quota: ${label}, ${quota.state}`}>
-      Quota <StatusBadge status={quotaCapacityTone(quota.state)}>{label}</StatusBadge>
-    </Link>
+    <StatusBadge status={quotaCapacityTone(quota.state)}>{label}</StatusBadge>
   );
 }
 
