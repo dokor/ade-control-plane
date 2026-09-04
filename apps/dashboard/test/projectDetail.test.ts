@@ -9,6 +9,23 @@ import { projectDetailFixture, projectDetailStates } from "./helpers/projectDeta
 import { overviewFixture } from "./helpers/overview.js";
 import { NOW, project } from "./helpers/fixtures.js";
 
+for (const count of [0, 1, 3, 4, 7]) test(`Work shows three items at most and expands all ${count} items in order`, async () => {
+  const props = await projectDetailFixture("blocked-work");
+  props.work = Array.from({ length: count }, (_, index) => ({ ...props.work[0]!, id: `work-${index}`, title: `Work item ${index}`, href: `/tasks/work-${index}` }));
+  for (const expanded of [false, true, false]) {
+    const html = renderToStaticMarkup(createElement(ProjectSetupPanel, { ...props, workExpanded: expanded }));
+    const list = html.match(/<ul id="project-work-list"[^>]*>([\s\S]*?)<\/ul>/)?.[1] ?? "";
+    const shown = expanded ? count : Math.min(3, count);
+    assert.deepEqual([...list.matchAll(/href="([^"]+)"/g)].map((match) => match[1]),
+      Array.from({ length: shown }, (_, index) => `/tasks/work-${index}`));
+    if (count > 3) {
+      assert.match(html, new RegExp(`aria-expanded="${expanded}" aria-controls="project-work-list"`));
+      assert.ok(html.includes(expanded ? "Voir moins" : "Voir plus"));
+    } else assert.doesNotMatch(html, /Voir plus|Voir moins/);
+    if (!count) assert.match(html, /No current or queued work/);
+  }
+});
+
 for (const state of projectDetailStates) test(`project detail renders ${state} with one primary action and three steps`, async () => {
   const props = await projectDetailFixture(state);
   const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));
