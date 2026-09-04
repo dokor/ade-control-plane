@@ -56,7 +56,9 @@ async function loadHeaderQuota(): Promise<HeaderQuotaView> {
 
     return {
       state: decision.state,
-      availablePercent: snapshot.usedPercent === null ? null : Math.max(0, 100 - snapshot.usedPercent),
+      availablePercent: snapshot.usedPercent === null
+        ? null
+        : Math.round(Math.max(0, 100 - snapshot.usedPercent)),
     };
   } catch {
     return { state: "unknown", availablePercent: null };
