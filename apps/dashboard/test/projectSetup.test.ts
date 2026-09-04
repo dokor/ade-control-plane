@@ -116,6 +116,18 @@ test("blocks a stale runner proof until its checkout matches the default branch"
   assert.match(readiness.requirements.find(({ key }) => key === "runner-capability-check")?.detail ?? "", /stale/);
 });
 
+test("points the missing runner proof to the visible initialization action", async () => {
+  const client = new DeterministicFakeGithubClient();
+  putReadyProfile(client);
+  client.contents.set("AGENTS.md", { path: "AGENTS.md", sha: "agents", content: Buffer.from("# Instructions").toString("base64") });
+  putRequiredLabels(client);
+  const readiness = await inspectProjectSetup(project, runtime(client), undefined, null);
+  const runnerCheck = readiness.requirements.find(({ key }) => key === "runner-capability-check");
+  assert.equal(runnerCheck?.state, "missing");
+  assert.match(runnerCheck?.detail ?? "", /Start ADE initialization/);
+  assert.doesNotMatch(runnerCheck?.detail ?? "", /Prepare ADE/);
+});
+
 test("reports GitHub App permission failures without claiming setup is ready", async () => {
   const client = new DeterministicFakeGithubClient();
   client.listLabels = async () => { throw new Error("forbidden"); };

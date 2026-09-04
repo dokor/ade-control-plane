@@ -153,7 +153,7 @@ export async function inspectProjectSetup(
           ? "Runner checkout is stale relative to the repository default branch; refresh it before scheduling."
         : missing.length > 0
           ? `Runner checkout is missing required ADE capabilities: ${missing.join(", ")}.`
-          : "Run Prepare ADE after the setup PR is merged to prove the runner checkout can resolve ADE workflows.",
+          : "After merging the setup PR, click “Start ADE initialization” to verify that the worker checkout can resolve ADE workflows.",
       repairable: false,
       source: "runtime",
     });
