@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import React, { type ReactNode } from "react";
 
 export type BadgeTone = "success" | "info" | "warning" | "danger" | "neutral";
 
@@ -22,6 +22,7 @@ const TONE_BY_STATUS: Readonly<Record<string, BadgeTone>> = {
   validating: "info",
 
   degraded: "warning",
+  "degraded-github": "warning",
   draining: "warning",
   optional: "warning",
   reconciling: "warning",

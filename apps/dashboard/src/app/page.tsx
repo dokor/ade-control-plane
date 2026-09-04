@@ -1,192 +1,39 @@
-import Link from "next/link";
-
+import { Suspense } from "react";
 import { ControlButton } from "../components/ControlButton.js";
 import { QuotaRefreshButton } from "../components/QuotaRefreshButton.js";
+import { OverviewContent, OverviewLoading, OverviewUnavailable } from "../components/OverviewContent.js";
 import { Shell } from "../components/Shell.js";
 import { requireAuthenticatedContext } from "../lib/auth.js";
-import { formatAge, formatInstant, formatPercent } from "../lib/format.js";
+import type { DashboardConfig } from "../lib/config.js";
 import { getPersistence } from "../lib/persistence.js";
-import { buildOverview } from "../lib/readModel.js";
+import { buildOverview, type OverviewViewModel } from "../lib/readModel.js";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
   const { session, config } = await requireAuthenticatedContext("/");
-  const overview = await buildOverview({
-    persistence: await getPersistence(),
-    quotaProvider: config.quotaProvider,
-    quotaAccountRef: config.quotaAccountRef,
-    adeRuntimeVersion: config.adeRuntimeVersion,
-  });
+  return <Shell title="Overview" actorRef={session.actorRef} refreshIntervalMs={config.refreshIntervalMs}>
+    <Suspense fallback={<OverviewLoading />}><OverviewData config={config} /></Suspense>
+  </Shell>;
+}
 
-  return (
-    <Shell
-      title="Overview"
-      actorRef={session.actorRef}
-      refreshIntervalMs={config.refreshIntervalMs}
-    >
-      <div className="cards">
-        <article className="card">
-          <h2>Scheduler</h2>
-          <p className="value">
-            <span className={`badge ${overview.schedulerMode === "running" ? "ok" : "warn"}`}>
-              {overview.schedulerMode}
-            </span>
-          </p>
-          <p className="detail">{overview.schedulerExplanation}</p>
-          <div className="actions">
-            {overview.schedulerMode === "running" ? (
-              <ControlButton
-                type="global.pause"
-                label="Pause globally"
-                variant="danger"
-                confirm="Pause all scheduling? No new privileged dispatch will start."
-              />
-            ) : (
-              <ControlButton
-                type="global.resume"
-                label="Resume"
-                variant="primary"
-                confirm="Resume global scheduling?"
-              />
-            )}
-            <ControlButton
-              type="global.safe-mode"
-              label="Safe mode"
-              confirm="Enable safe mode? Only reconciliation continues."
-              disabled={overview.schedulerMode === "safe_mode"}
-              disabledReason="Safe mode is already enabled."
-            />
-          </div>
-        </article>
-
-        <article className="card">
-          <h2>Provider quota</h2>
-          <p className="value">
-            <span className={`badge ${overview.quota.state === "normal" ? "ok" : "warn"}`}>
-              {overview.quota.state}
-            </span>{" "}
-            {formatPercent(overview.quota.usedPercent)}
-          </p>
-          <p className="detail">
-            {overview.quota.provider} / {overview.quota.accountRef}
-            <br />
-            Resets {formatInstant(overview.quota.resetsAt)}
-            <br />
-            Window {overview.quota.windowDurationMins === null ? "unknown" : `${overview.quota.windowDurationMins}m`}
-            <br />
-            Snapshot {formatAge(overview.quota.snapshotAgeMs)}
-          </p>
-          <p className="detail">{overview.quota.reason}</p>
-          <p className="detail">Dispatch allowed: {overview.quota.canStartWork ? "yes" : "no"}</p>
-          <QuotaRefreshButton />
-        </article>
-
-        <article className="card">
-          <h2>Runners</h2>
-          <p className="value">{overview.runners.filter((runner) => runner.healthy).length}/{overview.runners.length}</p>
-          <p className="detail">{overview.runnerHealthSummary}</p>
-          <p className="detail">
-            <Link href="/runners">Manage runners</Link>
-          </p>
-        </article>
-
-        <article className="card">
-          <h2>ADE runtime</h2>
-          <p className="value">{overview.adeRuntimeVersion}</p>
-          <p className="detail">Pinned runtime used by the worker.</p>
-        </article>
-
-        <article className="card">
-          <h2>Worker health</h2>
-          <p className="value">
-            <span className={`badge ${overview.workerHealth.status === "healthy" || overview.workerHealth.status === "idle" ? "ok" : "warn"}`}>
-              {overview.workerHealth.status}
-            </span>
-          </p>
-          <p className="detail">
-            Heartbeat {formatInstant(overview.workerHealth.lastHeartbeatAt)}
-            <br />
-            Last cycle {formatInstant(overview.workerHealth.lastSuccessfulCycleAt)}
-            <br />
-            Next wake {formatInstant(overview.workerHealth.nextWakeAt)}
-            {overview.workerHealth.nextWakeReason ? ` (${overview.workerHealth.nextWakeReason})` : ""}
-          </p>
-        </article>
-
-        <article className="card">
-          <h2>Active execution</h2>
-          {overview.activeExecutions.length === 0 ? (
-            <p className="detail">Nothing is executing right now.</p>
-          ) : (
-            overview.activeExecutions.map((execution) => (
-              <p key={execution.id} className="detail">
-                <span className="badge running">{execution.status}</span>{" "}
-                {execution.projectName} — {execution.capability}
-                <br />
-                since {formatInstant(execution.startedAt ?? execution.requestedAt)}
-              </p>
-            ))
-          )}
-        </article>
-      </div>
-
-      <section>
-        <h2>Attention queue</h2>
-        {overview.attention.length === 0 ? (
-          <p className="muted">Nothing needs a human decision.</p>
-        ) : (
-          <div className="list">
-            {overview.attention.map((item) => (
-              <article key={item.key} className="panel">
-                <div className="row">
-                  <strong>{item.title}</strong>
-                  <span className="muted">{formatInstant(item.since)}</span>
-                </div>
-                <p className="detail">{item.reason}</p>
-                <p className="detail">Recommended: {item.recommendedAction}</p>
-                {item.href ? <Link href={item.href}>Open</Link> : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section>
-        <div className="row"><h2>Projects</h2><Link className="button primary" href="/projects/new">Add project</Link></div>
-        {overview.projects.length === 0 ? (
-          <p className="muted">No project is registered yet.</p>
-        ) : (
-          <div className="list">
-            {overview.projects.map((project) => (
-              <article key={project.id} className="panel">
-                <div className="row">
-                  <strong>
-                    <Link href={`/projects/${project.id}`}>{project.name}</Link>
-                  </strong>
-                  <span>
-                    <span className={`badge ${project.status}`}>{project.status}</span>{" "}
-                    <span className="badge">priority {project.priority}</span>
-                  </span>
-                </div>
-                <p className="detail">
-                  {project.stage ? `Contract ${project.stage}` : "GitHub contract unknown"}
-                  {project.milestone ? ` · ${project.milestone}` : ""}
-                  {" · GitHub sync "}
-                  {formatAge(project.snapshotAgeMs)}
-                  {project.snapshotFresh ? "" : " (stale)"}
-                </p>
-                {project.currentWorkSummary ? (
-                  <p className="detail">Current: {project.currentWorkSummary}</p>
-                ) : null}
-                {project.waitingReason ? (
-                  <p className="detail">Waiting: {project.waitingReason}</p>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
-    </Shell>
-  );
+async function OverviewData({ config }: { config: DashboardConfig }) {
+  let overview: OverviewViewModel | null = null;
+  try {
+    overview = await buildOverview({
+      persistence: await getPersistence(), quotaProvider: config.quotaProvider,
+      quotaAccountRef: config.quotaAccountRef, adeRuntimeVersion: config.adeRuntimeVersion,
+      tolerateUnavailable: true,
+    });
+  } catch {
+    // Never serialize a database connection error into the page.
+    console.error("Overview read model unavailable");
+  }
+  return overview ? <OverviewContent overview={overview} quotaControl={<QuotaRefreshButton />} controls={<div className="actions">
+      <ControlButton type={overview.schedulerMode === "running" ? "global.pause" : "global.resume"}
+        label={overview.schedulerMode === "running" ? "Pause globally" : "Resume scheduling"}
+        confirm={overview.schedulerMode === "running" ? "Pause all scheduling?" : "Resume global scheduling?"} />
+      <ControlButton type="global.safe-mode" label="Safe mode" confirm="Enable safe mode? Only reconciliation continues."
+        disabled={overview.schedulerMode === "safe_mode"} disabledReason="Safe mode is already enabled." />
+    </div>} /> : <OverviewUnavailable />;
 }

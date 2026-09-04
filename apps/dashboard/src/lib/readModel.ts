@@ -138,6 +138,9 @@ export interface TimelineEntry {
 }
 
 export interface OverviewViewModel {
+  unavailableSections: readonly string[];
+  work: readonly OverviewWorkItem[];
+  githubSync: "current" | "stale" | "unknown";
   generatedAt: string;
   adeRuntimeVersion: string;
   schedulerMode: SchedulerMode;
@@ -150,6 +153,20 @@ export interface OverviewViewModel {
   activeExecutions: readonly ExecutionView[];
   attention: readonly AttentionItem[];
   projects: readonly ProjectView[];
+}
+
+export interface OverviewWorkItem {
+  id: string;
+  projectId: string;
+  projectName: string;
+  title: string;
+  status: string;
+  stage: string;
+  startedAt: string | null;
+  href: string;
+  active: boolean;
+  needsAttention: boolean;
+  reason: string;
 }
 
 export type WorkerHealthStatus = "healthy" | "idle" | "waiting-quota" | "degraded-github" | "stale/unhealthy";
@@ -189,6 +206,7 @@ export interface ProjectDetailViewModel {
 }
 
 export interface ReadModelInput {
+  tolerateUnavailable?: boolean;
   persistence: ControlPlanePersistence;
   quotaProvider: string;
   quotaAccountRef: string;
@@ -204,18 +222,26 @@ export async function buildOverview(
 ): Promise<OverviewViewModel> {
   const now = input.now ?? new Date().toISOString();
   const { persistence } = input;
+  const unavailable = new Set<string>();
+  async function read<T>(section: string, operation: () => Promise<T>, fallback: T): Promise<T> {
+    try { return await operation(); } catch (error) {
+      if (!input.tolerateUnavailable) throw error;
+      unavailable.add(section);
+      return fallback;
+    }
+  }
   const settings = await persistence.settings.get();
   const [projects, runners, activeExecutions] = await Promise.all([
     persistence.projects.list(),
-    persistence.runners.list(),
-    persistence.executions.listActive(),
+    read("Runners", () => persistence.runners.list(), []),
+    read("Executions", () => persistence.executions.listActive(), []),
   ]);
   const [workItems, profiles, histories, quotaSnapshot, recentAudits] = await Promise.all([
-    persistence.githubWork.listForProjects(projects.map(({ id }) => id)),
-    Promise.all(projects.map((project) => persistence.githubWork.getProfile(project.id))),
-    Promise.all(projects.map((project) => persistence.executions.listByProjectId(project.id, 100))),
-    persistence.providerQuotaSnapshots.getLatest(input.quotaProvider, input.quotaAccountRef),
-    persistence.auditEvents.listRecent(100),
+    read("GitHub work", () => persistence.githubWork.listForProjects(projects.map(({ id }) => id)), []),
+    Promise.all(projects.map((project) => read("Project readiness", () => persistence.githubWork.getProfile(project.id), null))),
+    Promise.all(projects.map((project) => read("Executions", () => persistence.executions.listByProjectId(project.id, 100), []))),
+    read("Provider quota", () => persistence.providerQuotaSnapshots.getLatest(input.quotaProvider, input.quotaAccountRef), null),
+    read("Worker health", () => persistence.auditEvents.listRecent(100), []),
   ]);
 
   const quota = buildQuotaView(
@@ -279,7 +305,64 @@ export async function buildOverview(
     toRunnerView(runner, activeExecutions, now),
   );
 
+  const executions = [...activeExecutions, ...histories.flat()];
+  const work: OverviewWorkItem[] = await Promise.all(workItems.filter((item) => item.present).map(async (item) => {
+    const execution = item.executionRef
+      ? executions.find(({ id, projectId }) => id === item.executionRef && projectId === item.projectId)
+        ?? await read("Executions", () => persistence.executions.getById(item.executionRef!), null)
+      : executions.filter((entry) => entry.projectId === item.projectId && entry.workRef === githubWorkRef(item.issueNumber))
+        .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))[0];
+    const correlated = execution?.projectId === item.projectId ? execution : null;
+    const workflow = item.state !== "completed" && correlated && persistence.deliveryWorkflows
+      ? await read("Workflow stages", () => persistence.deliveryWorkflows!.getByExecutionId(correlated.id), null) : null;
+    const active = correlated ? ["queued", "leased", "dispatched", "running"].includes(correlated.status) : item.state === "running";
+    const status = item.state === "completed" ? "completed"
+      : correlated?.status === "unknown" || workflow?.reconciliationRequired ? "reconciling"
+      : item.state === "blocked" || item.state === "failed" ? item.state
+      : correlated?.status === "failed" || correlated?.status === "cancelled" ? correlated.status
+      : workflow?.stage ?? item.state;
+    return {
+      id: item.id, projectId: item.projectId, projectName: projectNames.get(item.projectId) ?? "Unknown project",
+      title: `GitHub issue #${item.issueNumber}`, status,
+      stage: workflow?.stage ?? (active ? "Stage not yet recorded" : status),
+      startedAt: correlated?.startedAt ?? null,
+      href: `/tasks/github/${item.projectId}/${item.issueNumber}`,
+      active: active && status !== "completed" && status !== "reconciling",
+      needsAttention: ["waiting-human", "blocked", "failed", "reconciling"].includes(status),
+      reason: sanitizeText(correlated?.errorSummary ?? workflow?.transitionReason ?? (
+        status === "waiting-human" ? "Review the pull request or resolve the pending ADE decision."
+          : status === "reconciling" ? "Confirm the previous execution outcome before retrying."
+            : "Open the workflow for its current blocker and next action."), 240),
+    };
+  }));
+  // Include the manual-task path; it uses a separate persistence contract.
+  const tasks = await read("Manual tasks", () => persistence.v0Tasks.list(30), []);
+  for (const task of tasks.filter(({ status }) => ["PENDING", "RUNNING", "FAILED"].includes(status))) {
+    work.push({
+      id: task.id, projectId: task.projectId, projectName: projectNames.get(task.projectId) ?? "Unknown project",
+      title: task.source.type === "ade-initialize" ? "Prepare ADE"
+        : task.source.type === "github-issue" ? `GitHub issue #${task.source.issueNumber}` : "Manual task",
+      status: task.status.toLowerCase(), stage: task.status === "RUNNING" ? "Executing task" : task.status.toLowerCase(),
+      startedAt: task.startedAt, href: `/tasks/${task.id}`,
+      active: task.status === "PENDING" || task.status === "RUNNING", needsAttention: task.status === "FAILED",
+      reason: sanitizeText(task.errorSummary ?? "Open the task to view execution progress.", 240),
+    });
+  }
+  // Non-GitHub executions still need a navigable entry.
+  for (const execution of activeExecutions.filter((entry) => !workItems.some((item) =>
+    item.present && item.projectId === entry.projectId && (item.executionRef === entry.id || githubWorkRef(item.issueNumber) === entry.workRef)))) {
+    work.push({ id: execution.id, projectId: execution.projectId, projectName: projectNames.get(execution.projectId) ?? "Unknown project",
+      title: "Execution", status: execution.status, stage: execution.status, startedAt: execution.startedAt,
+      href: `/projects/${execution.projectId}`, active: execution.status !== "unknown", needsAttention: execution.status === "unknown",
+      reason: "Review execution evidence on the project page." });
+  }
+
   return {
+    unavailableSections: [...unavailable].sort(),
+    work,
+    githubSync: unavailable.has("GitHub work") || unavailable.has("Project readiness") || profiles.length === 0 || profiles.some((profile) => profile === null)
+      ? "unknown" : profiles.some((profile) => profile?.reason === "reconciliation-deferred" || (ageMs(profile!.observedAt, now) ?? Infinity) >= STALE_SNAPSHOT_MS)
+        || workItems.some((item) => item.present && !(Date.parse(item.expiresAt) > Date.parse(now))) ? "stale" : "current",
     generatedAt: now,
     adeRuntimeVersion: input.adeRuntimeVersion ?? "unknown",
     schedulerMode: settings.schedulerMode,
@@ -305,12 +388,16 @@ function buildWorkerHealth(
   schedulerMode: SchedulerMode,
   quotaState: QuotaDecision["state"],
 ): WorkerHealthView {
-  const workerAudits = audits.filter((event) => event.category === "worker");
-  const started = [...workerAudits].reverse().find((event) => event.action === "worker.started") ?? null;
-  const success = [...workerAudits].reverse().find((event) => event.action === "worker.cycle-succeeded") ?? null;
-  const failure = [...workerAudits].reverse().find((event) => event.action === "worker.cycle-failed") ?? null;
-  const lastHeartbeatAt = runners.map((runner) => runner.lastHeartbeatAt).filter((value): value is string => value !== null).sort().at(-1) ?? null;
-  const unhealthy = runners.length === 0 || runners.every((runner) => !runner.healthy);
+  const workerAudits = audits.filter((event) => event.category === "worker")
+    .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+  const started = workerAudits.find((event) => event.action === "worker.started") ?? null;
+  const success = workerAudits.find((event) => event.action === "worker.cycle-succeeded") ?? null;
+  const failure = workerAudits.find((event) => event.action === "worker.cycle-failed") ?? null;
+  // The production worker records its own heartbeat under this identity.
+  // Another online runner must not make a stopped worker look healthy.
+  const workerRunner = runners.find((runner) => runner.name === "github-work-local");
+  const lastHeartbeatAt = workerRunner?.lastHeartbeatAt ?? null;
+  const unhealthy = !workerRunner?.healthy;
   const status: WorkerHealthStatus = unhealthy
     ? "stale/unhealthy"
     : failure && (!success || Date.parse(failure.occurredAt) > Date.parse(success.occurredAt))
