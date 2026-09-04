@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Shared by hosted builds and the privileged deployment wrapper. No secrets/I/O mutations.
+set -Eeuo pipefail
+classify() {
+  case "$1" in
+    apps/dashboard/*) echo dashboard ;;
+    apps/worker/*|packages/ade-client/*|packages/host-runner/*|packages/runner-protocol/*|runner/*|deploy/bin/worker-entrypoint|deploy/bin/git-ssh|deploy/ssh/*) echo worker ;;
+    docs/*|README.md|AGENTS.md|LICENSE*|.github/ISSUE_TEMPLATE/*) echo none ;;
+    *) echo full ;;
+  esac
+}
+case "${1:-}" in
+  migrations)
+    base="${2:-}"; head="${3:?head required}"
+    if ! git merge-base --is-ancestor "$base" "$head" 2>/dev/null; then echo true; exit; fi
+    files="$(git diff --name-only "$base" "$head")" || { echo true; exit; }
+    if grep -Eq '^(packages/database/(migrations/|src/postgres/migrations\.ts)|apps/worker/src/v0/migrate\.ts)' <<< "$files"; then echo true; else echo false; fi
+    ;;
+  scope)
+    base="${2:-}"; head="${3:?head required}"
+    if ! git merge-base --is-ancestor "$base" "$head" 2>/dev/null; then echo full; exit; fi
+    dashboard=false; worker=false
+    files="$(git diff --name-only "$base" "$head")" || { echo full; exit; }
+    while IFS= read -r file; do
+      [[ -n "$file" ]] || continue
+      case "$(classify "$file")" in
+        dashboard) dashboard=true ;; worker) worker=true ;; full) dashboard=true; worker=true ;;
+      esac
+    done <<< "$files"
+    if $dashboard && $worker; then echo full; elif $dashboard; then echo dashboard; elif $worker; then echo worker; else echo none; fi
+    ;;
+  key)
+    runtime="${2:?runtime required}"; head="${3:?head required}"
+    [[ "$runtime" == dashboard || "$runtime" == worker ]] || exit 1
+    git ls-tree -r --full-tree "$head" | while IFS=$'\t' read -r object file; do
+      scope="$(classify "$file")"
+      if [[ "$scope" == full || "$scope" == "$runtime" ]]; then printf '%s\t%s\n' "$object" "$file"; fi
+    done | sha256sum | cut -d ' ' -f 1
+    ;;
+  *) echo 'usage: deployment-scope scope|migrations <base> <head> | key <dashboard|worker> <head>' >&2; exit 1 ;;
+esac

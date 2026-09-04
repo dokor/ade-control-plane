@@ -71,15 +71,6 @@ RUN groupadd --system --gid 10002 ade-worker \
   && mkdir -p /home/ade-worker/.codex /home/ade-git \
   && chown -R ade-worker:ade-worker /home/ade-worker
 WORKDIR /workspace
-COPY --from=worker-dependencies /worker-deploy/ ./
-COPY apps/worker/src ./apps/worker/src
-COPY deploy/bin/worker-entrypoint /usr/local/bin/ade-control-plane-worker
-COPY deploy/bin/git-ssh /usr/local/bin/ade-git-ssh
-COPY deploy/ssh/github_known_hosts /etc/ssh/ade_github_known_hosts
-RUN chmod 0755 /usr/local/bin/ade-git-ssh \
-  && chmod 0644 /etc/ssh/ade_github_known_hosts \
-  && ssh-keygen -lf /etc/ssh/ade_github_known_hosts -E sha256 | grep -F 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
-RUN chmod 0755 /usr/local/bin/ade-control-plane-worker
 # Keep the ADE CLI immutable and outside the writable Codex home volume.
 RUN npm install --global "@alelouet/ai-delivery-engine@${ADE_VERSION}" \
   && command -v ade
@@ -88,5 +79,15 @@ RUN npm install --global "@alelouet/ai-delivery-engine@${ADE_VERSION}" \
 USER ade-worker
 RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh \
   && command -v codex
+USER root
+COPY --from=worker-dependencies /worker-deploy/ ./
+COPY apps/worker/src ./apps/worker/src
+COPY deploy/bin/worker-entrypoint /usr/local/bin/ade-control-plane-worker
+COPY deploy/bin/git-ssh /usr/local/bin/ade-git-ssh
+COPY deploy/ssh/github_known_hosts /etc/ssh/ade_github_known_hosts
+RUN chmod 0755 /usr/local/bin/ade-git-ssh /usr/local/bin/ade-control-plane-worker \
+  && chmod 0644 /etc/ssh/ade_github_known_hosts \
+  && ssh-keygen -lf /etc/ssh/ade_github_known_hosts -E sha256 | grep -F 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
+USER ade-worker
 ENTRYPOINT ["/usr/local/bin/ade-control-plane-worker"]
 CMD ["node_modules/.bin/tsx", "apps/worker/src/github/main.ts"]

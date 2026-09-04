@@ -31,46 +31,25 @@ wait_healthy() {
 }
 
 record_deployed_sha() {
+  local service container_id image_id digest history=""
   install -d -o root -g root -m 0755 "$(dirname "$DEPLOYED_SHA_FILE")"
+  # Capture the actual running digests, including an unchanged runtime, for rollback/retention.
+  for service in dashboard worker; do
+    container_id="$("${compose[@]}" ps -q "$service")"
+    if [[ -n "$container_id" ]]; then
+      image_id="$(docker inspect --format '{{.Image}}' "$container_id")"
+      digest="$(docker image inspect --format '{{join .RepoDigests ","}}' "$image_id")"
+      history+="$(printf '%s\t%s\t%s' "$requested_sha" "$service" "$digest")"$'\n'
+    fi
+  done
+  printf '%s' "$history" >> /var/lib/ade-control-plane/image-history.tsv
   install -o root -g root -m 0644 <(printf '%s\n' "$requested_sha") "$DEPLOYED_SHA_FILE"
 }
 
-deployment_scope="full"
-dashboard_changed=false
-worker_changed=false
-shared_changed=false
-migration_changed=false
-
-classify_change() {
-  local changed_file="$1"
-  case "$changed_file" in
-    apps/dashboard/*)
-      dashboard_changed=true
-      ;;
-    packages/database/migrations/*|packages/database/src/postgres/migrations.ts)
-      shared_changed=true
-      migration_changed=true
-      ;;
-    apps/worker/src/v0/migrate.ts)
-      worker_changed=true
-      migration_changed=true
-      ;;
-    apps/worker/*|deploy/bin/worker-entrypoint)
-      worker_changed=true
-      ;;
-    packages/*|deploy/*|compose.yaml|Dockerfile|.dockerignore|pnpm-lock.yaml|pnpm-workspace.yaml|package.json|tsconfig*.json)
-      shared_changed=true
-      ;;
-    docs/*|.github/*|README.md|AGENTS.md|LICENSE*)
-      ;;
-    *)
-      shared_changed=true
-      ;;
-  esac
-}
-
 [[ "$(id -u)" -eq 0 ]] || die "must run as root"
-[[ "$#" -eq 1 ]] || die "usage: deploy <40-character commit SHA>"
+[[ "$#" -eq 3 || ( "$#" -eq 4 && "$4" == "--rollback" ) || ( "$#" -eq 2 && "$2" == "--local" ) ]] || die "usage: deploy <SHA> <dashboard@digest> <worker@digest> [--rollback] | deploy <SHA> --local"
+local_build=false
+if [[ "$#" -eq 2 ]]; then local_build=true; fi
 
 readonly requested_sha="$1"
 [[ "$requested_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die "commit SHA is invalid"
@@ -93,36 +72,29 @@ esac
 
 git fetch --quiet --no-tags origin "$requested_sha" || die "could not fetch requested commit"
 git cat-file -e "${requested_sha}^{commit}" || die "requested object is not a commit"
-
-if [[ "$previous_sha" =~ ^[0-9a-fA-F]{40}$ ]] \
+if [[ "$#" -eq 3 && "$previous_sha" =~ ^[0-9a-fA-F]{40}$ && "$previous_sha" != "$requested_sha" ]] \
   && git cat-file -e "${previous_sha}^{commit}" 2>/dev/null \
-  && git merge-base --is-ancestor "$previous_sha" "$requested_sha" 2>/dev/null; then
-  deployment_scope="none"
-  dashboard_changed=false
-  worker_changed=false
-  shared_changed=false
+  && ! git merge-base --is-ancestor "$previous_sha" "$requested_sha"; then
+  die "release is older than or diverges from production; an explicit manual rollback is required"
+fi
 
-  changed_files="$(git diff --name-only "$previous_sha" "$requested_sha")" \
-    || deployment_scope="full"
-  if [[ "$deployment_scope" != "full" ]]; then
-    while IFS= read -r changed_file; do
-      [[ -n "$changed_file" ]] || continue
-      classify_change "$changed_file"
-    done <<< "$changed_files"
-
-    if [[ "$shared_changed" == true || ("$dashboard_changed" == true && "$worker_changed" == true) ]]; then
-      deployment_scope="full"
-    elif [[ "$dashboard_changed" == true ]]; then
-      deployment_scope="dashboard"
-    elif [[ "$worker_changed" == true ]]; then
-      deployment_scope="worker"
-    fi
-  fi
+# Use the exact validated revision's shared classifier, including accumulated
+# changes since the last successful production release (not just HEAD^).
+if git cat-file -e "$requested_sha:deploy/bin/deployment-scope" 2>/dev/null; then
+  deployment_scope="$(bash <(git show "$requested_sha:deploy/bin/deployment-scope") scope "$previous_sha" "$requested_sha")"
+  migration_changed="$(bash <(git show "$requested_sha:deploy/bin/deployment-scope") migrations "$previous_sha" "$requested_sha")"
+elif "$local_build"; then
+  # A reviewed pre-cutover revision can still be rebuilt during manual rollback.
+  deployment_scope=full
+  migration_changed=true
+else
+  die "pre-cutover revision requires the explicit manual local-build rollback"
 fi
 
 git checkout --detach --force "$requested_sha" >/dev/null || die "could not select requested commit"
 
 printf 'deployment scope: %s\n' "$deployment_scope"
+compose=(docker compose --env-file "$ENV_FILE" --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
 
 if [[ "$deployment_scope" == "none" ]]; then
   record_deployed_sha
@@ -130,40 +102,41 @@ if [[ "$deployment_scope" == "none" ]]; then
   exit 0
 fi
 
-compose=(docker compose --env-file "$ENV_FILE" --project-directory "$APP_DIR" -f "$COMPOSE_FILE")
 "${compose[@]}" config --quiet || die "Compose configuration is invalid"
 "${compose[@]}" up -d postgres || die "PostgreSQL could not start"
 wait_healthy postgres
 
+services=()
 case "$deployment_scope" in
-  full)
-    "${compose[@]}" build --pull || die "container build failed"
-    # The V0 worker also migrates on startup. Running the migration command
-    # first makes the CD order explicit and fails before containers switch.
-    "${compose[@]}" run --rm --no-deps worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts \
-      >/dev/null || die "database migration failed"
-    "${compose[@]}" up -d dashboard worker || die "application containers could not start"
-    wait_healthy dashboard
-    wait_healthy worker
-    ;;
-  dashboard)
-    "${compose[@]}" build --pull dashboard || die "dashboard build failed"
-    "${compose[@]}" up -d dashboard || die "dashboard could not start"
-    wait_healthy dashboard
-    ;;
-  worker)
-    "${compose[@]}" build --pull worker || die "worker build failed"
-    if [[ "$migration_changed" == true ]]; then
-      "${compose[@]}" run --rm --no-deps worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts \
-        >/dev/null || die "database migration failed"
-    fi
-    "${compose[@]}" up -d worker || die "worker could not start"
-    wait_healthy worker
-    ;;
-  *)
-    die "unknown deployment scope: $deployment_scope"
-    ;;
+  full) services=(dashboard worker) ;;
+  dashboard) services=(dashboard) ;;
+  worker) services=(worker) ;;
+  *) die "unknown deployment scope" ;;
 esac
+
+if "$local_build"; then
+  # Explicit operator-only outage fallback. Never selected by normal CI deployment.
+  export ADE_DASHBOARD_IMAGE=ade-control-plane-dashboard:local
+  export ADE_WORKER_IMAGE=ade-control-plane-worker:local
+  "${compose[@]}" build "${services[@]}" || die "manual local build failed"
+else
+  [[ "$2" =~ ^ghcr\.io/dokor/ade-control-plane-dashboard@sha256:[0-9a-f]{64}$ ]] || die "invalid dashboard image digest"
+  [[ "$3" =~ ^ghcr\.io/dokor/ade-control-plane-worker@sha256:[0-9a-f]{64}$ ]] || die "invalid worker image digest"
+  export ADE_DASHBOARD_IMAGE="$2"
+  export ADE_WORKER_IMAGE="$3"
+  "${compose[@]}" pull "${services[@]}" || die "immutable image pull failed; no automatic local fallback"
+  for service in "${services[@]}"; do
+    image="$ADE_WORKER_IMAGE"; [[ "$service" != dashboard ]] || image="$ADE_DASHBOARD_IMAGE"
+    expected="$(bash deploy/bin/deployment-scope key "$service" "$requested_sha")"
+    actual="$(docker image inspect --format '{{index .Config.Labels "org.ade.source-key"}}' "$image")"
+    [[ "$actual" == "$expected" ]] || die "image inputs do not match the validated revision"
+  done
+fi
+if [[ "$migration_changed" == true ]]; then
+  "${compose[@]}" run --rm --no-deps --no-build worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts >/dev/null || die "database migration failed"
+fi
+"${compose[@]}" up -d --no-build --no-deps "${services[@]}" || die "application containers could not start"
+for service in "${services[@]}"; do wait_healthy "$service"; done
 
 record_deployed_sha
 printf 'deployed %s\n' "$requested_sha"

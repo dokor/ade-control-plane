@@ -1,19 +1,57 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
-
 permissions:
   contents: read
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  validate:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      scope: ${{ steps.scope.outputs.scope }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - id: scope
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -Eeuo pipefail
+          scope="$(bash deploy/bin/deployment-scope scope "$BASE" HEAD)"
+          echo "scope=$scope" >> "$GITHUB_OUTPUT"
+  operational:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate Compose and security boundaries
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          secrets_dir="$RUNNER_TEMP/ade-compose-secrets"
+          mkdir -p "$secrets_dir"
+          for secret in postgres_password database_url dashboard_session_secret dashboard_password_hash github_app_private_key codex_api_key; do
+            printf 'test-only-%s\n' "$secret" > "$secrets_dir/$secret"
+          done
+          SECRETS_DIR="$secrets_dir" DASHBOARD_PUBLIC_URL=https://ade.example.test DASHBOARD_PUBLIC_HOST=ade.example.test GITHUB_APP_ID=1 GITHUB_APP_INSTALLATION_ID=1 SECRETS_GID="$(id -g)" docker compose config --quiet
+          ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
+          bash -n deploy/bin/deploy deploy/bin/deployment-scope deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/validate-release-gate deploy/bin/worker-entrypoint deploy/bin/git-ssh
+          if deploy/bin/validate-release-gate docs/release-gate-evidence.template.json; then exit 1; fi
+          node --test deploy/test/*.test.mjs
+  typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: ./.github/actions/setup
+      - run: pnpm typecheck
+  tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     services:
@@ -23,76 +61,41 @@ jobs:
           POSTGRES_DB: ade_control_plane_test
           POSTGRES_USER: ade_control_plane_test
           POSTGRES_PASSWORD: test-only-password
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U ade_control_plane_test -d ade_control_plane_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
+          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       TEST_DATABASE_URL: postgresql://ade_control_plane_test:test-only-password@127.0.0.1:5432/ade_control_plane_test
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-        with:
-          version: 10.15.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-
-      # Enable setup-node pnpm cache once pnpm-lock.yaml is committed.
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Validate Compose security boundary
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          secrets_dir="$RUNNER_TEMP/ade-compose-secrets"
-          mkdir -p "$secrets_dir"
-          for secret in postgres_password database_url dashboard_session_secret dashboard_password_hash github_app_private_key codex_api_key; do
-            printf 'test-only-%s\n' "$secret" > "$secrets_dir/$secret"
-          done
-          SECRETS_DIR="$secrets_dir" \
-          DASHBOARD_PUBLIC_URL=https://ade.example.test \
-          DASHBOARD_PUBLIC_HOST=ade.example.test \
-          GITHUB_APP_ID=1 \
-          GITHUB_APP_INSTALLATION_ID=1 \
-          SECRETS_GID="$(id -g)" \
-          docker compose config --quiet
-          ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
-
-      - name: Validate operational scripts
-        run: bash -n deploy/bin/deploy deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/validate-release-gate deploy/bin/worker-entrypoint deploy/bin/git-ssh
-
-      - name: Validate release-gate evidence template remains non-passing
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          if deploy/bin/validate-release-gate docs/release-gate-evidence.template.json; then
-            echo 'The evidence template must not qualify a release.' >&2
-            exit 1
-          fi
-
-      - name: Typecheck
-        # Unit fixtures are not production qualification evidence.
-        run: pnpm typecheck
-
-      - name: Validate functional MVP evidence boundary
-        run: node --test deploy/test/functional-mvp.test.mjs
-
-      - name: Test
-        run: pnpm test
-
-      - name: Build and smoke-test Dashboard runtime
-        run: |
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: ./.github/actions/setup
+      - run: pnpm test
+  dashboard:
+    needs: changes
+    if: needs.changes.outputs.scope == 'dashboard' || needs.changes.outputs.scope == 'full'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: ./.github/actions/setup
+      - run: |
           pnpm --filter @ade-control-plane/dashboard build
           pnpm --filter @ade-control-plane/dashboard smoke:standalone
+  validate:
+    if: always()
+    needs: [changes, operational, typecheck, tests, dashboard]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e '
+            .changes.result == "success" and .operational.result == "success" and
+            .typecheck.result == "success" and .tests.result == "success" and
+            (if .changes.outputs.scope == "dashboard" or .changes.outputs.scope == "full"
+             then .dashboard.result == "success"
+             else (.changes.outputs.scope == "none" or .changes.outputs.scope == "worker") and .dashboard.result == "skipped"
+             end)
+          ' <<< "$RESULTS"
