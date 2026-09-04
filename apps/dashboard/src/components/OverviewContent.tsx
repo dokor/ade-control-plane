@@ -13,7 +13,7 @@ export function OverviewContent({ overview, controls, quotaControl }: {
   const { quota, workerHealth } = overview;
   return <div className="overview">
     <section className="overview-hero" aria-labelledby="health-title">
-      <div className="row"><p className="overview-eyebrow">Control Plane · operational overview</p><StatusBadge status={summary.tone}>{summary.tone === "warn" ? "Needs attention" : summary.tone === "unknown" ? "Not confirmed" : summary.tone}</StatusBadge></div>
+      <div className="row"><p className="overview-eyebrow">Control Plane · operational dashboard</p><StatusBadge status={summary.tone}>{summary.tone === "warn" ? "Needs attention" : summary.tone === "unknown" ? "Not confirmed" : summary.tone}</StatusBadge></div>
       <h2 id="health-title">{summary.headline}</h2>
       <p className="muted">{summary.activityAvailable ? summary.description : "Execution information is incomplete. Review the available status below."}</p>
       <div className="overview-signals">
@@ -27,15 +27,6 @@ export function OverviewContent({ overview, controls, quotaControl }: {
     {overview.unavailableSections.length > 0 && <div className="overview-notice" role="status">
       <strong>Partial view</strong><p>Could not load: {overview.unavailableSections.join(", ")}. Available information is shown below. Refresh to try again.</p>
     </div>}
-
-    <section aria-labelledby="attention-title">
-      <div className="overview-section-heading"><h2 id="attention-title">Attention required</h2><span className="muted">{summary.alerts.length} {overview.unavailableSections.length ? "known " : ""}items</span></div>
-      {summary.alerts.length === 0 ? <div className="panel overview-calm"><StatusBadge status={overview.unavailableSections.length ? "unknown" : "healthy"} /><p>{overview.unavailableSections.length ? "Some checks are unavailable. Health cannot be confirmed yet." : "No blockers or pending human actions reported."}</p></div>
-        : <ul className="overview-attention">{summary.alerts.map((item) => <li key={item.id}>
-          <div><StatusBadge status={item.status} /><h3>{item.title}</h3><p className="muted">{item.reason}</p></div>
-          <Link href={item.href} aria-label={`${item.action}: ${item.title}`}>{item.action} →</Link>
-        </li>)}</ul>}
-    </section>
 
     <section aria-labelledby="active-title">
       <div className="overview-section-heading"><h2 id="active-title">Running now</h2><Link href="/tasks">All tasks →</Link></div>
@@ -72,16 +63,25 @@ export function OverviewContent({ overview, controls, quotaControl }: {
       </section>
     </div>
     <details className="overview-controls"><summary>Scheduling controls & runtime</summary><p className="muted">{overview.schedulerExplanation}</p><p className="muted">ADE runtime {overview.adeRuntimeVersion}. Worker heartbeat {formatInstant(workerHealth.lastHeartbeatAt)}.</p>{controls}</details>
+
+    <section aria-labelledby="attention-title">
+      <div className="overview-section-heading"><h2 id="attention-title">Attention required</h2><span className="muted">{summary.alerts.length} {overview.unavailableSections.length ? "known " : ""}items</span></div>
+      {summary.alerts.length === 0 ? <div className="panel overview-calm"><StatusBadge status={overview.unavailableSections.length ? "unknown" : "healthy"} /><p>{overview.unavailableSections.length ? "Some checks are unavailable. Health cannot be confirmed yet." : "No blockers or pending human actions reported."}</p></div>
+        : <ul className="overview-attention">{summary.alerts.map((item) => <li key={item.id}>
+          <div><StatusBadge status={item.status} /><h3>{item.title}</h3><p className="muted">{item.reason}</p></div>
+          <Link href={item.href} aria-label={`${item.action}: ${item.title}`}>{item.action} →</Link>
+        </li>)}</ul>}
+    </section>
   </div>;
 }
 
 export function OverviewUnavailable() {
-  return <section className="overview overview-notice" role="status"><h2>Overview temporarily unavailable</h2><p>The Control Plane status could not be loaded. Refresh to try again.</p><Link href="/tasks">Open Tasks →</Link></section>;
+  return <section className="overview overview-notice" role="status"><h2>Dashboard temporarily unavailable</h2><p>The Control Plane status could not be loaded. Refresh to try again.</p><Link href="/tasks">Open Tasks →</Link></section>;
 }
 
 export function OverviewLoading() {
-  return <div className="overview" aria-busy="true" role="status" aria-label="Loading Overview">
-    <div className="overview-hero"><p className="overview-eyebrow">Control Plane</p><h2>Loading Overview…</h2><p>Checking operational status and work requiring attention.</p></div>
+  return <div className="overview" aria-busy="true" role="status" aria-label="Loading Dashboard">
+    <div className="overview-hero"><p className="overview-eyebrow">Control Plane</p><h2>Loading Dashboard…</h2><p>Checking operational status and work requiring attention.</p></div>
     <div className="overview-loading" aria-hidden="true" /><div className="overview-loading" aria-hidden="true" />
   </div>;
 }
