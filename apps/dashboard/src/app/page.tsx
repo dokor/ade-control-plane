@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
   const { session, config } = await requireAuthenticatedContext("/");
-  return <Shell title="Overview" actorRef={session.actorRef} refreshIntervalMs={config.refreshIntervalMs}>
+  return <Shell title="Dashboard" actorRef={session.actorRef} refreshIntervalMs={config.refreshIntervalMs}>
     <Suspense fallback={<OverviewLoading />}><OverviewData config={config} /></Suspense>
   </Shell>;
 }
