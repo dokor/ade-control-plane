@@ -44,6 +44,7 @@ export default async function TaskDetailPage({
         </div>
         <div className="task-detail-state">
           <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
+          {task.workflow ? <span className={`badge ${task.workflow.state}`}>{workflowStateLabel(task.workflow.state)}</span> : null}
           {active ? (
             <TaskCancelButton
               taskId={task.id}
@@ -67,6 +68,7 @@ export default async function TaskDetailPage({
         <div><dt>Started</dt><dd>{formatInstant(task.startedAt)}</dd></div>
         <div><dt>Finished</dt><dd>{formatInstant(task.finishedAt)}</dd></div>
         <div><dt>Duration</dt><dd>{formatDuration(task.startedAt, task.finishedAt)}</dd></div>
+        <div><dt>Current stage</dt><dd>{task.workflow ? workflowStateLabel(task.workflow.state) : "not recorded"}</dd></div>
         <div><dt>Branch</dt><dd>{task.branchName ?? "not created yet"}</dd></div>
       </dl>
 
@@ -86,8 +88,8 @@ export default async function TaskDetailPage({
       </section>
 
       {task.errorCode ? (
-        <div className="notice error task-error-notice" role="alert">
-          <strong>{task.errorCode}</strong>: {task.errorSummary ?? "Task execution failed."}
+        <div className={`notice ${task.workflow?.humanInputRequired ? "warning" : "error"} task-error-notice`} role={task.workflow?.humanInputRequired ? "status" : "alert"}>
+          <strong>{task.workflow?.humanInputRequired ? "Action required" : task.errorCode}</strong>: {task.errorSummary ?? "Task execution failed."}
         </div>
       ) : null}
 
@@ -115,7 +117,21 @@ export default async function TaskDetailPage({
                     <span className={`task-event-status ${entry.status}`}>{timelineStatusLabel(entry.status)}</span>
                   </div>
                   <time dateTime={entry.occurredAt}>{formatInstant(entry.occurredAt)}</time>
+                  {entry.durationMs !== undefined ? <span className="task-event-duration">{formatEventDuration(entry.durationMs)}</span> : null}
                   {entry.detail ? <p>{entry.detail}</p> : null}
+                  {entry.substeps?.length ? (
+                    <details className="task-phase-details">
+                      <summary>Phase details ({entry.substeps.length})</summary>
+                      <ul>
+                        {entry.substeps.map((substep) => (
+                          <li key={substep.id} className={substep.status}>
+                            <strong>{timelineStatusLabel(substep.status)}</strong> {substep.title}
+                            {substep.detail ? <span> — {substep.detail}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
                 </div>
               </li>
             ))}
@@ -145,6 +161,12 @@ export default async function TaskDetailPage({
   );
 }
 
+function formatEventDuration(milliseconds: number | null): string {
+  if (milliseconds === null) return "duration unavailable";
+  const seconds = Math.floor(milliseconds / 1_000);
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
 function timelineKindLabel(kind: string): string {
   const labels: Readonly<Record<string, string>> = {
     task: "Task",
@@ -170,4 +192,14 @@ function timelineStatusLabel(status: string): string {
     info: "info",
   };
   return labels[status] ?? status;
+}
+
+function workflowStateLabel(state: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    queued: "Waiting for worker", preparing: "Preparing task", "issue-not-ready": "Issue readiness",
+    "enriching-issue": "Enriching issue", "validating-issue": "Validating issue", "ready-for-dev": "Ready for development",
+    developing: "Developing", reviewing: "Reviewing", "preparing-pr": "Preparing PR", "waiting-human": "Waiting for information",
+    completed: "Completed", failed: "Failed", cancelled: "Cancelled",
+  };
+  return labels[state] ?? state;
 }
