@@ -60,7 +60,7 @@ export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs,
             <div className="setup-process-copy"><strong>{title}</strong>
               <StatusBadge status={done ? "ready" : state === "Blocked" ? "blocked" : "setup-required"}>{state}</StatusBadge>
               {current ? <>
-                {action.href ? <a className="button primary" href={action.href} rel={action.href.startsWith("https:") ? "noreferrer noopener" : undefined}>{action.label}</a>
+                {action.href ? <a className="button primary" href={action.href} target={action.href.startsWith("https:") ? "_blank" : undefined} rel={action.href.startsWith("https:") ? "noreferrer noopener" : undefined}>{action.label}</a>
                   : <button className="primary" type="button" disabled={pending || refreshing} onClick={action.refresh ? onRefresh : onPrepare}>
                     {pending ? "Preparing…" : refreshing ? "Refreshing…" : action.label}</button>}
                 {action.prepare ? <p className="muted">{summary.phase === "repository"
@@ -123,7 +123,7 @@ export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs,
     <details className="panel project-disclosure"><summary>Technical details &amp; refresh</summary>
       <p className="muted">Last repository check: {formatInstant(readiness.checkedAt)}. Checks refresh every {Math.max(5, Math.ceil(refreshIntervalMs / 1000))} seconds while this tab is visible.</p>
       <button type="button" onClick={onRefresh} disabled={refreshing || pending}>{refreshing ? "Refreshing…" : "Refresh checks"}</button>
-      {readiness.setupPullRequestUrl ? <p><a href={readiness.setupPullRequestUrl} rel="noreferrer noopener">View setup PR</a></p> : null}
+      {readiness.setupPullRequestUrl ? <p><a href={readiness.setupPullRequestUrl} target="_blank" rel="noreferrer noopener">View setup PR</a></p> : null}
       <dl className="project-metadata">
         <dt>Planned files</dt><dd>{readiness.plannedFiles.join(", ") || "None"}</dd>
         <dt>Planned labels</dt><dd>{readiness.missingLabels.map((item) => item.name).join(", ") || "None"}</dd>
