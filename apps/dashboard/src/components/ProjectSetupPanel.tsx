@@ -17,6 +17,8 @@ export interface ProjectSetupPanelProps {
   error?: boolean;
   onPrepare?: () => void;
   onRefresh?: () => void;
+  workExpanded?: boolean;
+  onToggleWork?: () => void;
 }
 
 const groups = [
@@ -34,7 +36,7 @@ function checkLabel(item: ProjectSetupRequirement, readiness: ProjectSetupReadin
 }
 
 export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs, pending, refreshing,
-  message, error, onPrepare, onRefresh }: ProjectSetupPanelProps) {
+  message, error, onPrepare, onRefresh, workExpanded = false, onToggleWork }: ProjectSetupPanelProps) {
   const summary = summarizeProjectDetail(project, readiness, work);
   const activeStep = summary.phase === "repository" ? 0 : summary.phase === "initialization" ? 1 : 2;
   const snapshot = readiness.capabilitySnapshot;
@@ -111,11 +113,14 @@ export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs,
           </dl>
         </div>
         <div id="project-work" tabIndex={-1}><h3>Work</h3>
-          {summary.visibleWork.length ? <ul className="project-work-list">{summary.visibleWork.map((item) => <li key={item.id}>
+          {summary.visibleWork.length ? <ul id="project-work-list" className="project-work-list">{(workExpanded ? summary.visibleWork : summary.visibleWork.slice(0, 3)).map((item) => <li key={item.id}>
             <a href={item.href}>{item.title}</a> <StatusBadge status={item.status} />
             <p className="detail">{item.active ? "Current" : item.needsAttention ? "Needs attention" : "Next / available"} · {item.stage}</p>
             {item.reason ? <p className="muted">{item.reason}</p> : null}
           </li>)}</ul> : <p className="muted">No current or queued work.</p>}
+          {summary.visibleWork.length > 3 ? <button type="button" aria-expanded={workExpanded} aria-controls="project-work-list" onClick={onToggleWork}>
+            {workExpanded ? "Voir moins" : "Voir plus"}
+          </button> : null}
           {project.waitingReason ? <p className="detail">Scheduling: {project.waitingReason}</p> : null}
         </div>
       </div>

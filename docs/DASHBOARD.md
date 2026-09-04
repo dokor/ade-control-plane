@@ -16,6 +16,14 @@ It must answer quickly:
 
 It is not a replacement for ADE's project-specific delivery UI/state and must not reconstruct ADE's internal graph.
 
+## Project Work list
+
+On a project page, the Work list initially shows its first three eligible items
+in the existing order. **Voir plus** reveals all remaining items without navigation;
+**Voir moins** restores the compact list. These controls appear only when more
+than three items exist. Expansion is retained during automatic refreshes of the
+same project. Work filtering, status, ordering and links are unchanged.
+
 ## Primary users
 
 MVP assumes a very small trusted user set. Authentication is mandatory even if there is only one user.

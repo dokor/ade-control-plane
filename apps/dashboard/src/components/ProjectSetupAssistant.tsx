@@ -10,6 +10,8 @@ export function ProjectSetupAssistant(props: Pick<ProjectSetupPanelProps, "proje
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState(false);
+  // Preserve expansion across refreshes, but not when navigating to another project.
+  const [expandedWorkProject, setExpandedWorkProject] = useState<string | null>(null);
   const [refreshing, startRefresh] = useTransition();
   // The server owns PR state across reloads. Keep the mutation result only until
   // a newer repository inspection arrives (including a merged/closed PR).
@@ -37,5 +39,7 @@ export function ProjectSetupAssistant(props: Pick<ProjectSetupPanelProps, "proje
   }
 
   return <ProjectSetupPanel {...props} readiness={readiness} pending={pending} refreshing={refreshing}
+    workExpanded={expandedWorkProject === props.project.id}
+    onToggleWork={() => setExpandedWorkProject((current) => current === props.project.id ? null : props.project.id)}
     message={message} error={error} onPrepare={() => void prepare()} onRefresh={() => startRefresh(() => router.refresh())} />;
 }
