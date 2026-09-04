@@ -27,6 +27,8 @@ test("passes only dedicated credentials to Codex", async () => {
       CODEX_API_KEY_FILE: codexKey,
       CODEX_HOME: codexHome,
       V0_GIT_HOME: gitHome,
+      GIT_SSH: join(directory, "ade-git-ssh"),
+      GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no",
     });
 
     assert.equal(config.codexEnvironment.CODEX_API_KEY, "codex-api-key");
@@ -37,6 +39,12 @@ test("passes only dedicated credentials to Codex", async () => {
     assert.equal(config.adeProfile, "normal");
     assert.equal(config.codexEnvironment.HOME, dirname(codexHome));
     assert.equal(config.gitEnvironment.HOME, gitHome);
+    assert.equal(config.gitEnvironment.GIT_SSH, join(directory, "ade-git-ssh"));
+    assert.equal(config.gitEnvironment.GIT_SSH_VARIANT, "ssh");
+    assert.equal(config.gitEnvironment.GIT_TERMINAL_PROMPT, "0");
+    assert.equal(config.gitEnvironment.GIT_SSH_COMMAND, undefined);
+    assert.equal(config.codexEnvironment.GIT_SSH, undefined);
+    assert.equal(config.claudeEnvironment.GIT_SSH, undefined);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -37,7 +37,7 @@ for (const code of ["GIT_CLONE_FAILED", "CHECKOUT_CONFIGURATION_INVALID", "CHECK
   });
 }
 
-test("captures clone stderr from the real provisioner before it wraps the command failure", async () => {
+test("captures preflight stderr and its specific cause from the real provisioner", async () => {
   const context = await setup({ checkoutExists: false });
   const diagnostics: unknown[] = [];
   try {
@@ -47,8 +47,8 @@ test("captures clone stderr from the real provisioner before it wraps the comman
       provisionCheckout: (project, signal) => provisionProjectCheckout({ project, commands, projectRoot: context.projectRoot,
         gitEnvironment: {}, ...(signal ? { signal } : {}), persistence: { auditEvents: { append: async () => ({}) as never } } }),
     }).execute(context.task);
-    assert.equal(context.task.errorCode, "GIT_CLONE_FAILED");
-    assert.match(JSON.stringify(diagnostics), /git clone/);
+    assert.equal(context.task.errorCode, "REPOSITORY_NOT_FOUND");
+    assert.match(JSON.stringify(diagnostics), /git ls-remote/);
     assert.match(JSON.stringify(diagnostics), /repository not found/);
     assert.match(JSON.stringify(diagnostics), /"exitCode":128/);
     assert.doesNotMatch(JSON.stringify([diagnostics, context.logs]), /super-private/);

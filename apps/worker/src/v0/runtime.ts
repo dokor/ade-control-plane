@@ -70,6 +70,8 @@ export async function loadV0WorkerRuntime(
     gitEnvironment: {
       ...childBase,
       HOME: gitHome,
+      ...(env.GIT_SSH ? { GIT_SSH: requiredAbsolute(env.GIT_SSH, "GIT_SSH"), GIT_SSH_VARIANT: "ssh" } : {}),
+      GIT_TERMINAL_PROMPT: "0",
       ...(env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: env.SSH_AUTH_SOCK } : {}),
       GIT_CONFIG_NOSYSTEM: "1",
     },

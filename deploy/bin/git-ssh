@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Git sets HOME to the read-only dedicated Git volume. OpenSSH otherwise uses
+# the passwd home, so select this volume's config/identities explicitly.
+options=(-o BatchMode=yes -o StrictHostKeyChecking=yes
+  -o GlobalKnownHostsFile=/etc/ssh/ade_github_known_hosts
+  -o UserKnownHostsFile=/dev/null -o UpdateHostKeys=no
+  -o HostKeyAlgorithms=ssh-ed25519 -o ConnectTimeout=15 -o ConnectionAttempts=1)
+if [[ -f "$HOME/.ssh/config" ]]; then
+  options+=(-F "$HOME/.ssh/config")
+else
+  options+=(-F /dev/null)
+fi
+for identity in id_ed25519 id_ecdsa id_rsa; do
+  if [[ -f "$HOME/.ssh/$identity" ]]; then
+    options+=(-i "$HOME/.ssh/$identity")
+  fi
+done
+exec ssh "${options[@]}" "$@"
