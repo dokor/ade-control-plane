@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { ControlButton } from "../../../../../components/ControlButton.js";
+import { GithubWorkRemoveButton } from "../../../../../components/GithubWorkRemoveButton.js";
 import { Shell } from "../../../../../components/Shell.js";
 import { requireAuthenticatedContext } from "../../../../../lib/auth.js";
 import { formatInstant } from "../../../../../lib/format.js";
@@ -38,6 +39,10 @@ export default async function GithubWorkDetailPage({
           <span className={`badge ${work.state}`}>{detail.stageLabel}</span>
           {pullRequestUrl ? <a className="button primary" href={pullRequestUrl} target="_blank" rel="noreferrer noopener">Open PR #{workflow?.pullRequestNumber}</a> : null}
           <a className="button" href={work.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a>
+          {execution && ["queued", "leased", "dispatched", "running"].includes(execution.status) ? <ControlButton
+            type="execution.cancel" payload={{ executionId: execution.id }} label={execution.cancelRequested ? "Cancellation requested" : "Cancel execution"}
+            confirm="Request cancellation of this execution? Wait for confirmed termination before removing its records."
+            disabled={execution.cancelRequested === true} disabledReason="Waiting for the worker to confirm cancellation." /> : null}
         </div>
       </section>
 
@@ -102,6 +107,11 @@ export default async function GithubWorkDetailPage({
         <div className="task-history-heading"><div><p className="task-kicker">Stage ledger</p><h2>Completed and pending stages</h2></div></div>
         <div className="task-history">{detail.transitions.map((stage) => <article className="task-history-row" key={`${stage.stage}:${stage.occurredAt}`}><div className="task-history-status"><span className="badge badge-neutral">{stage.label}</span><time>{formatInstant(stage.occurredAt)}</time></div><div className="task-history-main"><h3>Attempt {stage.attempt}</h3><p>{stage.reason}</p></div></article>)}</div>
       </section>
+      <details className="panel project-disclosure">
+        <summary>Remove this work item</summary>
+        <p>Remove only Control Plane records. The GitHub issue, branches and PRs are preserved. Active or unconfirmed executions must be cancelled or reconciled first.</p>
+        <GithubWorkRemoveButton projectId={projectId} issueNumber={issueNumber} workId={work.id} />
+      </details>
     </Shell>
   );
 }

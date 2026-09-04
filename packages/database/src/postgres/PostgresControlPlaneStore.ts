@@ -667,8 +667,80 @@ class PostgresGithubBotCommentRepository implements GithubBotCommentRepository {
   }
 }
 
+async function lockGithubWorkProject(client: SqlQueryable, projectId: string): Promise<void> {
+  await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`github-work:${projectId}`]);
+}
+
 class PostgresGithubWorkRepository implements GithubWorkRepository {
   public constructor(private readonly pool: Pool) {}
+
+  public async getRemoval(projectId: string, issueNumber: number): Promise<string | null> {
+    const row = await queryOptional(this.pool, "SELECT removed_at FROM github_work_removals WHERE project_id = $1 AND issue_number = $2", [projectId, issueNumber]);
+    return row ? toIsoString(row.removed_at) : null;
+  }
+
+  public async readmit(input: Parameters<GithubWorkRepository["readmit"]>[0]): Promise<boolean> {
+    return withTransaction(this.pool, async (client) => {
+      await lockGithubWorkProject(client, input.projectId);
+      const deleted = await client.query("DELETE FROM github_work_removals WHERE project_id = $1 AND issue_number = $2 AND removed_at = $3 RETURNING issue_number", [input.projectId, input.issueNumber, input.removedAt]);
+      if (!deleted.rowCount) return false;
+      await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", action: "github-work.readmitted",
+        severity: "info", actorType: "human", actorRef: input.actorRef, projectId: input.projectId, result: "readmitted", metadata: { issueNumber: input.issueNumber } });
+      return true;
+    });
+  }
+
+  public async remove(input: Parameters<GithubWorkRepository["remove"]>[0]): ReturnType<GithubWorkRepository["remove"]> {
+    return withTransaction(this.pool, async (client) => {
+      // Reconciliation, admission and lease creation use this same lock. A
+      // scheduler that selected a work item before removal cannot dispatch it.
+      await lockGithubWorkProject(client, input.projectId);
+      if (await queryOptional(client, "SELECT 1 FROM github_work_removals WHERE project_id = $1 AND issue_number = $2", [input.projectId, input.issueNumber])) return "already-removed";
+      const item = await queryOptional(client, "SELECT * FROM github_work_items WHERE project_id = $1 AND issue_number = $2 FOR UPDATE", [input.projectId, input.issueNumber]);
+      if (!item) return "not-found";
+      const reject = async (result: "active" | "ambiguous") => {
+        await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", action: "github-work.removal-rejected",
+          severity: "warning", actorType: "human", actorRef: input.actorRef, projectId: input.projectId, result, metadata: { issueNumber: input.issueNumber } });
+        return result;
+      };
+      if (String(item.id) !== input.workId) return reject("ambiguous");
+      const workRef = `github:issue:${input.issueNumber}`;
+      const executions = await client.query<TimestampRow>("SELECT * FROM executions WHERE project_id = $1 AND work_ref = $2 FOR UPDATE", [input.projectId, workRef]);
+      const ids = executions.rows.map((row) => String(row.id));
+      const conflictingEvidence = await queryOptional(client, "SELECT 1 FROM executions WHERE id = ANY($1::uuid[]) AND result_summary->>'issueNumber' IS NOT NULL AND result_summary->>'issueNumber' <> $2", [ids, String(input.issueNumber)]);
+      if (conflictingEvidence) return reject("ambiguous");
+      if (item.execution_ref && !ids.includes(String(item.execution_ref))) return reject("ambiguous");
+      const workflows = await client.query<TimestampRow>("SELECT * FROM ade_delivery_workflows WHERE (project_id = $1 AND issue_number = $2) OR execution_id = ANY($3::uuid[]) FOR UPDATE", [input.projectId, input.issueNumber, ids]);
+      if (workflows.rows.some((row) => String(row.project_id) !== input.projectId || Number(row.issue_number) !== input.issueNumber || !ids.includes(String(row.execution_id)))) return reject("ambiguous");
+      if (executions.rows.some((row) => !["succeeded", "failed", "cancelled"].includes(String(row.status)))) return reject("active");
+      if (workflows.rows.some((row) => row.reconciliation_required === true)) return reject("active");
+      if (item.state === "running" && ids.length === 0) return reject("active");
+      const lease = await queryOptional(client, "SELECT 1 FROM execution_leases WHERE released_at IS NULL AND (execution_id = ANY($1::uuid[]) OR lease_key = $2)", [ids, `github-work:${input.projectId}:${input.issueNumber}`]);
+      if (lease) return reject("active");
+      const tasks = await client.query<TimestampRow>("SELECT * FROM v0_tasks WHERE project_id = $1 AND source_type = 'github-issue' AND github_issue_number = $2 FOR UPDATE", [input.projectId, input.issueNumber]);
+      if (tasks.rows.some((row) => !["SUCCESS", "FAILED", "CANCELLED"].includes(String(row.status)) || row.pr_retry_requested === true)) return reject("active");
+      const sharedExecution = await queryOptional(client, "SELECT 1 FROM github_work_items WHERE NOT (project_id = $1 AND issue_number = $2) AND execution_ref = ANY($3::text[])", [input.projectId, input.issueNumber, ids]);
+      if (sharedExecution) return reject("ambiguous");
+      const decisions = [...new Set([item.human_decision_ref, ...workflows.rows.map((row) => row.human_decision_ref),
+        ...executions.rows.flatMap((row) => { const summary = row.result_summary as Record<string, unknown> | null; return [summary?.humanDecisionRef, summary?.resumeDecisionRef]; }),
+      ].filter((ref): ref is string => typeof ref === "string"))];
+      const sharedDecision = await queryOptional(client, `SELECT 1 FROM github_work_items WHERE project_id = $1 AND issue_number <> $2 AND human_decision_ref = ANY($3::text[])
+        UNION ALL SELECT 1 FROM ade_delivery_workflows WHERE project_id = $1 AND issue_number <> $2 AND human_decision_ref = ANY($3::text[])
+        UNION ALL SELECT 1 FROM executions WHERE project_id = $1 AND NOT (id = ANY($4::uuid[])) AND (result_summary->>'humanDecisionRef' = ANY($3::text[]) OR result_summary->>'resumeDecisionRef' = ANY($3::text[]))`, [input.projectId, input.issueNumber, decisions, ids]);
+      if (sharedDecision) return reject("ambiguous");
+      await client.query("INSERT INTO github_work_removals (project_id, issue_number, removed_at, removed_by) VALUES ($1, $2, $3, $4)", [input.projectId, input.issueNumber, input.occurredAt, input.actorRef]);
+      // FK cascades remove workflow transitions, leases and usage evidence;
+      // audit rows survive with execution_id SET NULL.
+      await client.query("DELETE FROM executions WHERE id = ANY($1::uuid[])", [ids]);
+      await client.query("DELETE FROM v0_tasks WHERE id = ANY($1::uuid[])", [tasks.rows.map((row) => String(row.id))]);
+      await client.query("DELETE FROM ade_decisions WHERE project_id = $1 AND decision_ref = ANY($2::text[])", [input.projectId, decisions]);
+      await client.query("DELETE FROM github_work_items WHERE id = $1", [input.workId]);
+      await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", action: "github-work.removed",
+        severity: "info", actorType: "human", actorRef: input.actorRef, projectId: input.projectId, result: "removed",
+        metadata: { issueNumber: input.issueNumber, workId: input.workId, executionIds: ids, taskIds: tasks.rows.map((row) => String(row.id)), decisionRefs: decisions, githubPreserved: true } });
+      return "removed";
+    });
+  }
 
   public async getProfile(projectId: string): Promise<GithubWorkProfileRecord | null> {
     const row = await queryOptional(this.pool, "SELECT * FROM github_work_profiles WHERE project_id = $1", [projectId]);
@@ -691,6 +763,7 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
   public async reconcile(input: GithubWorkReconciliationInput): Promise<readonly GithubWorkItemRecord[]> {
     return withTransaction(this.pool, async (client) => {
       const profile = input.profile;
+      await lockGithubWorkProject(client, profile.projectId);
       await client.query(
         `INSERT INTO github_work_profiles (project_id, repository_github_id, compatible, contract_version, capabilities, skill_paths, reason, observed_at, ade_status, ade_config_version, ade_runtime_version, resolved_profiles, resolved_rules, context_status, ade_missing_required_ids, runner_checkout_ref)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $14, $15::jsonb, $16)
@@ -715,6 +788,8 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
       );
       await client.query("UPDATE github_work_items SET present = false WHERE project_id = $1", [profile.projectId]);
       for (const item of input.items) {
+        if (item.projectId !== profile.projectId) throw new Error("Reconciliation project mismatch.");
+        if (await queryOptional(client, "SELECT 1 FROM github_work_removals WHERE project_id = $1 AND issue_number = $2", [item.projectId, item.issueNumber])) continue;
         await client.query(
           `INSERT INTO github_work_items (id, project_id, repository_github_id, contract_version, issue_number, issue_url, state, priority, depends_on, retry_policy, human_decision_ref, execution_ref, branch_name, pull_request_number, source_updated_at, observed_at, expires_at, present)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, true)
@@ -1368,6 +1443,12 @@ class PostgresExecutionRepository implements ExecutionRepository {
   ): Promise<ScheduledExecutionRecord | null> {
     try {
       return await withTransaction(this.pool, async (client) => {
+        const match = /^github:issue:([1-9][0-9]*)$/u.exec(input.execution.workRef ?? "");
+        if (match) {
+          await lockGithubWorkProject(client, input.execution.projectId);
+          if (await queryOptional(client, "SELECT 1 FROM github_work_removals WHERE project_id = $1 AND issue_number = $2", [input.execution.projectId, Number(match[1])])) return null;
+          if (input.expectedGithubWorkId && !await queryOptional(client, "SELECT 1 FROM github_work_items WHERE project_id = $1 AND issue_number = $2 AND id = $3 AND present = true", [input.execution.projectId, Number(match[1]), input.expectedGithubWorkId])) return null;
+        }
         const execution = await insertExecution(client, input.execution);
         const lease = await insertLease(client, execution.id, input.lease);
 
@@ -2133,20 +2214,26 @@ class PostgresV0TaskRepository implements V0TaskRepository {
       throw new Error("GitHub issue number must be a positive integer.");
     }
     try {
-      const result = await this.pool.query<TimestampRow>(
-        `INSERT INTO v0_tasks
-           (id, project_id, prompt, source_type, github_issue_number, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $6) RETURNING *`,
-        [
-          input.id ?? randomUUID(),
-          input.projectId,
-          prompt,
-          source.type,
-          source.type === "github-issue" ? source.issueNumber : null,
-          input.createdAt,
-        ],
-      );
-      return mapV0Task(expectOne(result.rows, "Failed to create V0 task."));
+      return await withTransaction(this.pool, async (client) => {
+        if (source.type === "github-issue") {
+          await lockGithubWorkProject(client, input.projectId);
+          if (await queryOptional(client, "SELECT 1 FROM github_work_removals WHERE project_id = $1 AND issue_number = $2", [input.projectId, source.issueNumber])) throw new DatabaseRecordNotFoundError("Explicit GitHub issue readmission is required.");
+        }
+        const result = await client.query<TimestampRow>(
+          `INSERT INTO v0_tasks
+             (id, project_id, prompt, source_type, github_issue_number, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $6) RETURNING *`,
+          [
+            input.id ?? randomUUID(),
+            input.projectId,
+            prompt,
+            source.type,
+            source.type === "github-issue" ? source.issueNumber : null,
+            input.createdAt,
+          ],
+        );
+        return mapV0Task(expectOne(result.rows, "Failed to create V0 task."));
+      });
     } catch (error) {
       if (isUniqueViolation(error, "v0_tasks_single_active_idx")) {
         throw new ActiveTaskConflictError();

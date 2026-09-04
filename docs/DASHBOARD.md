@@ -95,6 +95,27 @@ Do not show controls unsupported by the current project/ADE capabilities.
 
 ### `/tasks` — Task runway
 
+From a GitHub issue workflow detail, **Remove this work item** opens a confirmed
+Control Plane cleanup. It deletes only the selected local work item, correlated
+terminal executions/legacy issue tasks, delivery workflows/checkpoints, usage
+evidence and unshared decisions. GitHub issues, branches, PRs and comments are
+untouched; audit and webhook deduplication records are retained.
+
+Removal is transactional and audited. Active executions, unreleased leases
+(even expired ones), pending PR retries, unknown outcomes and unresolved workflow
+reconciliation are rejected: cancel first and wait for confirmed termination, or
+reconcile the outcome. Shared or conflicting references are rejected rather than
+guessing ownership. Repeated deletion is idempotent, and a stale page cannot
+delete a newly readmitted work item.
+
+A durable local suppression marker prevents polling/webhooks from immediately
+recreating removed work, even after restart or a GitHub issue edit. To admit it
+again, explicitly select the still-open issue in Tasks and press **Run**. This
+resets its ADE lifecycle metadata to ready (preserving issue prose, priority and
+dependencies), clears the matching suppression marker and requests reconciliation.
+The same transaction lock protects cleanup, reconciliation and scheduling;
+stale scheduler selections are fenced by the work-item identity.
+
 Failed manual/initialization tasks retain their specific checkout/provisioning
 error code. The execution page separates the safe outcome from a **Technical
 details** disclosure: failed stage, command operation (argument values omitted),

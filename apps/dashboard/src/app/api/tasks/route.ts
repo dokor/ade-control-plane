@@ -21,7 +21,7 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  return handleDashboardApi(request, "mutation", async () => {
+  return handleDashboardApi(request, "mutation", async ({ identity }) => {
     const body = await readJsonObject(request);
     const source = body.source;
     const persistence = await getPersistence();
@@ -40,7 +40,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         throw new ControlError("NOT_FOUND", "The selected GitHub issue is no longer open or accessible.");
       }
       if (!github.client) throw new ControlError("UNAVAILABLE", "GitHub issue admission is not configured.");
-      const admission = await admitGithubIssue(project, github.client, source.issueNumber);
+      const removedAt = await persistence.githubWork.getRemoval(project.id, source.issueNumber);
+      const admission = await admitGithubIssue(project, github.client, source.issueNumber, removedAt !== null);
+      if (removedAt && !await persistence.githubWork.readmit({ projectId: project.id, issueNumber: source.issueNumber,
+        removedAt, actorRef: identity!.actorRef, occurredAt: new Date().toISOString() })) {
+        throw new ControlError("CONFLICT", "The removal state changed. Refresh before admitting this issue again.");
+      }
       await persistence.wakeups?.signal({ reason: "github-work-admitted", projectId: project.id, signaledAt: new Date().toISOString() });
       return { body: { githubWork: admission }, status: 202 };
     }
