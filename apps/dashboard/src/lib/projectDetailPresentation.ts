@@ -43,8 +43,10 @@ export function summarizeProjectDetail(project: ProjectView, readiness: ProjectS
       : "Repository setup is complete. Start ADE initialization to prepare configuration and verify runner capabilities.";
     action = { label: "Start ADE initialization", prepare: true };
   } else if (attention) {
-    status = "blocked"; label = "Blocked"; reason = attention.reason;
-    action = { label: "Review blocked work", href: attention.href };
+    status = attention.status === "waiting-human" || attention.status === "reconciling" ? attention.status : "blocked";
+    label = status === "waiting-human" ? "Waiting for review" : status === "reconciling" ? "Reconciliation required" : "Blocked";
+    reason = attention.reason;
+    action = { label: status === "blocked" ? "Review blocked work" : "Review work", href: attention.href };
   } else if (project.status === "paused") {
     status = "paused"; label = "Scheduling paused";
     reason = project.waitingReason ?? "Global scheduling is paused.";

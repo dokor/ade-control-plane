@@ -89,3 +89,13 @@ test("paused scheduling and missing runners do not appear ready to execute", asy
   props.project.status = "waiting-runner"; props.project.exclusion = "no-compatible-runner";
   assert.equal(summarizeProjectDetail(props.project, props.readiness, []).action.href, "/runners");
 });
+
+test("pending human review stays amber rather than becoming a blocking error", async () => {
+  const props = await projectDetailFixture("blocked-work");
+  props.work = [{ ...props.work[0]!, status: "waiting-human" }];
+  const summary = summarizeProjectDetail(props.project, props.readiness, props.work);
+  assert.equal(summary.status, "waiting-human");
+  assert.equal(summary.label, "Waiting for review");
+  const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));
+  assert.match(html, /badge-warning">Waiting for review/);
+});
