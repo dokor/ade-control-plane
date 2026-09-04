@@ -58,6 +58,8 @@ ADE → Ready for work**, with one primary action inside the current step. A pen
 setup PR is rediscovered from GitHub after reload; a persisted queued/running
 initialization task links to progress instead of offering another initialization.
 If PR discovery fails, refresh is offered without claiming no PR exists.
+GitHub repository and setup PR links open in a new tab with `noopener noreferrer`,
+keeping ADE Setup open. Internal task links and page anchors stay in the current tab.
 
 Required checks are grouped into Repository setup, ADE capabilities and GitHub
 integration, with unresolved checks first. Per-check disclosures retain detailed

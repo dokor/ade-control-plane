@@ -22,6 +22,26 @@ for (const state of projectDetailStates) test(`project detail renders ${state} w
   assert.ok(html.includes(expected[state]), expected[state]);
 });
 
+test("setup GitHub links open a protected new tab, including both PR review links", async () => {
+  const props = await projectDetailFixture("pr-pending");
+  const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));
+  const links = [...html.matchAll(/<a\b([^>]*)>(.*?)<\/a>/g)];
+  assert.deepEqual(links.map(([, , label]) => label), ["dokor/argos", "Review setup PR", "View setup PR"]);
+  for (const [, attributes] of links) {
+    assert.match(attributes!, /target="_blank"/);
+    assert.match(attributes!, /rel="noreferrer noopener"/);
+  }
+  for (const [, attributes] of links.slice(1)) assert.ok(attributes!.includes(`href="${props.readiness.setupPullRequestUrl}"`));
+});
+
+for (const state of ["initializing", "ready", "disabled", "blocked-work"] as const) test(`setup internal links stay in the current tab when ${state}`, async () => {
+  const props = await projectDetailFixture(state);
+  const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));
+  const internalLinks = [...html.matchAll(/<a\b([^>]*href="[/#][^"]*"[^>]*)>/g)];
+  assert.ok(internalLinks.length > 0);
+  for (const [, attributes] of internalLinks) assert.doesNotMatch(attributes!, /\b(?:target|rel)=/);
+});
+
 test("missing runner evidence is unknown, not a stale work snapshot", async () => {
   const props = await projectDetailFixture("new");
   props.project.snapshotFresh = false;
