@@ -12,6 +12,7 @@ import type {
 import type { GithubIssueReader } from "@ade-control-plane/github";
 
 import { sanitizeText } from "./sanitize.js";
+import { diagnosticFromLog, readExecutionDiagnostic, type ExecutionDiagnosticView } from "./executionDiagnostics.js";
 
 type TaskPersistence = Pick<ControlPlanePersistence, "projects" | "v0Tasks" | "githubWork" | "executions" | "deliveryWorkflows" | "adeDecisions" | "executionLeases" | "auditEvents">;
 
@@ -96,6 +97,7 @@ export interface GithubDecisionView {
 }
 
 export interface TaskDetailModel {
+  diagnostic: ExecutionDiagnosticView | null;
   task: V0TaskRecord;
   project: ProjectRecord;
   logs: readonly V0TaskLogRecord[];
@@ -374,8 +376,17 @@ export async function buildTaskDetail(
     ...log,
     message: sanitizeText(log.message, 4_096),
   }));
+  let diagnostic = logs.filter((log) => log.stream === "system").map((log) => diagnosticFromLog(log.message, task.id)).filter((entry) => entry !== null).at(-1) ?? null;
+  // Audit evidence remains available when the bounded raw-output log is full.
+  if (!diagnostic && task.status === "FAILED") {
+    const audits = await persistence.auditEvents.listForProject(task.projectId, 1000).catch(() => []);
+    diagnostic = audits.filter((entry) => entry.action === "task.execution.failed" && entry.correlationId === task.id)
+      .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+      .map((entry) => readExecutionDiagnostic(entry.metadata, task.id)).find((entry) => entry !== null) ?? null;
+  }
   const timeline = buildTaskTimeline(sanitizedTask, sanitizedLogs);
   return {
+    diagnostic,
     task: sanitizedTask,
     project,
     logs: sanitizedLogs,
@@ -530,6 +541,9 @@ function taskLogToTimelineEvent(
   index: number,
 ): TaskTimelineEvent | null {
   if (log.stream !== "system") return null;
+  const diagnostic = diagnosticFromLog(log.message, log.taskId);
+  if (diagnostic) return { id: `diagnostic:${log.id}`, occurredAt: log.occurredAt, kind: "error", status: "failed",
+    title: `${diagnostic.stage}: ${diagnostic.code}`, detail: diagnostic.message };
   const message = log.message.trim();
   const command = /^(git fetch|git branch preparation|git commit|git push) (started|passed|failed)\.?$/u.exec(message);
   if (command) {

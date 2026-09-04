@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { Shell } from "../../../components/Shell.js";
+import { ExecutionFailureDetails } from "../../../components/ExecutionFailureDetails.js";
 import { TaskCancelButton } from "../../../components/TaskCancelButton.js";
 import { TaskPrRetryButton } from "../../../components/TaskPrRetryButton.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
@@ -89,6 +90,8 @@ export default async function TaskDetailPage({
           <strong>{task.errorCode}</strong>: {task.errorSummary ?? "Task execution failed."}
         </div>
       ) : null}
+
+      {task.status === "FAILED" && detail.diagnostic ? <ExecutionFailureDetails diagnostic={detail.diagnostic} /> : null}
 
       <section className="task-log-section">
         <div className="task-history-heading">

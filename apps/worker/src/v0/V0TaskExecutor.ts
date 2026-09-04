@@ -13,6 +13,8 @@ import type { CommandOutput, CommandResult, CommandRunner } from "./CommandRunne
 import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPlan, type AdeDeliveryPreparation, type AdeDeliveryReviewResult, type AdeSetupEvaluation } from "../AdeDeliveryRuntime.js";
 import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./ProjectCheckout.js";
+import { ProjectProvisioningError } from "./ProjectProvisioner.js";
+import { diagnosticCommands, executionStage, failureDiagnostic, recordAgentFailure, redactCommandOutput, redactDiagnostic, withExecutionDiagnostics } from "./ExecutionDiagnostics.js";
 
 interface V0Persistence {
   projects: Pick<ProjectRepository, "getById">;
@@ -21,6 +23,7 @@ interface V0Persistence {
   };
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
   githubWork?: Pick<GithubWorkRepository, "recordAdeReadiness">;
+  auditEvents?: Pick<import("@ade-control-plane/database").AuditEventRepository, "append">;
 }
 
 export interface V0TaskExecutorOptions {
@@ -42,6 +45,7 @@ export interface V0TaskExecutorOptions {
   timeoutMs?: number;
   cancelPollMs?: number;
   now?(): Date;
+  logDiagnostic?(diagnostic: ReturnType<typeof failureDiagnostic>): void;
 }
 
 export type AdeProfile = "chill" | "normal" | "expert";
@@ -56,16 +60,18 @@ export class V0TaskExecutor {
   private readonly timeoutMs: number;
   private readonly cancelPollMs: number;
   private readonly now: () => Date;
+  private readonly commands: CommandRunner;
 
   public constructor(private readonly options: V0TaskExecutorOptions) {
+    this.commands = diagnosticCommands(options.commands);
     this.codexExecutable = options.codexExecutable ?? "codex";
     this.agentExecutor = options.agentExecutor ?? new CodexAgentExecutor({
-      commands: options.commands,
+      commands: this.commands,
       executable: this.codexExecutable,
       environment: options.codexEnvironment ?? {},
     });
     this.deliveryRuntime = options.deliveryRuntime ?? new AdeDeliveryRuntime({
-      commands: options.commands,
+      commands: this.commands,
       ...(options.adeExecutable ? { executable: options.adeExecutable } : {}),
       ...(options.adeRuntimeVersion ? { expectedVersion: options.adeRuntimeVersion } : {}),
       ...(options.gitEnvironment ? { environment: options.gitEnvironment } : {}),
@@ -85,6 +91,12 @@ export class V0TaskExecutor {
   }
 
   public async execute(task: V0TaskRecord, shutdownSignal?: AbortSignal): Promise<void> {
+    const secrets = Object.entries({ ...this.gitEnvironment, ...this.codexEnvironment })
+      .filter(([key]) => /key|token|secret|pass|auth|credential/iu.test(key)).map(([, value]) => value);
+    return withExecutionDiagnostics([...secrets, task.prompt, this.options.projectRoot], () => this.executeTask(task, shutdownSignal));
+  }
+
+  private async executeTask(task: V0TaskRecord, shutdownSignal?: AbortSignal): Promise<void> {
     if (task.status !== "RUNNING") {
       throw new Error("V0 executor accepts RUNNING tasks only.");
     }
@@ -123,12 +135,15 @@ export class V0TaskExecutor {
 
     try {
       const project = await this.requireProject(task.projectId);
+      executionStage("Provision checkout");
       const checkout = await this.ensureCheckout(project, controller.signal);
+      executionStage("Resolve GitHub issue");
       const issue = await this.resolveIssue(task, project);
       branchName = `ade/${task.id}`;
       await this.log(task.id, "Preparing allow-listed checkout.");
       await this.assertNotCancelled(task.id);
 
+      executionStage("Validate checkout");
       const remote = await this.git(checkout.root, ["remote", "get-url", "origin"]);
       if (!matchesGithubRemote(remote.stdout, project.repositoryOwner, project.repositoryName)) {
         throw new V0ExecutionError("REMOTE_MISMATCH", "Checkout origin does not match the registered GitHub repository.");
@@ -175,6 +190,7 @@ export class V0TaskExecutor {
         url: issue?.url ?? `ade://tasks/${task.id}`,
       };
       let deliveryPlan: AdeDeliveryPlan | undefined;
+      executionStage("Prepare ADE configuration");
       if (initialization) {
         const setup = await this.deliveryRuntime.inspectSetup({ cwd: checkout.root, work, signal: controller.signal });
         if (setup.readiness === "ready") {
@@ -221,6 +237,7 @@ export class V0TaskExecutor {
       await this.log(task.id, initialization
         ? "Starting ADE initialization in the workspace-write sandbox."
         : "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
+      executionStage("Run Codex");
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
         prompt: buildCodexPrompt(task.prompt, this.adeProfile, issue, initialization),
@@ -228,6 +245,7 @@ export class V0TaskExecutor {
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });
       if (agentResult.exitCode !== 0) {
+        recordAgentFailure(this.agentExecutor.provider, agentResult);
         await this.log(task.id, `${this.agentExecutor.provider} execution failed.`);
         throw new V0ExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
@@ -235,6 +253,7 @@ export class V0TaskExecutor {
       usage = agentResult.usage;
       await this.assertNotCancelled(task.id);
 
+      executionStage("Inspect generated changes");
       const finalStatus = await this.git(checkout.root, [
         "status",
         "--porcelain=v1",
@@ -245,6 +264,7 @@ export class V0TaskExecutor {
       }
 
       if (!prepared) {
+        executionStage("Validate generated ADE configuration");
         prepared = await this.deliveryRuntime.prepare({
           cwd: checkout.root,
           work,
@@ -259,6 +279,7 @@ export class V0TaskExecutor {
         }
       }
 
+      executionStage("Run ADE post-agent gates");
       reviewResult = await this.deliveryRuntime.runPostAgentGates({
         cwd: checkout.root,
         work,
@@ -300,6 +321,7 @@ export class V0TaskExecutor {
       if (headSha) await this.options.persistence.v0Tasks.markPushed?.({ taskId: task.id, branchName, headSha });
 
       await this.log(task.id, "Creating GitHub pull request.");
+      executionStage("Create GitHub pull request");
       const repository = { id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`, owner: project.repositoryOwner, name: project.repositoryName };
       const pullRequest = await this.createOrReconcilePullRequest(repository, branchName, checkout.baseBranch, task, issue, reviewResult);
       await this.log(task.id, "Pull request created; recording terminal status.");
@@ -314,9 +336,10 @@ export class V0TaskExecutor {
         adeProvenance: AdeDeliveryRuntime.provenanceSummary(reviewResult.provenance),
       });
     } catch (error) {
-      const latest = await this.options.persistence.v0Tasks.getById(task.id);
+      const latest = await this.options.persistence.v0Tasks.getById(task.id).catch(() => null);
       const cancelled = abortReason === "cancel" || latest?.cancelRequested === true;
       const failure = classifyFailure(error, abortReason);
+      if (!cancelled) await this.persistDiagnostic(task, failure.code, error);
       await this.options.persistence.v0Tasks.complete({
         taskId: task.id,
         status: cancelled ? "CANCELLED" : "FAILED",
@@ -324,7 +347,7 @@ export class V0TaskExecutor {
         branchName,
         headSha,
         errorCode: cancelled ? null : failure.code,
-        errorSummary: cancelled ? null : failure.summary,
+        errorSummary: cancelled ? null : redactDiagnostic(failure.summary),
       });
       await this.log(
         task.id,
@@ -376,6 +399,15 @@ export class V0TaskExecutor {
 
   /** Reconciles or creates only the PR for a pushed task; no agent or Git mutation is run. */
   public async retryPullRequest(task: V0TaskRecord): Promise<void> {
+    const secrets = Object.entries(this.gitEnvironment).filter(([key]) => /key|token|secret|pass|auth|credential/iu.test(key)).map(([, value]) => value);
+    return withExecutionDiagnostics(secrets, async () => {
+      executionStage("Reconcile GitHub pull request");
+      try { await this.retryPullRequestTask(task); }
+      catch (error) { await this.persistDiagnostic(task, classifyFailure(error, null).code, error); throw error; }
+    });
+  }
+
+  private async retryPullRequestTask(task: V0TaskRecord): Promise<void> {
     if (task.status !== "FAILED" || task.errorCode !== "GITHUB_PR_CREATE_FAILED") return;
     const project = await this.requireProject(task.projectId);
     const checkout = await resolveProjectCheckout(this.options.projectRoot, project);
@@ -402,9 +434,10 @@ export class V0TaskExecutor {
       await this.log(task.id, `PR-only retry reconciled pull request #${pullRequest.number}; agent was not rerun.`);
     } catch (error) {
       const failure = classifyFailure(error, null);
+      await this.persistDiagnostic(task, failure.code, error);
       await this.options.persistence.v0Tasks.complete({
         taskId: task.id, status: "FAILED", finishedAt: this.now().toISOString(), branchName, headSha: task.headSha ?? remoteSha,
-        errorCode: failure.code, errorSummary: failure.summary,
+        errorCode: failure.code, errorSummary: redactDiagnostic(failure.summary),
       });
       await this.log(task.id, `PR-only retry failed: ${failure.summary}`).catch(() => undefined);
     }
@@ -519,7 +552,7 @@ export class V0TaskExecutor {
   }
 
   private async git(cwd: string, args: readonly string[]): Promise<CommandResult> {
-    const result = await this.options.commands.run({
+    const result = await this.commands.run({
       executable: "git",
       args: ["-c", "core.hooksPath=/dev/null", ...args],
       cwd,
@@ -537,7 +570,8 @@ export class V0TaskExecutor {
     input: Parameters<CommandRunner["run"]>[0],
   ): Promise<CommandResult> {
     await this.log(taskId, `${label} started.`);
-    const result = await this.options.commands.run(input);
+    executionStage(label);
+    const result = await this.commands.run(input);
     if (result.exitCode !== 0) {
       await this.log(taskId, `${label} failed.`);
       throw new V0ExecutionError(
@@ -554,7 +588,7 @@ export class V0TaskExecutor {
       taskId,
       occurredAt: this.now().toISOString(),
       stream: output.stream,
-      message: output.message,
+      message: redactCommandOutput(output.stream, output.message),
     });
   }
 
@@ -563,8 +597,23 @@ export class V0TaskExecutor {
       taskId,
       occurredAt: this.now().toISOString(),
       stream: "system",
-      message,
+      message: redactDiagnostic(message, 4000),
     });
+  }
+
+  private async persistDiagnostic(task: V0TaskRecord, code: string, error: unknown): Promise<void> {
+    const diagnostic = failureDiagnostic(task.id, task.projectId, code, error);
+    // Log first: a persistence outage must not erase the server-side evidence.
+    try {
+      if (this.options.logDiagnostic) this.options.logDiagnostic(diagnostic);
+      else console.error(JSON.stringify(diagnostic));
+    } catch { /* A logger failure must not replace the execution outcome. */ }
+    await this.options.persistence.v0Tasks.appendLog({ taskId: task.id, occurredAt: this.now().toISOString(),
+      stream: "system", message: JSON.stringify(diagnostic) }).catch(() => undefined);
+    await this.options.persistence.auditEvents?.append({ occurredAt: this.now().toISOString(),
+      category: "task", action: "task.execution.failed", severity: "error", actorType: "system", actorRef: "v0-worker",
+      projectId: task.projectId, correlationId: task.id, result: "failed", metadata: { ...diagnostic },
+    }).catch(() => undefined);
   }
 }
 
@@ -601,8 +650,14 @@ function classifyFailure(
   if (error instanceof ProjectCheckoutError) {
     return { code: error.code, summary: error.safeSummary };
   }
+  if (error instanceof ProjectProvisioningError) {
+    return { code: error.code, summary: error.safeSummary };
+  }
   if (error instanceof V0ExecutionError) {
     return { code: error.code, summary: error.safeSummary };
+  }
+  if (error instanceof Error && "code" in error && typeof error.code === "string" && ["ENOENT", "EACCES", "ENOEXEC"].includes(error.code)) {
+    return { code: error.code, summary: "The worker could not start the required command." };
   }
   return { code: "EXECUTION_FAILED", summary: "Task execution failed." };
 }

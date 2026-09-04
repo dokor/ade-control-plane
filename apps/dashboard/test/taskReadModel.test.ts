@@ -17,6 +17,31 @@ import {
 
 const TASK_ID = "66666666-6666-4666-8666-666666666666";
 
+test("uses task-correlated audit diagnostics when raw logs are unavailable", async () => {
+  const state = createMemoryState({ projects: [project()], v0Tasks: [task({ status: "FAILED", errorCode: "GIT_CLONE_FAILED" })] });
+  const persistence = createMemoryPersistence(state);
+  await persistence.auditEvents.append({ occurredAt: NOW, category: "task", action: "task.execution.failed", severity: "error",
+    actorType: "system", actorRef: "v0-worker", projectId: project().id, correlationId: TASK_ID, result: "failed",
+    metadata: { event: "task.execution.failed", taskId: TASK_ID, code: "GIT_CLONE_FAILED", stage: "Provision checkout", stderr: "repository not found" } });
+  const detail = await buildTaskDetail(persistence, TASK_ID);
+  assert.equal(detail?.diagnostic?.code, "GIT_CLONE_FAILED");
+  assert.equal(detail?.diagnostic?.stage, "Provision checkout");
+  state.auditEvents[0]!.correlationId = "other-task";
+  assert.equal((await buildTaskDetail(persistence, TASK_ID))?.diagnostic, null);
+});
+
+test("only system logs can supply structured diagnostics and their stage reaches the timeline", async () => {
+  const message = JSON.stringify({ event: "task.execution.failed", taskId: TASK_ID, code: "GIT_CLONE_FAILED", stage: "Provision checkout" });
+  const state = createMemoryState({ projects: [project()], v0Tasks: [task({ status: "FAILED" })],
+    v0TaskLogs: [{ id: "1", taskId: TASK_ID, occurredAt: NOW, stream: "stdout", message }] });
+  const persistence = createMemoryPersistence(state);
+  assert.equal((await buildTaskDetail(persistence, TASK_ID))?.diagnostic, null);
+  state.v0TaskLogs[0]!.stream = "system";
+  const detail = await buildTaskDetail(persistence, TASK_ID);
+  assert.equal(detail?.diagnostic?.code, "GIT_CLONE_FAILED");
+  assert.ok(detail?.timeline.some((item) => item.title === "Provision checkout: GIT_CLONE_FAILED"));
+});
+
 function task(overrides: Partial<V0TaskRecord> = {}): V0TaskRecord {
   return {
     id: TASK_ID,

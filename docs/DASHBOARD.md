@@ -95,6 +95,20 @@ Do not show controls unsupported by the current project/ADE capabilities.
 
 ### `/tasks` — Task runway
 
+Failed manual/initialization tasks retain their specific checkout/provisioning
+error code. The execution page separates the safe outcome from a **Technical
+details** disclosure: failed stage, command operation (argument values omitted),
+internal error code/type, exit code/signal, bounded redacted stderr and server
+stack. The structured `task.execution.failed` event is correlated by task ID in
+worker logs, task logs and the audit trail. A task-correlated recent audit event
+is used when the bounded raw log does not contain the diagnostic. Historical
+failures without this evidence are not retroactively diagnosed.
+
+Diagnostics are sanitized before persistence; no environment, stdin, full
+command arguments or raw error objects are stored. The server still emits the
+diagnostic if persistence fails. Unknown errors retain the generic user-facing
+`EXECUTION_FAILED` outcome while providing bounded operator evidence.
+
 The task composer lists open GitHub issues that the configured GitHub App can
 read, independently of ADE compatibility. Selecting an issue does not bypass
 execution safeguards: task creation still verifies that the issue has a valid

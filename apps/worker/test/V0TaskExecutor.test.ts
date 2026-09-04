@@ -13,8 +13,100 @@ import { DeterministicFakeGithubClient } from "@ade-control-plane/github";
 
 import type { CommandInput, CommandResult, CommandRunner } from "../src/v0/CommandRunner.js";
 import { V0TaskExecutor } from "../src/v0/V0TaskExecutor.js";
+import { ProjectProvisioningError, provisionProjectCheckout } from "../src/v0/ProjectProvisioner.js";
+import { CodexAgentExecutor } from "../src/AgentExecutor.js";
 
 const now = "2026-08-27T10:00:00.000Z";
+
+for (const code of ["GIT_CLONE_FAILED", "CHECKOUT_CONFIGURATION_INVALID", "CHECKOUT_REMOTE_MISMATCH"] as const) {
+  test(`preserves provisioning code ${code} with correlated diagnostics`, async () => {
+    const context = await setup({ checkoutExists: false });
+    const diagnostics: unknown[] = [];
+    try {
+      await new V0TaskExecutor({ persistence: context.persistence, github: new DeterministicFakeGithubClient(),
+        commands: new SuccessfulCommands(context.task), projectRoot: context.projectRoot,
+        provisionCheckout: async () => { throw new ProjectProvisioningError(code, "Checkout preparation failed."); },
+        logDiagnostic: (entry) => diagnostics.push(entry),
+      }).execute(context.task);
+      assert.equal(context.task.errorCode, code);
+      assert.equal(context.task.branchName, null);
+      assert.equal((diagnostics[0] as { taskId: string }).taskId, context.task.id);
+      assert.match(JSON.stringify(diagnostics), /Provision checkout/);
+      assert.ok(context.logs.some((log) => log.message.includes('"event":"task.execution.failed"')));
+    } finally { await context.close(); }
+  });
+}
+
+test("captures clone stderr from the real provisioner before it wraps the command failure", async () => {
+  const context = await setup({ checkoutExists: false });
+  const diagnostics: unknown[] = [];
+  try {
+    const commands = { run: async () => ({ exitCode: 128, signal: null, stdout: "", stderr: "fatal: repository not found; token=super-private" }) };
+    await new V0TaskExecutor({ persistence: context.persistence, github: new DeterministicFakeGithubClient(), commands,
+      projectRoot: context.projectRoot, logDiagnostic: (entry) => diagnostics.push(entry),
+      provisionCheckout: (project, signal) => provisionProjectCheckout({ project, commands, projectRoot: context.projectRoot,
+        gitEnvironment: {}, ...(signal ? { signal } : {}), persistence: { auditEvents: { append: async () => ({}) as never } } }),
+    }).execute(context.task);
+    assert.equal(context.task.errorCode, "GIT_CLONE_FAILED");
+    assert.match(JSON.stringify(diagnostics), /git clone/);
+    assert.match(JSON.stringify(diagnostics), /repository not found/);
+    assert.match(JSON.stringify(diagnostics), /"exitCode":128/);
+    assert.doesNotMatch(JSON.stringify([diagnostics, context.logs]), /super-private/);
+  } finally { await context.close(); }
+});
+
+test("keeps correlated audit/server evidence when the raw log budget is exhausted", async () => {
+  const context = await setup({ checkoutExists: false });
+  const audits: unknown[] = [], diagnostics: unknown[] = [];
+  try {
+    await new V0TaskExecutor({ persistence: { ...context.persistence,
+      v0Tasks: { ...context.persistence.v0Tasks, appendLog: async () => null },
+      auditEvents: { append: async (input) => { audits.push(input); return {} as never; } } },
+      github: new DeterministicFakeGithubClient(), commands: new SuccessfulCommands(context.task), projectRoot: context.projectRoot,
+      provisionCheckout: async () => { throw new ProjectProvisioningError("GIT_CLONE_FAILED", "Clone failed."); },
+      logDiagnostic: (entry) => diagnostics.push(entry),
+    }).execute(context.task);
+    assert.equal(context.task.errorCode, "GIT_CLONE_FAILED");
+    assert.equal(diagnostics.length, 1);
+    assert.match(JSON.stringify(audits), new RegExp(`"correlationId":"${context.task.id}"`));
+    assert.match(JSON.stringify(audits), /GIT_CLONE_FAILED/);
+  } finally { await context.close(); }
+});
+
+for (const failure of ["unknown", "spawn", "exit"] as const) test(`persists ${failure} diagnostics without leaking secrets`, async () => {
+  const context = await setup();
+  const diagnostics: unknown[] = [];
+  try {
+    const successful = new SuccessfulCommands(context.task);
+    const commands: CommandRunner = { run: async (input) => {
+      if (input.executable !== "codex") return successful.run(input);
+      if (failure === "exit") {
+        const stderr = "Authentication failed: Bearer abc-supersecret\nCUSTOM_API_KEY=opaque-custom-secret";
+        await input.onOutput?.({ stream: "stderr", message: stderr });
+        return { exitCode: 17, signal: null, stdout: "", stderr };
+      }
+      const error = new Error("Cannot start worker: opaque-custom-secret token=another-secret");
+      if (failure === "spawn") Object.assign(error, { code: "ENOENT" });
+      throw error;
+    } };
+    await new V0TaskExecutor({ persistence: context.persistence, commands, github: new DeterministicFakeGithubClient(),
+      projectRoot: context.projectRoot, codexEnvironment: { CUSTOM_API_KEY: "opaque-custom-secret" },
+      agentExecutor: new CodexAgentExecutor({ commands, executable: "codex", environment: { CUSTOM_API_KEY: "opaque-custom-secret" } }),
+      logDiagnostic: (entry) => diagnostics.push(entry),
+    }).execute(context.task);
+    assert.equal(context.task.errorCode, failure === "exit" ? "AGENT_EXECUTION_FAILED" : failure === "spawn" ? "ENOENT" : "EXECUTION_FAILED");
+    assert.match(JSON.stringify(diagnostics), /Run Codex/);
+    assert.match(JSON.stringify(diagnostics), /codex exec/);
+    assert.doesNotMatch(JSON.stringify([context.task.errorSummary, context.logs, diagnostics]), /abc-supersecret|opaque-custom-secret|another-secret/);
+    if (failure === "spawn") assert.match(JSON.stringify(diagnostics), /ENOENT/);
+    if (failure === "unknown") {
+      assert.equal(context.task.errorSummary, "Task execution failed.");
+      assert.match(JSON.stringify(diagnostics), /Cannot start worker/);
+      assert.match(JSON.stringify(diagnostics), /"stack":"Error:/);
+    }
+    if (failure === "exit") assert.match(JSON.stringify(diagnostics), /"exitCode":17/);
+  } finally { await context.close(); }
+});
 
 test("runs Codex through stdin then commits, pushes and persists the PR", async () => {
   const context = await setup();
