@@ -1,6 +1,8 @@
-# MVP release-gate scenario ledger
+# Extended operational qualification ledger
 
-Issue #153 is a production qualification gate. The repository can provide the
+This historical S01–S14 ledger is extended operational qualification (#88),
+not a prerequisite for the functional MVP. For #153 use the separate F01–F09
+ledger in [RELEASE_GATE.md](RELEASE_GATE.md). The repository can provide the
 black-box happy-path command and the evidence validator, but it cannot create
 Raspberry, GitHub App or operator evidence in CI. The scenarios below must be
 run against the deployed Dashboard, worker, pinned ADE runtime and a dedicated
@@ -68,7 +70,7 @@ visible; do not replace it with a successful rerun under the same correlation.
 
 ## Release decision
 
-The MVP gate is ready only if:
+The extended operational gate is ready only if:
 
 - all 14 scenarios are `passed` against the real deployed topology;
 - the happy path required one initial Run action plus explicit human merge;
@@ -80,4 +82,4 @@ The MVP gate is ready only if:
 
 If any prerequisite or scenario is missing, leave the verdict `not-ready` or
 `blocked` and link the follow-up issue. Do not close #153 from repository tests
-alone.
+alone. Conversely, an outstanding S14 soak does not block functional MVP sign-off.

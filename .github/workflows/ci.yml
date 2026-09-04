@@ -83,7 +83,11 @@ jobs:
           fi
 
       - name: Typecheck
+        # Unit fixtures are not production qualification evidence.
         run: pnpm typecheck
+
+      - name: Validate functional MVP evidence boundary
+        run: node --test deploy/test/functional-mvp.test.mjs
 
       - name: Test
         run: pnpm test
