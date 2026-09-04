@@ -409,8 +409,10 @@ export class V0TaskExecutor {
         finishedAt: this.now().toISOString(),
         branchName,
         headSha,
-        workflow: this.workflow(cancelled ? "cancelled" : "failed", cancelled ? "The task was cancelled." : failure.summary, {
-          recoverable: false, remediation: "none", humanInputRequired: false,
+        workflow: this.workflow(cancelled ? "cancelled" : needsHumanInput(failure.code) ? "waiting-human" : "failed", cancelled ? "The task was cancelled." : failure.summary, {
+          recoverable: false,
+          remediation: needsHumanInput(failure.code) ? "wait-for-input" : "none",
+          humanInputRequired: needsHumanInput(failure.code),
         }),
         errorCode: cancelled ? null : failure.code,
         errorSummary: cancelled ? null : redactDiagnostic(failure.summary),
@@ -887,6 +889,10 @@ function classifyFailure(
     return { code: error.code, summary: "The worker could not start the required command." };
   }
   return { code: "EXECUTION_FAILED", summary: "Task execution failed." };
+}
+
+function needsHumanInput(code: string): boolean {
+  return ["ADE_DELIVERY_NOT_READY", "ADE_ISSUE_NOT_READY", "ADE_ISSUE_ENRICHMENT_EXHAUSTED", "ISSUE_ENRICHMENT_UNAVAILABLE"].includes(code);
 }
 
 function buildIssueEnrichmentPrompt(issue: GithubIssueDetails, instruction: string): string {
