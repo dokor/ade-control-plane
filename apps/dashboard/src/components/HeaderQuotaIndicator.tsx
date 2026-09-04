@@ -14,7 +14,7 @@ export async function HeaderQuotaIndicator() {
   const quota = await loadHeaderQuota();
   const label = quota.availablePercent === null
     ? "Quota unknown"
-    : `${Math.max(0, 100 - quota.availablePercent === 100 ? 100 : quota.availablePercent)}% available`;
+    : `${quota.availablePercent}% available`;
 
   return (
     <Link href="/#capacity" aria-label={`AI quota: ${label}, ${quota.state}`}>
