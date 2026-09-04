@@ -1,7 +1,7 @@
 import React, { type ReactNode } from "react";
 import Link from "next/link";
 import { StatusBadge } from "./StatusBadge.js";
-import { formatAge, formatDuration, formatInstant, formatPercent } from "../lib/format.js";
+import { formatAge, formatDuration, formatFutureDistance, formatInstant, formatPercent } from "../lib/format.js";
 import { summarizeOverview } from "../lib/overview.js";
 import { quotaCapacityColor } from "../lib/quotaPresentation.js";
 import type { OverviewViewModel } from "../lib/readModel.js";
@@ -57,7 +57,7 @@ export function OverviewContent({ overview, controls, quotaControl }: {
           {quota.usedPercent !== null && <meter min={0} max={100} value={quota.usedPercent} style={{ accentColor: quotaCapacityColor(quota.state) }} aria-label={`${quota.provider} quota used`}>{formatPercent(quota.usedPercent)}</meter>}
           <p>{quota.canStartWork ? "Quota permits new work." : "Quota does not permit new work."}</p>
           <p className="muted">{quota.reason}</p>
-          <p className="muted">{quota.resetsAt ? `Next reset ${formatInstant(quota.resetsAt)}` : "Reset time not reported"}<br />Snapshot {formatAge(quota.snapshotAgeMs)}</p>
+          <p className="muted">{quota.resetsAt ? `Next reset ${formatFutureDistance(quota.resetsAt, Date.parse(overview.generatedAt))}` : "Reset time not reported"}<br />Snapshot {formatAge(quota.snapshotAgeMs)}</p>
           {quotaControl}
         </div>
       </section>
