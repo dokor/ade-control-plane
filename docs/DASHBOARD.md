@@ -397,6 +397,27 @@ quota thresholds as a single durable row. It defaults to `paused`: privileged
 dispatch must be an explicit, audited human decision rather than a deployment
 side effect.
 
+## Operational Overview (#173)
+
+The Overview presents operational health, required actions, active work,
+project ADE readiness, then provider capacity, in the same order on desktop
+and mobile. Each blocked, failed, reconciling or waiting-human issue has its
+own detail link, even when another issue in the same project can run. Active
+work uses persisted ADE checkpoints and execution timestamps; manual tasks
+remain visible alongside GitHub work. Detailed evidence stays on task pages.
+
+Readiness comes from the stored ADE compatibility result. GitHub sync denotes
+the freshness of repository reconciliation, not a live GitHub API health probe.
+Worker health uses its `github-work-local` heartbeat and the latest cycle audit;
+an unrelated healthy runner cannot establish worker health. Provider usage may
+be unknown, and a reset is never treated as proof that capacity is available.
+
+The page streams a loading state after authentication. Optional read failures
+produce a labeled partial view while retaining available sections; a missing
+execution read is never displayed as "no active executions". Core settings or
+project-registry failures show a retryable unavailable state. Use the existing
+Refresh action to reload. Scheduler controls remain in an expandable section.
+
 # Project deletion
 
 The project detail page has a destructive **Delete project** action. The operator must type the exact project name. The Dashboard queues the operation; the worker removes the verified managed checkout and its worktrees, then deletes the project and all project-owned local records. The GitHub repository is never deleted.
