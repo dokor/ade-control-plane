@@ -1,0 +1,50 @@
+/* Keep the global navigation visually simple and aligned. */
+header.top {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 24px;
+  min-height: 40px;
+}
+
+header.top h1 {
+  flex: 0 0 auto;
+  line-height: 1.2;
+}
+
+nav.primary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  gap: 14px;
+  margin-left: auto;
+}
+
+nav.primary > * {
+  flex: 0 0 auto;
+}
+
+nav.primary a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+}
+
+nav.primary button {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  header.top {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  nav.primary {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+  }
+}
