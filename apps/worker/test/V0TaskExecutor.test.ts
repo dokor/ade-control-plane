@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -320,6 +320,98 @@ test("records a merged setup checkout only after its read-only ADE check succeed
   }
 });
 
+for (const remainsIncomplete of [false, true]) test(`initialization without diff reinspects setup: ${remainsIncomplete ? "incomplete" : "ready"}`, async () => {
+  const context = await setup();
+  try {
+    context.task.source = { type: "ade-initialize" };
+    const commands = new SuccessfulCommands(context.task);
+    commands.adeConfigMissingUntilCodex = true;
+    commands.noChanges = true;
+    if (remainsIncomplete) commands.setupAfterCodex = JSON.stringify({ version: "ade.project-setup/v1", adeVersion: "0.7.0", readiness: "incomplete",
+      missingRequiredIds: ["context.generated"], requirements: [{ id: "context.generated", status: "unsatisfied", detail: "Project context is stale.", remediation: "Run ade context generate." }] });
+    const github = new DeterministicFakeGithubClient();
+    await new V0TaskExecutor({ persistence: context.persistence, github, commands, projectRoot: context.projectRoot }).execute(context.task);
+    assert.equal(context.task.status, remainsIncomplete ? "FAILED" : "SUCCESS");
+    assert.equal(context.task.errorCode, remainsIncomplete ? "ADE_SETUP_STILL_INCOMPLETE" : null);
+    assert.equal(commands.calls.filter((call) => call.executable === "ade" && call.args[0] === "setup").length, 2);
+    assert.match(commands.calls.find((call) => call.executable === "codex")?.stdin ?? "", /Missing required: config.file/);
+    assert.equal(github.createdPullRequests.length, 0);
+    assert.equal(commands.calls.some((call) => call.args.includes("commit") || call.args.includes("push")), false);
+    assert.equal((context.readinessProofs.at(-1) as { status: string }).status, remainsIncomplete ? "incompatible" : "compatible");
+    const logs = context.logs.map((log) => log.message).join("\n");
+    assert.match(logs, /ade.setup.inspected/);
+    if (remainsIncomplete) { assert.match(logs, /Project context is stale/); assert.match(context.task.errorSummary!, /context.generated/); }
+  } finally { await context.close(); }
+});
+
+test("partial setup sends exact sanitized remediation to Codex and retains structured logs", async () => {
+  const context = await setup();
+  try {
+    context.task.source = { type: "ade-initialize" };
+    const commands = new SuccessfulCommands(context.task); commands.noChanges = true;
+    commands.setupBeforeCodex = JSON.stringify({ version: "ade.project-setup/v1", adeVersion: "0.7.0", readiness: "incomplete", missingRequiredIds: ["context.generated"],
+      requirements: [{ id: "context.generated", status: "unsatisfied", criticality: "required", detail: "Context is stale. ghp_neverExpose", remediation: "Run ade context generate." }] });
+    await new V0TaskExecutor({ persistence: context.persistence, github: new DeterministicFakeGithubClient(), commands, projectRoot: context.projectRoot }).execute(context.task);
+    const prompt = commands.calls.find((call) => call.executable === "codex")!.stdin!;
+    assert.match(prompt, /Context is stale/); assert.match(prompt, /Run ade context generate/);
+    assert.match(prompt, /Preserve existing configuration/); assert.doesNotMatch(prompt, /ghp_neverExpose/);
+    const events = context.logs.filter((log) => log.message.startsWith('{"event":"ade.setup.')).map((log) => JSON.parse(log.message));
+    assert.ok(events.some((event) => event.event === "ade.setup.requirement" && event.remediation === "Run ade context generate."));
+    assert.doesNotMatch(JSON.stringify(events), /ghp_neverExpose/);
+    assert.equal(context.task.status, "SUCCESS");
+  } finally { await context.close(); }
+});
+
+test("legacy partial initialization becomes a targeted upgrade with a reviewed PR", async () => {
+  const context = await setup();
+  try {
+    await copyFile(new URL("./fixtures/legacy-ade/package.json", import.meta.url), join(context.projectRoot, "alpha", "package.json"));
+    context.task.source = { type: "ade-initialize" };
+    const commands = new SuccessfulCommands(context.task);
+    commands.setupBeforeCodex = JSON.stringify({ version: "ade.project-setup/v1", adeVersion: "0.7.0", readiness: "invalid", missingRequiredIds: ["config.valid"], configurationErrors: ["Legacy rules configuration requires migration."] });
+    const github = new DeterministicFakeGithubClient();
+    await new V0TaskExecutor({ persistence: context.persistence, github, commands, projectRoot: context.projectRoot }).execute(context.task);
+    const prompt = commands.calls.find((call) => call.executable === "codex")!.stdin!;
+    assert.match(prompt, /outdated/); assert.match(prompt, /\^0\.3\.0/); assert.match(prompt, /worker runtime 0\.7\.0/);
+    assert.match(prompt, /Legacy rules configuration requires migration/);
+    assert.equal(context.task.status, "SUCCESS");
+    assert.equal(github.createdPullRequests.length, 1);
+    // Unmerged generated configuration must not mark the default branch ready.
+    assert.equal(context.readinessProofs.some((proof) => (proof as { status: string }).status === "compatible"), false);
+  } finally { await context.close(); }
+});
+
+for (const interruption of ["cancel", "unreviewed-commit"] as const) test(`no-diff initialization does not record readiness after ${interruption}`, async () => {
+  const context = await setup();
+  try {
+    context.task.source = { type: "ade-initialize" };
+    const commands = new SuccessfulCommands(context.task); commands.noChanges = true; commands.adeConfigMissingUntilCodex = true;
+    const guarded: CommandRunner = { run: async (input) => {
+      const output = await commands.run(input);
+      if (commands.calls.some((call) => call.executable === "codex")) {
+        if (interruption === "cancel" && input.args[0] === "setup") context.task.cancelRequested = true;
+        if (interruption === "unreviewed-commit" && input.args.includes("rev-parse") && input.args.includes("HEAD")) return result("a".repeat(40));
+      }
+      return output;
+    } };
+    const github = new DeterministicFakeGithubClient();
+    await new V0TaskExecutor({ persistence: context.persistence, github, commands: guarded, projectRoot: context.projectRoot }).execute(context.task);
+    assert.equal(context.task.status, interruption === "cancel" ? "CANCELLED" : "FAILED");
+    assert.equal(context.task.errorCode, interruption === "cancel" ? null : "ADE_SETUP_HEAD_CHANGED");
+    assert.equal(context.readinessProofs.some((proof) => (proof as { status: string }).status === "compatible"), false);
+    assert.equal(github.createdPullRequests.length, 0);
+  } finally { await context.close(); }
+});
+
+test("ordinary development without diff still fails with NO_CHANGES", async () => {
+  const context = await setup();
+  try {
+    const commands = new SuccessfulCommands(context.task); commands.noChanges = true;
+    await new V0TaskExecutor({ persistence: context.persistence, github: new DeterministicFakeGithubClient(), commands, projectRoot: context.projectRoot }).execute(context.task);
+    assert.equal(context.task.errorCode, "NO_CHANGES");
+  } finally { await context.close(); }
+});
+
 test("refuses ADE artifacts that are not ignored before Codex starts", async () => {
   const context = await setup();
   try {
@@ -397,6 +489,9 @@ class SuccessfulCommands implements CommandRunner {
   public adeReviewExitCode = 0;
   public adeArtifactsDirty = false;
   public adeConfigMissingUntilCodex = false;
+  public noChanges = false;
+  public setupAfterCodex: string | null = null;
+  public setupBeforeCodex: string | null = null;
   private codexStarted = false;
   private statusCalls = 0;
 
@@ -410,6 +505,7 @@ class SuccessfulCommands implements CommandRunner {
     if (input.args.includes("get-url")) return result(this.remote);
     if (input.args.includes("rev-parse")) return result("0123456789012345678901234567890123456789\n");
     if (input.args.includes("--porcelain=v1")) {
+      if (this.noChanges) return result("");
       const statusCall = this.statusCalls++;
       if (statusCall === 0) return result("");
       if (statusCall === 1) {
@@ -424,6 +520,8 @@ class SuccessfulCommands implements CommandRunner {
       return result("ADE configuration is missing", 1);
     }
     if (input.executable === "ade" && input.args[0] === "review") return result("", this.adeReviewExitCode);
+    if (input.executable === "ade" && input.args[0] === "setup" && this.codexStarted && this.setupAfterCodex) return result(this.setupAfterCodex, 1);
+    if (input.executable === "ade" && input.args[0] === "setup" && !this.codexStarted && this.setupBeforeCodex) return result(this.setupBeforeCodex, 1);
     if (input.executable === "ade" && input.args[0] === "setup") return this.adeConfigMissingUntilCodex && !this.codexStarted
       ? result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"incomplete","missingRequiredIds":["config.file"]}', 1)
       : result('{"version":"ade.project-setup/v1","adeVersion":"0.7.0","readiness":"ready","missingRequiredIds":[]}');

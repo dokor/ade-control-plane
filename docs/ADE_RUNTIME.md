@@ -1,5 +1,33 @@
 # Supported ADE runtime
 
+## Initialization diagnostics and no-change outcomes
+
+`ade-initialize` records bounded, sanitized JSON log events (`ade.setup.inspected`,
+`ade.setup.requirement`, `ade.setup.configuration-error`, `ade.setup.missing-required`
+and `ade.setup.missing-capability`). These preserve ADE's requirement status,
+criticality, explanation and remediation, configuration errors and capability gaps
+for the Dashboard logs/API. Raw report markdown and unrelated fields are excluded.
+The same diagnostic projection guides the agent toward targeted repairs/migration;
+optional and unverifiable checks are not mandatory repairs.
+
+Diagnostics distinguish absent, compatible, incomplete/invalid and outdated setup.
+For a non-ready setup, a simple exact/caret/tilde ADE dependency declaration in the
+root package.json with a lower version floor than the worker is labeled `outdated`
+(an upgrade candidate). The declared range is not an installed-version measurement
+or proof of incompatibility. Complex ranges/unavailable manifests are not guessed.
+ADE's setup and delivery contracts remain authoritative: a compatible older project
+is not forcibly upgraded, and no new minimum repository version is imposed.
+
+After a successful agent run with no Git diff, initialization repeats the read-only
+setup inspection. A ready setup must still pass delivery-plan negotiation before
+SUCCESS and default-branch readiness are recorded, without commit, push or PR.
+Otherwise the task fails with `ADE_SETUP_STILL_INCOMPLETE` and remaining gaps in the
+summary and structured logs. Normal development tasks retain `NO_CHANGES`.
+Generated changes still follow validation/review and a human-reviewed PR; unmerged
+configuration does not mark the default branch ready.
+
+## Runtime pinning
+
 Control Plane production images pin an exact `@alelouet/ai-delivery-engine`
 version through the `ADE_VERSION` build argument. The current supported runtime
 is `0.11.0`; the image also publishes the value as `ADE_RUNTIME_VERSION`.

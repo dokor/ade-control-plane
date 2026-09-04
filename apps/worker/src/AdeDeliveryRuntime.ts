@@ -3,6 +3,9 @@ import type { AgentUsageMetrics, JsonObject, ProjectRecord } from "@ade-control-
 
 import type { CommandOutput, CommandResult, CommandRunner } from "./v0/CommandRunner.js";
 import type { AgentExecutor } from "./AgentExecutor.js";
+import { readFile, stat } from "node:fs/promises";
+import { join } from "node:path";
+import { redactDiagnostic } from "./v0/ExecutionDiagnostics.js";
 
 export type AdeDeliveryFailureCode =
   | "ADE_RUNTIME_MISMATCH"
@@ -75,6 +78,11 @@ export interface AdeSetupEvaluation {
   setupContractVersion: string;
   readiness: "ready" | "incomplete" | "invalid";
   missingRequiredIds: readonly string[];
+  diagnostics: readonly { id: string; status: string; criticality: string; detail: string; remediation: string }[];
+  configurationErrors: readonly string[];
+  missingExecutionCapabilityIds: readonly string[];
+  classification: "absent" | "compatible" | "outdated" | "incomplete" | "invalid";
+  declaredDependency: string | null;
 }
 
 export interface AdeDeliveryWorkContext {
@@ -123,6 +131,7 @@ export class AdeDeliveryRuntime {
     contextProfile?: string;
     signal?: AbortSignal;
     onOutput?(output: CommandOutput): void | Promise<void>;
+    onSetupEvaluation?(setup: AdeSetupEvaluation): void | Promise<void>;
   }): Promise<AdeDeliveryPreparation> {
     const runtimeVersion = await this.detectVersion(input);
     await this.runAde(input, ["config", "validate"], "ADE config validation", "ADE_CONFIG_INVALID");
@@ -130,6 +139,7 @@ export class AdeDeliveryRuntime {
     await this.runAde(input, ["context", "generate"], "ADE project context generation", "ADE_CONTEXT_FAILED");
     await this.runAde(input, ["context", "pack", contextProfile], `ADE ${contextProfile} context pack`, "ADE_CONTEXT_FAILED");
     const evaluation = await this.inspectSetup(input, runtimeVersion);
+    await input.onSetupEvaluation?.(evaluation);
     this.requireReadySetup(evaluation);
     return {
       runtimeVersion,
@@ -167,11 +177,19 @@ export class AdeDeliveryRuntime {
     if (result.exitCode !== 0 && evaluation.readiness === "ready") {
       throw new AdeDeliveryError("ADE_SETUP_INVALID", "ADE project setup returned an inconsistent readiness result.");
     }
+    const declaredDependency = await readDeclaredAdeDependency(input.cwd);
+    const olderDeclaration = declaredDependency !== null && isOlderDeclaration(declaredDependency, runtimeVersion);
     return {
       runtimeVersion,
       setupContractVersion: evaluation.version,
       readiness: evaluation.readiness,
       missingRequiredIds: evaluation.missingRequiredIds.filter(isSafeSetupId).slice(0, 20),
+      diagnostics: evaluation.diagnostics,
+      configurationErrors: evaluation.configurationErrors,
+      missingExecutionCapabilityIds: evaluation.missingExecutionCapabilityIds,
+      declaredDependency,
+      classification: evaluation.readiness === "ready" ? "compatible" : olderDeclaration ? "outdated"
+        : evaluation.missingRequiredIds.includes("config.ade-config") || evaluation.missingRequiredIds.includes("config.file") ? "absent" : evaluation.readiness,
     };
   }
 
@@ -453,6 +471,9 @@ interface SetupEvaluationSummary {
   adeVersion: string;
   readiness: "ready" | "incomplete" | "invalid";
   missingRequiredIds: readonly string[];
+  diagnostics: AdeSetupEvaluation["diagnostics"];
+  configurationErrors: readonly string[];
+  missingExecutionCapabilityIds: readonly string[];
 }
 
 function parseSetupEvaluation(stdout: string): SetupEvaluationSummary | null {
@@ -465,7 +486,39 @@ function parseSetupEvaluation(stdout: string): SetupEvaluationSummary | null {
     ? value.missingRequiredIds.filter((entry): entry is string => typeof entry === "string")
     : null;
   if (!version || !adeVersion || !readiness || !missingRequiredIds) return null;
-  return { version, adeVersion, readiness, missingRequiredIds };
+  const safeText = (text: unknown) => typeof text === "string" ? redactDiagnostic(text, 600) : "";
+  const diagnostics = (Array.isArray(value.requirements) ? value.requirements : []).slice(0, 100).flatMap((entry) =>
+    isRecord(entry) && typeof entry.id === "string" && isSafeSetupId(entry.id) && ["satisfied", "unsatisfied", "unverifiable"].includes(String(entry.status))
+      ? [{ id: entry.id, status: String(entry.status), criticality: ["required", "recommended", "optional"].includes(String(entry.criticality)) ? String(entry.criticality) : "unspecified", detail: safeText(entry.detail), remediation: safeText(entry.remediation) }] : []);
+  for (const entry of (Array.isArray(value.executionCapabilities) ? value.executionCapabilities : []).slice(0, 20)) {
+    if (isRecord(entry) && typeof entry.id === "string" && isSafeSetupId(entry.id) && ["available", "missing"].includes(String(entry.status))) {
+      diagnostics.push({ id: entry.id, status: String(entry.status), criticality: "capability", detail: safeText(entry.detail), remediation: "" });
+    }
+  }
+  const configurationErrors = (Array.isArray(value.configurationErrors) ? value.configurationErrors : []).slice(0, 20).map(safeText).filter(Boolean);
+  return { version, adeVersion, readiness, missingRequiredIds, diagnostics, configurationErrors,
+    missingExecutionCapabilityIds: boundedStrings(value.missingExecutionCapabilityIds, 20) };
+}
+
+// Version declarations are diagnostic context, not a replacement for ADE's
+// compatibility verdict. A lower range floor does not prove an installed version.
+async function readDeclaredAdeDependency(cwd: string): Promise<string | null> {
+  try {
+    const path = join(cwd, "package.json");
+    if ((await stat(path)).size > 1_000_000) return null;
+    const manifest = asRecord(parseJson(await readFile(path, "utf8")));
+    const value = asRecord(manifest.dependencies)["@alelouet/ai-delivery-engine"] ?? asRecord(manifest.devDependencies)["@alelouet/ai-delivery-engine"];
+    return typeof value === "string" && value.length <= 64 && /^[~^]?\d+\.\d+\.\d+$/u.test(value) ? value : null;
+  } catch { return null; }
+}
+
+function isOlderDeclaration(declaration: string, runtime: string): boolean {
+  const declared = declaration.replace(/^[~^]/u, "").split(".").map(Number);
+  const current = runtime.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (declared[i]! !== current[i]!) return declared[i]! < current[i]!;
+  }
+  return false;
 }
 
 function parseDeliveryPlan(stdout: string): AdeDeliveryPlan | null {
