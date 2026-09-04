@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -17,6 +17,33 @@ import { ProjectProvisioningError, provisionProjectCheckout } from "../src/v0/Pr
 import { CodexAgentExecutor } from "../src/AgentExecutor.js";
 
 const now = "2026-08-27T10:00:00.000Z";
+
+for (const outcome of ["success", "dirty", "cancel"] as const) test(`isolated task workspace is used and released on ${outcome}`, async () => {
+  const context = await setup();
+  const isolated = join(context.projectRoot, "isolated");
+  let released = false;
+  const successful = new SuccessfulCommands(context.task, outcome === "cancel");
+  try {
+    await cp(join(context.projectRoot, "alpha"), isolated, { recursive: true });
+    const commands: CommandRunner = { run: (input) => {
+      assert.equal(input.cwd, isolated);
+      if (outcome === "dirty" && input.args.includes("--porcelain=v1")) return Promise.resolve(result(" M tracked\n?? untracked\n"));
+      return successful.run(input);
+    } };
+    await new V0TaskExecutor({ persistence: context.persistence, github: new DeterministicFakeGithubClient(), commands, projectRoot: context.projectRoot,
+      workspaces: { prepare: async (project, id, kind) => {
+        assert.equal(project.id, context.task.projectId); assert.equal(id, context.task.id); assert.equal(kind, "task");
+        return { root: isolated, baseBranch: "main", release: async () => { released = true; } };
+      } }, logDiagnostic: () => {},
+    }).execute(context.task);
+    assert.equal(context.task.status, outcome === "success" ? "SUCCESS" : outcome === "cancel" ? "CANCELLED" : "FAILED");
+    if (outcome === "dirty") {
+      assert.equal(context.task.errorCode, "CHECKOUT_DIRTY");
+      assert.match(context.task.errorSummary!, /isolated=true; tracked=1; untracked=1/);
+    }
+    assert.equal(released, true);
+  } finally { await context.close(); }
+});
 
 for (const code of ["GIT_CLONE_FAILED", "CHECKOUT_CONFIGURATION_INVALID", "CHECKOUT_REMOTE_MISMATCH"] as const) {
   test(`preserves provisioning code ${code} with correlated diagnostics`, async () => {

@@ -14,6 +14,7 @@ import {
 
 import { NodeCommandRunner } from "./CommandRunner.js";
 import { GithubAppGitRunner } from "./GithubAppGitRunner.js";
+import { ExecutionWorkspaces } from "./ExecutionWorkspaces.js";
 import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
 import { V0TaskExecutor } from "./V0TaskExecutor.js";
 import { V0TaskWorker } from "./V0TaskWorker.js";
@@ -45,13 +46,16 @@ async function main(): Promise<void> {
       tokens,
       installationId: config.github.installationId,
     });
-    const commands = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
-      projectRoot: config.projectRoot, installationId: config.github.installationId, tokens });
+    const commands: GithubAppGitRunner = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
+      projectRoot: config.projectRoot, installationId: config.github.installationId, tokens,
+      resolveExecutionProject: (cwd) => workspaces.resolveProject(cwd) });
+    const workspaces: ExecutionWorkspaces = new ExecutionWorkspaces({ commands, projectRoot: config.projectRoot, environment: config.gitEnvironment });
     const issueReader = new HttpGithubIssueAdapter({
       tokens,
       installationId: config.github.installationId,
     });
     const executor = new V0TaskExecutor({
+      workspaces,
       persistence: store,
       github,
       issueReader,
@@ -169,6 +173,12 @@ async function main(): Promise<void> {
     }, 30_000);
     provisioningTimer.unref?.();
     try {
+      await worker.recoverInterruptedTask();
+      await workspaces.reclaimAbandoned(async (owner) => {
+        if (owner.kind !== "task") return false;
+        const record = await store.v0Tasks.getById(owner.executionId);
+        return Boolean(record && record.projectId === owner.projectId && record.finishedAt && ["SUCCESS", "FAILED", "CANCELLED"].includes(record.status));
+      });
       await worker.run(stop.signal);
     } finally {
       clearInterval(provisioningTimer);
