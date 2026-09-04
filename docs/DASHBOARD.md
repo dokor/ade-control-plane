@@ -159,6 +159,14 @@ The task history and `/tasks/{id}` detail view are task-centric and diagnostic:
 - internal model reasoning, secrets, full environments and sensitive host paths
   are never rendered.
 
+The default execution history is a concise phase timeline. Command start/end
+events are collapsed into one entry with duration, ADE setup checks are grouped
+under an expandable setup phase, and propagated terminal errors are collapsed
+behind the first/root-cause failure. The current ADE workflow state (including
+issue enrichment and waiting for information) is shown separately from the
+terminal task status. Complete bounded stdout/stderr and technical diagnostics
+remain available under the explicit raw-output/technical-details disclosures.
+
 ### `/runners`
 
 Show safe runner metadata:

@@ -197,13 +197,27 @@ test("turns system logs into a chronological execution history", () => {
     timeline.map(({ title, status }) => ({ title, status })),
     [
       { title: "Execution started", status: "running" },
-      { title: "Fetch base branch", status: "running" },
       { title: "Fetch base branch", status: "success" },
       { title: "Execution stopped with an error", status: "failed" },
-      { title: "Task failed", status: "failed" },
     ],
   );
-  assert.equal(timeline.filter(({ status }) => status === "failed").length, 2);
+  assert.equal(timeline.find(({ title }) => title === "Fetch base branch")?.durationMs, 2_000);
+  assert.equal(timeline.filter(({ status }) => status === "failed").length, 1);
+});
+
+test("groups ADE setup diagnostics and workflow states into readable phases", () => {
+  const timeline = buildTaskTimeline(task({ status: "RUNNING", finishedAt: null }), [
+    { id: "1", taskId: TASK_ID, occurredAt: NOW, stream: "system", message: "Preparing allow-listed checkout." },
+    { id: "2", taskId: TASK_ID, occurredAt: NOW, stream: "system", message: JSON.stringify({ event: "ade.setup.inspected", readiness: "incomplete", classification: "incomplete" }) },
+    { id: "3", taskId: TASK_ID, occurredAt: NOW, stream: "system", message: JSON.stringify({ event: "ade.setup.missing-required", id: "context.generated" }) },
+    { id: "4", taskId: TASK_ID, occurredAt: NOW, stream: "system", message: JSON.stringify({ event: "task.workflow", state: "enriching-issue", reason: "Issue needs more context." }) },
+  ]);
+
+  const setupPhase = timeline.find(({ title }) => title === "ADE setup");
+  assert.ok(setupPhase);
+  assert.equal(setupPhase.substeps?.length, 3);
+  assert.equal(timeline.find(({ title }) => title === "Issue enrichment")?.status, "running");
+  assert.equal(timeline.filter(({ kind }) => kind === "setup").length, 1);
 });
 
 test("renders pull request links only for HTTPS GitHub URLs", () => {
