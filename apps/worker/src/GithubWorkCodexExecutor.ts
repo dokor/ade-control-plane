@@ -8,8 +8,10 @@ import { CodexAgentExecutor, type AgentExecutor } from "./AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime } from "./AdeDeliveryRuntime.js";
 import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./v0/ProjectCheckout.js";
 import { ProjectProvisioningError } from "./v0/ProjectProvisioner.js";
+import type { ExecutionWorkspaces, ExecutionWorkspace } from "./v0/ExecutionWorkspaces.js";
 
 export interface GithubWorkCodexExecutorOptions {
+  workspaces?: Pick<ExecutionWorkspaces, "prepare">;
   github: GithubPullRequestClient & GithubIssueLifecycleClient;
   commands: CommandRunner;
   projectRoot: string;
@@ -62,6 +64,14 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
   public async execute(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult> {
     let branchName: string | null = null;
     let usage: AgentUsageMetrics | undefined;
+    let workspace: ExecutionWorkspace | undefined;
+    const checkoutForExecution = async () => {
+      if (this.options.workspaces) {
+        workspace ??= await this.options.workspaces.prepare(request.project, request.executionId, "github", request.signal);
+        return workspace;
+      }
+      return this.ensureCheckout(request.project, request.signal);
+    };
     try {
       throwIfAborted(request.signal);
       const workflows = this.options.persistence?.deliveryWorkflows;
@@ -80,7 +90,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         if (!this.options.applyHumanDecision) {
           throw new GithubWorkExecutionError("ADE_DECISION_UNAVAILABLE", "The worker has no compatible ADE decision contract.");
         }
-        const checkout = await this.ensureCheckout(request.project, request.signal);
+        const checkout = await checkoutForExecution();
         await workflows.transition({
           workflowId: workflow.id, expectedStage: "waiting-human", stage: "planning", attempt: workflow.attempt,
           reason: "ADE decision resolved; resuming the existing delivery workflow.",
@@ -110,7 +120,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         };
       }
       if (workflow?.stage === "publishing" && workflow.branchName && workflow.headSha) {
-        const checkout = await this.ensureCheckout(request.project, request.signal);
+        const checkout = await checkoutForExecution();
         const remoteHead = await this.git(checkout.root, ["ls-remote", "origin", `refs/heads/${workflow.branchName}`], request.signal);
         const sha = remoteHead.stdout.trim().split(/\s+/u)[0] ?? "";
         if (sha === workflow.headSha) {
@@ -149,7 +159,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         checkpointStage = stage;
       };
       await checkpoint("planning", "Preparing the ADE issue lifecycle plan.");
-      const checkout = await this.ensureCheckout(request.project, request.signal);
+      const checkout = await checkoutForExecution();
       branchName = request.work.branchName ?? `ade/issue-${request.work.issueNumber}`;
       const remote = await this.git(checkout.root, ["remote", "get-url", "origin"], request.signal);
       if (!matchesGithubRemote(remote.stdout, request.project.repositoryOwner, request.project.repositoryName)) {
@@ -157,7 +167,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       }
       const initialStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"], request.signal);
       if (initialStatus.stdout.trim()) {
-        throw new GithubWorkExecutionError("CHECKOUT_DIRTY", "Checkout contains changes from another operation.");
+        const entries = initialStatus.stdout.trimEnd().split("\n");
+        const untracked = entries.filter((entry) => entry.startsWith("??")).length;
+        throw new GithubWorkExecutionError("CHECKOUT_DIRTY", `Checkout baseline unexpectedly changed; execution ${request.executionId}; isolated=${Boolean(workspace)}; tracked=${entries.length - untracked}; untracked=${untracked}.`);
       }
       await this.mustRun("git fetch", {
         executable: "git", args: ["fetch", "--prune", "origin", checkout.baseBranch], cwd: checkout.root, env: this.gitEnvironment,
@@ -303,6 +315,8 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       }
       const failure = classifyFailure(error);
       return { status: "failed", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), errorCode: failure.code, errorSummary: failure.summary, ...(branchName ? { resultSummary: { branchName } } : {}) };
+    } finally {
+      await workspace?.release().catch(() => console.warn("Execution workspace cleanup deferred; recovery will recheck ownership."));
     }
   }
 

@@ -6,6 +6,7 @@ import { CodexAppServerQuotaSource, QuotaRefreshCoordinator } from "@ade-control
 
 import { NodeCommandRunner } from "../v0/CommandRunner.js";
 import { GithubAppGitRunner } from "../v0/GithubAppGitRunner.js";
+import { ExecutionWorkspaces } from "../v0/ExecutionWorkspaces.js";
 import { loadV0WorkerRuntime, type V0WorkerRuntimeConfig } from "../v0/runtime.js";
 import { V0TaskExecutor } from "../v0/V0TaskExecutor.js";
 import { V0TaskWorker } from "../v0/V0TaskWorker.js";
@@ -38,8 +39,10 @@ async function main(): Promise<void> {
     await store.migrate();
     const tokens = new GithubAppTokenProvider({ credentials: config.github });
     const github = new HttpGithubClient({ tokens, installationId: config.github.installationId });
-    const commands = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
-      projectRoot: config.projectRoot, installationId: config.github.installationId, tokens });
+    const commands: GithubAppGitRunner = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
+      projectRoot: config.projectRoot, installationId: config.github.installationId, tokens,
+      resolveExecutionProject: (cwd) => workspaces.resolveProject(cwd) });
+    const workspaces: ExecutionWorkspaces = new ExecutionWorkspaces({ commands, projectRoot: config.projectRoot, environment: config.gitEnvironment });
     const agentExecutor = config.agentProvider === "claude-code"
       ? new ClaudeCodeAgentExecutor({ commands, executable: config.claudeExecutable, environment: config.claudeEnvironment })
         : new CodexAgentExecutor({ commands, executable: config.codexExecutable, environment: config.codexEnvironment });
@@ -52,6 +55,7 @@ async function main(): Promise<void> {
     const manual = new V0TaskWorker({
       persistence: store,
       executor: new V0TaskExecutor({
+        workspaces,
         persistence: store, github,
         issueReader: new HttpGithubIssueAdapter({ tokens, installationId: config.github.installationId }),
         commands, projectRoot: config.projectRoot, codexExecutable: config.codexExecutable,
@@ -71,6 +75,7 @@ async function main(): Promise<void> {
       persistence: store,
       reader: new HttpGithubWorkAdapter({ tokens, installationId: config.github.installationId }),
       dispatcher: new GithubWorkCodexExecutor({
+        workspaces,
         github, commands, projectRoot: config.projectRoot,
         codexExecutable: config.codexExecutable, codexEnvironment: config.codexEnvironment,
         adeExecutable: config.adeExecutable, adeRuntimeVersion: config.adeRuntimeVersion,
@@ -120,6 +125,11 @@ async function main(): Promise<void> {
       fullReconcileIntervalMs: config.fullReconcileIntervalMs,
     });
     await manual.recoverInterruptedTask();
+    await workspaces.reclaimAbandoned(async (owner) => {
+      const record = owner.kind === "task" ? await store.v0Tasks.getById(owner.executionId) : await store.executions.getById(owner.executionId);
+      return Boolean(record && record.projectId === owner.projectId && record.finishedAt
+        && ["SUCCESS", "FAILED", "CANCELLED", "succeeded", "failed", "cancelled"].includes(record.status));
+    });
     while (!stop.signal.aborted) {
       const event = await wake.wait(unified.nextWaitTimeoutMs(config.fullReconcileIntervalMs), stop.signal);
       if (stop.signal.aborted || event.reason === "shutdown") break;

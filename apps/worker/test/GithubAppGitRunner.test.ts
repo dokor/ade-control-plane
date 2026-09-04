@@ -12,6 +12,22 @@ const project: ProjectRecord = { id: "p", slug: "alpha", name: "Alpha", reposito
 const ok = { exitCode: 0, signal: null, stdout: "", stderr: "" };
 const secret = "test-installation-credential";
 
+test("Git authentication accepts only a live registered execution workspace", async () => {
+  let active = true;
+  let calls = 0;
+  const runner = new GithubAppGitRunner({ projectRoot: ".", projects: { list: async () => [project] }, installationId: "42",
+    resolveExecutionProject: () => active ? project : undefined,
+    tokens: { getRepositoryToken: async () => secret }, commands: { run: async (input) => {
+      calls++; assert.ok(input.args.includes("https://github.com/dokor/alpha.git")); return ok;
+    } },
+  });
+  const input = { executable: "git", args: ["push", "--set-upstream", "origin", "ade/execution"], cwd: process.cwd() };
+  await runner.run(input);
+  active = false;
+  await assert.rejects(runner.run(input), /registered repository/);
+  assert.equal(calls, 1);
+});
+
 test("HTTPS credentials cover preflight, clone, fetch and push, but not agent/local Git commands", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "ade-app-git-"));
   t.after(() => rm(root, { recursive: true, force: true }));

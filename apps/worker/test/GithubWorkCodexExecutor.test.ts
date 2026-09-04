@@ -51,6 +51,28 @@ const request: GithubWorkDispatchRequest = {
   skillPaths: [],
 };
 
+test("GitHub executor guards its isolated checkout and releases it on failure", async () => {
+  let released = false;
+  const executor = new GithubWorkCodexExecutor({
+    projectRoot: ".", workspaces: { prepare: async (selected, id, kind) => {
+      assert.equal(selected.id, project.id); assert.equal(id, request.executionId); assert.equal(kind, "github");
+      return { root: "isolated", baseBranch: "main", release: async () => { released = true; } };
+    } }, commands: { run: async (input) => {
+      assert.equal(input.cwd, "isolated");
+      return { exitCode: 0, signal: null, stderr: "", stdout: input.args.includes("get-url") ? "https://github.com/dokor/demo.git" : "?? unexpected\n" };
+    } }, github: {
+      getIssueDetails: async () => { throw new Error("No agent or API work before clean baseline"); },
+      updateIssueBody: async () => { throw new Error("Unexpected issue mutation"); },
+      syncAdeWorkflowLabels: async () => { throw new Error("Unexpected label mutation"); },
+      createPullRequest: async () => { throw new Error("No PR before clean baseline"); },
+    },
+  });
+  const result = await executor.execute(request);
+  assert.equal(result.errorCode, "CHECKOUT_DIRTY");
+  assert.match(result.errorSummary!, /isolated=true; tracked=0; untracked=1/);
+  assert.equal(released, true);
+});
+
 test("reports an unavailable GitHub-work checkout with a safe actionable error", async () => {
   const executor = new GithubWorkCodexExecutor({
     projectRoot: "C:/not-a-worker-checkout-root",

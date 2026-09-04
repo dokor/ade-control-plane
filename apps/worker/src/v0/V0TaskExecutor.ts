@@ -14,6 +14,7 @@ import { CodexAgentExecutor, type AgentExecutor } from "../AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPlan, type AdeDeliveryPreparation, type AdeDeliveryReviewResult, type AdeSetupEvaluation } from "../AdeDeliveryRuntime.js";
 import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } from "./ProjectCheckout.js";
 import { ProjectProvisioningError } from "./ProjectProvisioner.js";
+import type { ExecutionWorkspaces, ExecutionWorkspace } from "./ExecutionWorkspaces.js";
 import { diagnosticCommands, executionStage, failureDiagnostic, recordAgentFailure, redactCommandOutput, redactDiagnostic, withExecutionDiagnostics } from "./ExecutionDiagnostics.js";
 
 interface V0Persistence {
@@ -27,6 +28,7 @@ interface V0Persistence {
 }
 
 export interface V0TaskExecutorOptions {
+  workspaces?: Pick<ExecutionWorkspaces, "prepare">;
   persistence: V0Persistence;
   github: GithubPullRequestClient;
   issueReader?: GithubIssueReader;
@@ -109,6 +111,7 @@ export class V0TaskExecutor {
     let reviewResult: AdeDeliveryReviewResult | undefined;
     const startedAt = task.startedAt ?? this.now().toISOString();
     let checkingCancellation = false;
+    let workspace: ExecutionWorkspace | undefined;
     const abort = (reason: Exclude<AbortReason, null>): void => {
       if (controller.signal.aborted) return;
       abortReason = reason;
@@ -136,7 +139,8 @@ export class V0TaskExecutor {
     try {
       const project = await this.requireProject(task.projectId);
       executionStage("Provision checkout");
-      const checkout = await this.ensureCheckout(project, controller.signal);
+      workspace = await this.options.workspaces?.prepare(project, task.id, "task", controller.signal);
+      const checkout = workspace ?? await this.ensureCheckout(project, controller.signal);
       executionStage("Resolve GitHub issue");
       const issue = await this.resolveIssue(task, project);
       branchName = `ade/${task.id}`;
@@ -154,7 +158,9 @@ export class V0TaskExecutor {
         "--untracked-files=all",
       ]);
       if (initialStatus.stdout.trim()) {
-        throw new V0ExecutionError("CHECKOUT_DIRTY", "Checkout contains changes from another operation.");
+        const entries = initialStatus.stdout.trimEnd().split("\n");
+        const untracked = entries.filter((entry) => entry.startsWith("??")).length;
+        throw new V0ExecutionError("CHECKOUT_DIRTY", `Checkout baseline unexpectedly changed; execution ${task.id}; isolated=${Boolean(workspace)}; tracked=${entries.length - untracked}; untracked=${untracked}.`);
       }
 
       await this.mustRun(task.id, "git fetch", {
@@ -383,6 +389,7 @@ export class V0TaskExecutor {
         cancelled ? "Task cancelled." : `Task failed: ${failure.summary}`,
       ).catch(() => undefined);
     } finally {
+      await workspace?.release().catch(() => this.log(task.id, "Execution workspace cleanup deferred; ownership will be checked on recovery.").catch(() => undefined));
       const finishedAt = this.now().toISOString();
       const latest = await this.options.persistence.v0Tasks.getById(task.id);
       const usageInput: AgentUsageInput = {

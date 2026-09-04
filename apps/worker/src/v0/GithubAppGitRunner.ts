@@ -10,6 +10,7 @@ export class GithubAppGitRunner implements CommandRunner {
     commands: CommandRunner;
     projects: { list(): Promise<readonly ProjectRecord[]> };
     projectRoot: string;
+    resolveExecutionProject?: (cwd: string) => ProjectRecord | undefined;
     installationId: string;
     tokens: { getRepositoryToken(installationId: string, repository: string): Promise<string> };
   }) {}
@@ -31,7 +32,11 @@ export class GithubAppGitRunner implements CommandRunner {
     } else {
       remoteIndex = args.indexOf("origin", offset + 1);
       const cwd = await realpath(input.cwd);
+      const owned = this.options.resolveExecutionProject?.(cwd);
+      project = owned ? projects.find((candidate) => candidate.id === owned.id
+        && candidate.repositoryOwner === owned.repositoryOwner && candidate.repositoryName === owned.repositoryName) : undefined;
       for (const candidate of projects) {
+        if (project) break;
         const checkout = await resolveProjectCheckout(this.options.projectRoot, candidate).catch(() => null);
         if (checkout?.root === cwd) { project = candidate; break; }
       }

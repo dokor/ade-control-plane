@@ -11,6 +11,45 @@ entrypoint is post-V0 and is not substituted implicitly.
 
 ## Host preparation
 
+### Isolated execution checkouts (#216)
+
+Both production worker entrypoints allocate an independent clone under
+`V0_PROJECT_ROOT/.ade-executions/execution-<unique-suffix>/checkout` for each
+task/GitHub execution. The adjacent ownership manifest records the project,
+execution ID, kind and creating worker process. Registered project checkouts are
+not reset, cleaned or reused for implementation. Existing dirty files there are
+preserved and no longer block the next execution.
+
+The worker clones the registered base branch through GitHub App HTTPS, materializes
+the detached baseline without credentials or hooks, then runs the existing remote
+and `CHECKOUT_DIRTY` guards. In particular, a `--no-checkout` clone is not mistaken
+for a dirty execution baseline. Branch creation, ADE, the agent, validation,
+commit and push use the execution's own directory/index/refs. Git authentication
+recognizes active execution directories only through the in-memory owner registry.
+
+Normal completion, failure and cancellation release the owned directory after
+commands return. Cleanup checks the exact generated directory, canonical root and
+unchanged ownership manifest. A cleanup failure is reported and retained for
+recovery, never resolved with a reset/clean of the registered repository. Unpushed
+changes in completed failed executions are disposable; pushed branches, PRs and
+persisted diagnostics remain available.
+
+On startup, after execution-state reconciliation, abandoned directories are removed
+only for a matching terminal database record and a confirmed dead creating worker
+on the same host. Live/PID-reused, foreign-host, unknown, malformed or altered
+ownership is retained conservatively. Thus container hostname changes may require
+an operator-reviewed offline cleanup; the worker never guesses ownership from age.
+Retained directories do not block new execution clones.
+
+Independent executor invocations can run concurrently against the same repository
+without sharing a working tree. This change does not increase scheduler capacity,
+change the single-active-task API policy, or introduce distributed runners.
+
+Without Raspberry terminal access, merge and deploy through Actions, then run a
+new Dashboard task. Check baseline validation, ADE work, push and PR separately.
+Do not delete the registered project to recover from the old dirty checkout.
+Production delivery qualification remains a post-deployment check.
+
 ### GitHub App HTTPS authentication (#212)
 
 Both worker entrypoints use the configured GitHub App installation for CP-owned

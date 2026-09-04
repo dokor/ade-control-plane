@@ -340,4 +340,13 @@ The system must make it possible to:
 
 ## Rule
 
+Execution checkout cleanup (#216) is limited to generated children of the dedicated
+`.ade-executions` namespace with an unchanged ownership manifest and canonical
+directory checks. Recovery additionally requires a terminal record for the same
+project/execution and a confirmed dead same-host worker; uncertain ownership is
+retained. This is Git/filesystem state isolation between trusted executions, not
+an OS security sandbox against a malicious same-UID process. Existing process and
+container isolation requirements still apply. Registered dirty repositories are
+never reset or cleaned by this lifecycle.
+
 When convenience and security conflict in privileged execution, default to the narrower capability and require an explicit design decision to broaden it.
