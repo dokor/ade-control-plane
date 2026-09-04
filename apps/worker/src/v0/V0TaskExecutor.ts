@@ -37,6 +37,8 @@ export interface V0TaskExecutorOptions {
   adeRuntimeVersion?: string;
   gitEnvironment?: Readonly<Record<string, string>>;
   codexEnvironment?: Readonly<Record<string, string>>;
+  /** Repairs a missing registered checkout before task execution starts. */
+  provisionCheckout?: (project: ProjectRecord, signal?: AbortSignal) => Promise<void>;
   timeoutMs?: number;
   cancelPollMs?: number;
   now?(): Date;
@@ -121,7 +123,7 @@ export class V0TaskExecutor {
 
     try {
       const project = await this.requireProject(task.projectId);
-      const checkout = await resolveProjectCheckout(this.options.projectRoot, project);
+      const checkout = await this.ensureCheckout(project, controller.signal);
       const issue = await this.resolveIssue(task, project);
       branchName = `ade/${task.id}`;
       await this.log(task.id, "Preparing allow-listed checkout.");
@@ -356,6 +358,20 @@ export class V0TaskExecutor {
     const project = await this.options.persistence.projects.getById(projectId);
     if (!project) throw new V0ExecutionError("PROJECT_NOT_FOUND", "Registered project was not found.");
     return project;
+  }
+
+  private async ensureCheckout(project: ProjectRecord, signal?: AbortSignal) {
+    try {
+      return await resolveProjectCheckout(this.options.projectRoot, project);
+    } catch (error: unknown) {
+      if (!(error instanceof ProjectCheckoutError) || error.code !== "CHECKOUT_NOT_FOUND" || !this.options.provisionCheckout) {
+        throw error;
+      }
+      throwIfAborted(signal);
+      await this.options.provisionCheckout(project, signal);
+      throwIfAborted(signal);
+      return resolveProjectCheckout(this.options.projectRoot, project);
+    }
   }
 
   /** Reconciles or creates only the PR for a pushed task; no agent or Git mutation is run. */
@@ -617,6 +633,11 @@ function buildCodexPrompt(
     "Task:",
     prompt,
   ].join("\n");
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  throw new V0CancelledError();
 }
 
 function buildPullRequestBody(task: V0TaskRecord, adeProfile: AdeProfile, issue: GithubIssueSummary | null, reviewResult?: AdeDeliveryReviewResult): string {

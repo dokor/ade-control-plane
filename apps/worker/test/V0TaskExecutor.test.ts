@@ -74,6 +74,31 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
   }
 });
 
+test("provisions a missing checkout before executing a manual task", async () => {
+  const context = await setup({ checkoutExists: false });
+  try {
+    let provisionedProject: string | undefined;
+    const executor = new V0TaskExecutor({
+      persistence: context.persistence,
+      github: new DeterministicFakeGithubClient(),
+      commands: new SuccessfulCommands(context.task),
+      projectRoot: context.projectRoot,
+      provisionCheckout: async (project) => {
+        provisionedProject = project.id;
+        await mkdir(join(context.projectRoot, "alpha"));
+      },
+      now: () => new Date(now),
+    });
+
+    await executor.execute(context.task);
+
+    assert.equal(provisionedProject, "11111111-1111-4111-8111-111111111111");
+    assert.equal(context.task.status, "SUCCESS");
+  } finally {
+    await context.close();
+  }
+});
+
 test("blocks the commit, push, and PR when ADE staged review finds an error", async () => {
   const context = await setup();
   try {
@@ -319,10 +344,10 @@ class SuccessfulCommands implements CommandRunner {
   }
 }
 
-async function setup() {
+async function setup(options: { checkoutExists?: boolean } = {}) {
   const projectRoot = await mkdtemp(join(tmpdir(), "ade-v0-projects-"));
   const checkout = join(projectRoot, "alpha");
-  await mkdir(checkout);
+  if (options.checkoutExists !== false) await mkdir(checkout);
   const project: ProjectRecord = {
     id: "11111111-1111-4111-8111-111111111111",
     slug: "alpha",
