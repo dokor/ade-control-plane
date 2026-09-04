@@ -56,6 +56,10 @@ async function main(): Promise<void> {
         agentExecutor, adeExecutable: config.adeExecutable, adeProfile: config.adeProfile,
         adeRuntimeVersion: config.adeRuntimeVersion, codexEnvironment: config.codexEnvironment,
         gitEnvironment: config.gitEnvironment, timeoutMs: config.taskTimeoutMs,
+        provisionCheckout: (project, signal) => provisionProjectCheckout({
+          persistence: { auditEvents: store.auditEvents }, commands, projectRoot: config.projectRoot,
+          gitEnvironment: config.gitEnvironment, project, ...(signal ? { signal } : {}),
+        }),
       }),
       idleDelayMs: config.idleDelayMs,
       deletionProcessor: new ProjectDeletionProcessor({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }),

@@ -17,7 +17,7 @@ import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js
 import { V0TaskExecutor } from "./V0TaskExecutor.js";
 import { V0TaskWorker } from "./V0TaskWorker.js";
 import { loadV0WorkerRuntime } from "./runtime.js";
-import { provisionRegisteredProjects } from "./ProjectProvisioner.js";
+import { provisionProjectCheckout, provisionRegisteredProjects } from "./ProjectProvisioner.js";
 import { ProjectDeletionProcessor } from "./ProjectDeletionProcessor.js";
 
 async function main(): Promise<void> {
@@ -65,6 +65,10 @@ async function main(): Promise<void> {
       codexEnvironment: config.codexEnvironment,
       gitEnvironment: config.gitEnvironment,
       timeoutMs: config.taskTimeoutMs,
+      provisionCheckout: (project, signal) => provisionProjectCheckout({
+        persistence: { auditEvents: store.auditEvents }, commands, projectRoot: config.projectRoot,
+        gitEnvironment: config.gitEnvironment, project, ...(signal ? { signal } : {}),
+      }),
     });
     const quota = config.codexAppServerUrl
       ? new QuotaRefreshCoordinator({
