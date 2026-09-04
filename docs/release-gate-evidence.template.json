@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "gateIssue": 153,
+  "runId": "replace-with-unique-release-run-id",
+  "operator": "replace-with-operator-id",
+  "environment": {
+    "deployedSha": "replace-with-deployed-git-sha",
+    "runtimeVersion": "replace-with-pinned-ade-runtime-version",
+    "dashboardUrl": "https://replace-with-production-dashboard",
+    "repository": "owner/ade-release-fixture"
+  },
+  "verdict": "not-ready",
+  "scenarios": [
+    { "id": "S01", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S02", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S03", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S04", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S05", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S06", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S07", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S08", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S09", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S10", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S11", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S12", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S13", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" },
+    { "id": "S14", "status": "not-run", "executedAt": null, "evidence": [], "notes": "" }
+  ]
+}

@@ -12,6 +12,7 @@ Use this page as the entry point for design and implementation work.
 - [`SCHEDULER.md`](SCHEDULER.md) — pure global scheduling gates, ranking and explainable decisions.
 - [`WORKER.md`](WORKER.md) — crash-safe worker recovery, wake-ups and graceful shutdown.
 - [`MVP.md`](MVP.md) — MVP scope and acceptance criteria.
+- [`RELEASE_SCENARIOS.md`](RELEASE_SCENARIOS.md) — production-like #153 scenario ledger and evidence contract.
 - [`FEATURES.md`](FEATURES.md) — product capabilities, MVP scope and later candidates.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) — recommended development order.
 
