@@ -1,26 +1,40 @@
+import type { OverviewProjectReadinessPresentation } from "./overviewReadiness.js";
 import type { OverviewViewModel } from "./readModel.js";
 
-export function summarizeOverview(overview: OverviewViewModel) {
+export function summarizeOverview(
+  overview: OverviewViewModel,
+  readinessPresentation: readonly OverviewProjectReadinessPresentation[] = [],
+) {
   const { projects, unavailableSections } = overview;
   const readinessAvailable = !unavailableSections.includes("Project readiness");
-  const readiness = projects.map((project) => ({
-    ...project,
-    readiness: project.controlState === "disabled" ? "disabled"
+  const presentationByProject = new Map(readinessPresentation.map((item) => [item.id, item]));
+  const readiness = projects.map((project, index) => {
+    const fallbackReadiness = project.controlState === "disabled" ? "disabled"
       : !readinessAvailable ? "unknown"
       : project.adeStatus === "compatible" ? "ready"
-      : project.adeStatus === "setup-required" || project.adeStatus === "validating" ? "setup-required" : "incompatible",
-  }));
+      : project.adeStatus === "setup-required" || project.adeStatus === "validating" ? "setup-required" : "incompatible";
+    const presentation = presentationByProject.get(project.id);
+    return {
+      ...project,
+      readiness: presentation ? (presentation.ready ? "ready" : presentation.status) : fallbackReadiness,
+      badgeStatus: presentation?.status ?? fallbackReadiness,
+      badgeLabel: presentation?.label ?? fallbackReadiness,
+      progress: presentation?.progress ?? fallbackProgress(fallbackReadiness),
+      originalIndex: index,
+    };
+  }).sort((left, right) => right.progress - left.progress || left.originalIndex - right.originalIndex);
   const alerts: { id: string; title: string; reason: string; href: string; action: string; status: string }[] = [];
   for (const work of overview.work.filter((item) => item.needsAttention)) {
     alerts.push({ id: work.id, title: `${work.projectName} · ${work.title}`, reason: work.reason,
       status: work.status, href: work.href, action: "Review work" });
   }
   for (const project of readiness) {
-    if (project.readiness === "setup-required" || project.readiness === "incompatible") {
+    if (["setup-required", "incompatible", "blocked"].includes(project.badgeStatus)) {
       alerts.push({ id: `setup:${project.id}`, title: `${project.name} needs ADE preparation`,
-        reason: project.readiness === "incompatible" ? "ADE readiness failed. Review the compatibility checks."
+        reason: project.badgeStatus === "incompatible" ? "ADE readiness failed. Review the compatibility checks."
+          : project.badgeStatus === "blocked" ? "ADE preparation is blocked. Review the required project checks."
           : "Complete repository setup and the runner check to enable execution.",
-        status: project.readiness, href: `/projects/${project.id}`, action: "Prepare project" });
+        status: project.badgeStatus, href: `/projects/${project.id}`, action: "Prepare project" });
     } else if (project.controlState === "enabled" && project.exclusion === "no-compatible-runner") {
       alerts.push({ id: `runner:${project.id}`, title: `${project.name} needs a compatible runner`,
         reason: "No online runner meets this project's execution requirements.", status: "blocked",
@@ -65,4 +79,11 @@ export function summarizeOverview(overview: OverviewViewModel) {
     active: overview.work.filter((item) => item.active),
     activityAvailable: !unavailableSections.some((section) => ["Executions", "GitHub work", "Manual tasks", "Workflow stages"].includes(section)),
   };
+}
+
+function fallbackProgress(readiness: string): number {
+  if (readiness === "ready") return 3_000;
+  if (readiness === "incompatible") return 2_000;
+  if (readiness === "setup-required") return 1_000;
+  return 0;
 }
