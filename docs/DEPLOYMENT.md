@@ -11,7 +11,44 @@ entrypoint is post-V0 and is not substituted implicitly.
 
 ## Host preparation
 
-### Git provisioning repair without Raspberry terminal access (#183 / #185)
+### GitHub App HTTPS authentication (#212)
+
+Both worker entrypoints use the configured GitHub App installation for CP-owned
+Git preflight, clone, fetch, push and PR-reconciliation `ls-remote` calls. A separate
+worker SSH identity is no longer required. The installation must include the
+registered repository with **Contents: read/write**, in addition to the existing
+API/PR permissions. Private repositories use the same path.
+
+Tokens are restricted to one repository and Contents write, cached only in memory,
+and renewed before expiry. The worker asks the token provider before each network
+Git operation, including push after a long agent execution. Credentials use Git's
+per-process configuration environment, not command arguments, remote URLs, files,
+prompts or agent environments. Output callbacks and captured diagnostics redact
+both the raw token and its Basic-auth encoding. Credential helpers, tracing,
+redirects, network Git hooks and recursive submodule access are disabled for these
+authenticated operations. Clone defers checkout until the credential-free branch
+preparation step. Fetch explicitly updates the registered `origin` tracking ref.
+
+Existing SSH origins remain valid for repository identity checks; network requests
+use the canonical registered HTTPS URL without rewriting the stored SSH origin.
+New clones store a credential-free HTTPS origin. Git commit identity remains in
+the existing Git home; deployment-runner credentials are unchanged.
+
+Without Raspberry terminal access: merge/review normally, wait for the production
+deployment, then initialize one registered project from Dashboard. Verify checkout,
+delivery, push and PR separately. `GIT_AUTH_FAILED` now identifies GitHub App HTTPS
+and directs the operator to installation access and Contents permission, without
+revealing API responses or tokens. Do not repeatedly retry missing permissions or
+restore an insecure SSH bypass. CI alone is not a real private-repository delivery
+qualification; #185/#189 still require production evidence.
+
+References: [GitHub installation authentication](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation),
+[Git process configuration and HTTP headers](https://git-scm.com/docs/git-config).
+
+### Historical SSH provisioning repair (#183 / #185)
+
+The following describes the older SSH transport and retained image pin. It is not
+an SSH credential prerequisite for the GitHub App HTTPS worker path above.
 
 The worker image now includes a root-owned, read-only GitHub Ed25519 host-key
 pin at `/etc/ssh/ade_github_known_hosts`. Its fingerprint is verified at build

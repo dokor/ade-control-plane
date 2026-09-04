@@ -13,6 +13,7 @@ import {
 } from "@ade-control-plane/quota";
 
 import { NodeCommandRunner } from "./CommandRunner.js";
+import { GithubAppGitRunner } from "./GithubAppGitRunner.js";
 import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
 import { V0TaskExecutor } from "./V0TaskExecutor.js";
 import { V0TaskWorker } from "./V0TaskWorker.js";
@@ -34,7 +35,6 @@ async function main(): Promise<void> {
 
   try {
     await store.migrate();
-    const commands = new NodeCommandRunner();
     const tokens = new GithubAppTokenProvider({
       credentials: {
         appId: config.github.appId,
@@ -45,6 +45,8 @@ async function main(): Promise<void> {
       tokens,
       installationId: config.github.installationId,
     });
+    const commands = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
+      projectRoot: config.projectRoot, installationId: config.github.installationId, tokens });
     const issueReader = new HttpGithubIssueAdapter({
       tokens,
       installationId: config.github.installationId,
