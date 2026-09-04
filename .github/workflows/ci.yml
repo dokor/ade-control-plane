@@ -71,7 +71,16 @@ jobs:
           ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
 
       - name: Validate operational scripts
-        run: bash -n deploy/bin/deploy deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/worker-entrypoint
+        run: bash -n deploy/bin/deploy deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/validate-release-gate deploy/bin/worker-entrypoint
+
+      - name: Validate release-gate evidence template remains non-passing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if deploy/bin/validate-release-gate docs/release-gate-evidence.template.json; then
+            echo 'The evidence template must not qualify a release.' >&2
+            exit 1
+          fi
 
       - name: Typecheck
         run: pnpm typecheck

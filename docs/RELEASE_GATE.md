@@ -52,3 +52,17 @@ explicit human-merge boundary. Cancellation, timeout, crash/restart,
 duplicate-delivery, quota and restore/soak scenarios remain release-blocking
 operations to exercise from the checklist; they must not be simulated or
 marked complete from this happy-path run alone.
+
+The complete scenario order and evidence contract are documented in
+[`RELEASE_SCENARIOS.md`](RELEASE_SCENARIOS.md). Start a ledger from
+[`release-gate-evidence.template.json`](release-gate-evidence.template.json)
+and validate it on the deployed host:
+
+```bash
+deploy/bin/validate-release-gate /path/to/release-gate-evidence.json
+```
+
+The validator requires exactly one entry for each of S01–S14, rejects raw
+payload/secret-shaped fields, and accepts `verdict: passed` only when all 14
+entries are backed by evidence references. It does not execute or simulate any
+scenario.

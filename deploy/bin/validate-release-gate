@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Validate the operator-maintained evidence ledger for issue #153. This is a
+# completeness and redaction guard; it does not execute a workflow or infer
+# that a real scenario ran.
+
+readonly EVIDENCE_FILE="${1:-${ADE_RELEASE_GATE_EVIDENCE:-}}"
+readonly MAX_BYTES=262144
+readonly EXPECTED_SCENARIOS='["S01","S02","S03","S04","S05","S06","S07","S08","S09","S10","S11","S12","S13","S14"]'
+
+die() { printf 'Release gate evidence invalid: %s\n' "$1" >&2; exit 1; }
+
+[[ -n "$EVIDENCE_FILE" ]] || die "usage: validate-release-gate <evidence.json>"
+[[ -f "$EVIDENCE_FILE" ]] || die "evidence file does not exist"
+[[ "$(wc -c <"$EVIDENCE_FILE")" -le "$MAX_BYTES" ]] || die "evidence file exceeds ${MAX_BYTES} bytes"
+command -v jq >/dev/null 2>&1 || die "jq is unavailable"
+
+jq -e 'type == "object" and .schemaVersion == 1 and .gateIssue == 153' "$EVIDENCE_FILE" >/dev/null \
+  || die "schemaVersion 1 and gateIssue 153 are required"
+jq -e '
+  (.runId | type == "string" and length > 0 and length <= 200) and
+  (.operator | type == "string" and length > 0 and length <= 200) and
+  (.environment | type == "object") and
+  (.environment.deployedSha | type == "string" and test("^[0-9a-f]{40,64}$"; "i")) and
+  (.environment.runtimeVersion | type == "string" and length > 0 and length <= 200) and
+  (.environment.dashboardUrl | type == "string" and startswith("https://") and length <= 500) and
+  (.environment.repository | type == "string" and test("^[^/\\s]+/[^/\\s]+$"))
+' "$EVIDENCE_FILE" >/dev/null || die "deployment metadata is missing or malformed"
+
+jq -e --argjson expected "$EXPECTED_SCENARIOS" '
+  (.scenarios | type == "array" and length == ($expected | length)) and
+  ([.scenarios[].id] | sort) == ($expected | sort) and
+  ([.scenarios[].id] | unique | length) == ($expected | length)
+' "$EVIDENCE_FILE" >/dev/null || die "exactly one entry for each S01-S14 is required"
+
+jq -e '
+  all(.scenarios[];
+    (.status | IN("passed", "failed", "blocked", "not-run")) and
+    (.executedAt == null or (.executedAt | type == "string" and test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,3})?Z$"))) and
+    (.evidence | type == "array" and all(.[]; type == "string" and length > 0 and length <= 500)) and
+    (.notes | type == "string" and length <= 1000) and
+    (.status != "passed" or (.executedAt != null and (.evidence | length > 0)))
+  )
+' "$EVIDENCE_FILE" >/dev/null || die "scenario entries are malformed or a passed scenario has no evidence"
+
+jq -e '
+  [.. | objects | keys[]? | select(type == "string" and test("^(password|token|secret|privateKey|credentials?|prompt|issueBody|rawBody|stdout|stderr|logs?|environmentDump)$"; "i"))] | length == 0
+' "$EVIDENCE_FILE" >/dev/null || die "sensitive or raw-payload field found"
+
+jq -e '
+  .verdict == "passed" and ([.scenarios[].status] | all(. == "passed"))
+' "$EVIDENCE_FILE" >/dev/null || die "release gate is not passed: all 14 scenarios must be passed"
+
+passed_count="$(jq '[.scenarios[] | select(.status == "passed")] | length' "$EVIDENCE_FILE")"
+printf 'Release gate evidence is structurally valid: %s/14 scenarios passed; verdict=%s\n' \
+  "$passed_count" "$(jq -r '.verdict' "$EVIDENCE_FILE")"

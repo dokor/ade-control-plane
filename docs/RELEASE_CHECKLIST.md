@@ -105,6 +105,8 @@ application stack or the privileged host runner.
 
 - [ ] `/srv/apps/ade-control-plane/deploy/bin/qualify-h24 --require-backup` passes.
 - [ ] `deploy/bin/qualify-github-work` passes against the dedicated real test repository; see [`RELEASE_GATE.md`](RELEASE_GATE.md).
+- [ ] The S01–S14 scenario ledger is completed from [`RELEASE_SCENARIOS.md`](RELEASE_SCENARIOS.md).
+- [ ] `deploy/bin/validate-release-gate /path/to/release-gate-evidence.json` passes with `14/14` scenarios.
 - [ ] Dashboard opened through real production URL.
 - [ ] Test task created from Dashboard.
 - [ ] Task reaches RUNNING.
