@@ -11,6 +11,64 @@ entrypoint is post-V0 and is not substituted implicitly.
 
 ## Host preparation
 
+### Git provisioning repair without Raspberry terminal access (#183 / #185)
+
+The worker image now includes a root-owned, read-only GitHub Ed25519 host-key
+pin at `/etc/ssh/ade_github_known_hosts`. Its fingerprint is verified at build
+time against the [official GitHub fingerprint](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints).
+No startup keyscan, trust-on-first-use, or manual edit to the mounted Git home
+is required. A key rotation requires a reviewed pin/image update; fail closed
+until the new official fingerprint is verified.
+
+Compose uses `GIT_SSH=/usr/local/bin/ade-git-ssh`. The worker explicitly passes
+this executable to Git only, not the agent environment. The previous
+`GIT_SSH_COMMAND` bypass was not forwarded by the worker's environment allow-list;
+it is removed, not replaced by another bypass. The wrapper enforces strict host
+checking, the image pin, Ed25519 host authentication and non-interactive bounded
+SSH connection attempts, even if an old mounted SSH config disables checking.
+It reads the mounted Git home's `.ssh/config` and conventional identity files
+explicitly because OpenSSH does not use Git's HOME to locate its default config.
+The volume remains read-only; no ownership/permission changes are made at startup.
+
+For an operator without terminal access:
+
+1. Review/merge the PR and follow **CI**, then **Deploy production** in GitHub
+   Actions (approve the production environment if required). The existing ARM64
+   deployment runner rebuilds the worker image; restarting the old image is not enough.
+2. Once deployment succeeds, open Dashboard and request ADE initialization for a
+   registered project without a checkout. Inspect the new execution, not the old failure.
+3. Confirm provisioning proceeds past `Provision checkout`. A later ADE failure
+   is separate from Git connectivity; no PR/branch is created by the preflight.
+4. Keep #185's production verification pending until a fresh checkout succeeds.
+   The unsafe override is removed in code, but CI is not proof of Raspberry credentials.
+
+The existing SSH identity still needs read access for clone/fetch and write access
+for push. Keys/config in `V0_GIT_HOME_HOST/.ssh` must already be readable by UID
+10002 and have restrictive permissions (directory 0700, private keys/config 0600,
+or appropriately controlled equivalent). An SSH agent may also be used when already
+configured. This release installs only a **public host key**, not a private identity.
+If the deploy runner is unavailable or credentials need provisioning, GitHub/Dashboard
+will expose the failure; that remaining host/credential operation cannot be completed
+merely by retrying tasks without an authorized server administrator.
+
+New-checkout preflight uses a 30-second `git ls-remote` check on the registered
+base branch. Both preflight and clone return specific fixed, secret-free guidance:
+`HOST_KEY_VERIFICATION_FAILED`, `GIT_AUTH_FAILED`, `REPOSITORY_NOT_FOUND`,
+`REPOSITORY_ACCESS_DENIED`, `GIT_NETWORK_FAILED`, or `GIT_BRANCH_NOT_FOUND`.
+Unknown errors retain `GIT_PREFLIGHT_FAILED`/`GIT_CLONE_FAILED` and sanitized
+execution diagnostics. GitHub can hide private repositories as “not found”; that
+code does not prove the repository is absent. Background provisioning records the
+same reason/host/action in the project audit trail without raw command output.
+
+HTTPS with short-lived GitHub App installation tokens remains a possible follow-up:
+it would remove SSH host/identity management, but must scope tokens per repository,
+refresh them for later pushes, and deliver them through a credential helper without
+embedding them in URLs, process arguments, logs or agent environments. Existing App
+API credentials are not automatically Git credentials. This incident fix retains SSH
+to avoid introducing that separate authentication workflow or new host secrets.
+
+### Initial host installation
+
 Use a 64-bit Raspberry Pi OS installation with Docker Engine and the Compose
 plugin. Keep the checkout, PostgreSQL volume and project repositories on the
 SSD. Keep the production configuration and secret files outside the Git

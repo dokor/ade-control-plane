@@ -117,9 +117,8 @@ services:
       CODEX_APP_SERVER_URL: ws://127.0.0.1:4500
       CODEX_CREDENTIAL_REF: ${CODEX_CREDENTIAL_REF:-codex-account-main}
       V0_GIT_HOME: /home/ade-git
-      # TEMPORARY: unblock SSH clones until the Raspberry git home has a
-      # verified GitHub known_hosts entry. Remove this with issue #185.
-      GIT_SSH_COMMAND: "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+      # The image pins GitHub's host key; no Raspberry known_hosts edit needed.
+      GIT_SSH: /usr/local/bin/ade-git-ssh
       V0_TASK_TIMEOUT_SECONDS: ${V0_TASK_TIMEOUT_SECONDS:-3600}
       V0_WORKER_IDLE_SECONDS: ${V0_WORKER_IDLE_SECONDS:-2}
       GITHUB_WORK_STAGE_TIMEOUT_SECONDS: ${GITHUB_WORK_STAGE_TIMEOUT_SECONDS:-900}

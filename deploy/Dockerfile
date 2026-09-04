@@ -61,6 +61,7 @@ ENV ADE_RUNTIME_VERSION=${ADE_VERSION}
 ENV HOME=/home/ade-worker
 ENV CODEX_HOME=/home/ade-worker/.codex
 ENV V0_GIT_HOME=/home/ade-git
+ENV GIT_SSH=/usr/local/bin/ade-git-ssh
 ENV PATH=/home/ade-worker/.local/bin:${PATH}
 RUN apt-get update \
   && apt-get install --no-install-recommends -y bash ca-certificates curl git openssh-client bubblewrap \
@@ -73,6 +74,11 @@ WORKDIR /workspace
 COPY --from=worker-dependencies /worker-deploy/ ./
 COPY apps/worker/src ./apps/worker/src
 COPY deploy/bin/worker-entrypoint /usr/local/bin/ade-control-plane-worker
+COPY deploy/bin/git-ssh /usr/local/bin/ade-git-ssh
+COPY deploy/ssh/github_known_hosts /etc/ssh/ade_github_known_hosts
+RUN chmod 0755 /usr/local/bin/ade-git-ssh \
+  && chmod 0644 /etc/ssh/ade_github_known_hosts \
+  && ssh-keygen -lf /etc/ssh/ade_github_known_hosts -E sha256 | grep -F 'SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU'
 RUN chmod 0755 /usr/local/bin/ade-control-plane-worker
 # Keep the ADE CLI immutable and outside the writable Codex home volume.
 RUN npm install --global "@alelouet/ai-delivery-engine@${ADE_VERSION}" \
