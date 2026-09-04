@@ -412,6 +412,31 @@ export type V0TaskStatus =
   | "SUCCESS"
   | "FAILED"
   | "CANCELLED";
+export type V0TaskWorkflowState =
+  | "queued"
+  | "preparing"
+  | "issue-not-ready"
+  | "enriching-issue"
+  | "validating-issue"
+  | "ready-for-dev"
+  | "developing"
+  | "reviewing"
+  | "preparing-pr"
+  | "waiting-human"
+  | "completed"
+  | "failed"
+  | "cancelled";
+export type V0TaskWorkflowRemediation = "enrich-issue" | "wait-for-input" | "none";
+export interface V0TaskWorkflow {
+  state: V0TaskWorkflowState;
+  reason: string | null;
+  recoverable: boolean;
+  remediation: V0TaskWorkflowRemediation;
+  humanInputRequired: boolean;
+  attempt: number;
+  maxAttempts: number;
+  updatedAt: string;
+}
 export type V0TaskSource =
   | { type: "prompt"; prompt: string }
   | { type: "github-issue"; issueNumber: number }
@@ -429,6 +454,8 @@ export interface V0TaskRecord {
   headSha?: string | null;
   prRetryRequested?: boolean;
   adeProvenance?: JsonObject | null;
+  /** Durable, user-facing workflow state. Older rows may not have it yet. */
+  workflow?: V0TaskWorkflow | null;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
   errorCode: string | null;

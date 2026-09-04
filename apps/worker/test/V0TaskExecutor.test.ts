@@ -8,6 +8,7 @@ import type {
   ProjectRecord,
   V0TaskLogRecord,
   V0TaskRecord,
+  V0TaskWorkflow,
 } from "@ade-control-plane/database";
 import { DeterministicFakeGithubClient } from "@ade-control-plane/github";
 
@@ -371,6 +372,36 @@ for (const remainsIncomplete of [false, true]) test(`initialization without diff
   } finally { await context.close(); }
 });
 
+test("persists user-facing workflow transitions separately from terminal task status", async () => {
+  const context = await setup();
+  const workflows: V0TaskWorkflow[] = [];
+  context.persistence.v0Tasks.updateWorkflow = async (input: { taskId: string; workflow: V0TaskWorkflow }) => {
+    assert.equal(input.taskId, context.task.id);
+    workflows.push(input.workflow);
+    context.task.workflow = input.workflow;
+    return context.task;
+  };
+  try {
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github: new DeterministicFakeGithubClient(),
+      commands: new SuccessfulCommands(context.task),
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "SUCCESS");
+    assert.deepEqual(workflows.map(({ state }) => state), [
+      "preparing", "preparing", "developing", "reviewing", "preparing-pr",
+    ]);
+    assert.equal(context.task.workflow?.state, "completed");
+    assert.equal(context.task.workflow?.recoverable, false);
+    assert.ok(context.logs.some(({ message }) => message.includes('"event":"task.workflow"')));
+  } finally {
+    await context.close();
+  }
+});
+
 test("partial setup sends exact sanitized remediation to Codex and retains structured logs", async () => {
   const context = await setup();
   try {
@@ -621,8 +652,14 @@ async function setup(options: { checkoutExists?: boolean } = {}) {
         pullRequestUrl?: string | null;
         errorCode?: string | null;
         errorSummary?: string | null;
+        workflow?: V0TaskWorkflow | null;
       }) => {
         Object.assign(task, input, { updatedAt: input.finishedAt });
+        return task;
+      },
+      updateWorkflow: async (input: { taskId: string; workflow: V0TaskWorkflow }) => {
+        assert.equal(input.taskId, task.id);
+        task.workflow = input.workflow;
         return task;
       },
     },

@@ -40,6 +40,7 @@ import type {
   V0TaskLogRecord,
   V0TaskLogStream,
   V0TaskRecord,
+  V0TaskWorkflow,
   V0TaskSource,
   V0TaskStatus,
   AgentUsageCostKind,
@@ -389,6 +390,7 @@ export interface V0TaskTransitionInput {
   pullRequestNumber?: number | null;
   pullRequestUrl?: string | null;
   adeProvenance?: JsonObject | null;
+  workflow?: V0TaskWorkflow | null;
   errorCode?: string | null;
   errorSummary?: string | null;
 }
@@ -397,6 +399,11 @@ export interface V0TaskPushedInput {
   taskId: string;
   branchName: string;
   headSha: string;
+}
+
+export interface V0TaskWorkflowUpdateInput {
+  taskId: string;
+  workflow: V0TaskWorkflow;
 }
 
 export interface V0TaskLogInput {
@@ -413,6 +420,7 @@ export interface V0TaskRepository {
   claimPending(startedAt: string): Promise<V0TaskRecord | null>;
   requestCancel(taskId: string, requestedAt: string): Promise<V0TaskRecord>;
   complete(input: V0TaskTransitionInput): Promise<V0TaskRecord>;
+  updateWorkflow(input: V0TaskWorkflowUpdateInput): Promise<V0TaskRecord>;
   markPushed?(input: V0TaskPushedInput): Promise<V0TaskRecord>;
   requestPrRetry?(taskId: string, requestedAt: string): Promise<V0TaskRecord>;
   appendLog(input: V0TaskLogInput): Promise<V0TaskLogRecord | null>;

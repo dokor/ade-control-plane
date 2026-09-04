@@ -6,6 +6,8 @@ import type {
   ProjectRecord,
   V0TaskRepository,
   V0TaskRecord,
+  V0TaskWorkflow,
+  V0TaskWorkflowState,
 } from "@ade-control-plane/database";
 import { GithubApiError, type GithubIssueReader, type GithubPullRequestClient, type GithubRepositoryRef, type GithubIssueSummary, type GithubPullRequest } from "@ade-control-plane/github";
 
@@ -21,6 +23,7 @@ interface V0Persistence {
   projects: Pick<ProjectRepository, "getById">;
   v0Tasks: Pick<V0TaskRepository, "getById" | "complete" | "appendLog"> & {
     markPushed?: V0TaskRepository["markPushed"];
+    updateWorkflow?: V0TaskRepository["updateWorkflow"];
   };
   agentUsage?: Pick<import("@ade-control-plane/database").AgentUsageRepository, "record">;
   githubWork?: Pick<GithubWorkRepository, "recordAdeReadiness">;
@@ -138,10 +141,12 @@ export class V0TaskExecutor {
 
     try {
       const project = await this.requireProject(task.projectId);
+      await this.updateWorkflow(task.id, "preparing", "Preparing the registered repository checkout.");
       executionStage("Provision checkout");
       workspace = await this.options.workspaces?.prepare(project, task.id, "task", controller.signal);
       const checkout = workspace ?? await this.ensureCheckout(project, controller.signal);
       executionStage("Resolve GitHub issue");
+      await this.updateWorkflow(task.id, "preparing", task.source.type === "github-issue" ? "Loading the selected GitHub issue." : "Preparing the task context.");
       const issue = await this.resolveIssue(task, project);
       branchName = `ade/${task.id}`;
       await this.log(task.id, "Preparing allow-listed checkout.");
@@ -235,6 +240,11 @@ export class V0TaskExecutor {
       if (!initialization) {
         deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
         if (deliveryPlan.action !== "develop") {
+          await this.updateWorkflow(task.id, "issue-not-ready", `ADE requires issue refinement before development: ${deliveryPlan.reason}`, {
+            recoverable: deliveryPlan.action === "enrich",
+            remediation: deliveryPlan.action === "enrich" ? "enrich-issue" : deliveryPlan.action === "wait" ? "wait-for-input" : "none",
+            humanInputRequired: deliveryPlan.action === "wait",
+          });
           throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
         }
       }
@@ -256,6 +266,7 @@ export class V0TaskExecutor {
       await this.log(task.id, initialization
         ? "Starting ADE initialization in the workspace-write sandbox."
         : "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
+      await this.updateWorkflow(task.id, initialization ? "developing" : "developing", initialization ? "Codex is preparing the ADE configuration." : "Codex is implementing the task.");
       executionStage("Run Codex");
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
@@ -299,6 +310,7 @@ export class V0TaskExecutor {
 
       if (!prepared) {
         executionStage("Validate generated ADE configuration");
+        await this.updateWorkflow(task.id, "validating-issue", "Re-validating ADE readiness after the agent changed the repository.");
         prepared = await this.deliveryRuntime.prepare({
           cwd: checkout.root,
           work,
@@ -314,6 +326,7 @@ export class V0TaskExecutor {
         }
       }
 
+      await this.updateWorkflow(task.id, "reviewing", "Running ADE deterministic and profile review gates.");
       executionStage("Run ADE post-agent gates");
       reviewResult = await this.deliveryRuntime.runPostAgentGates({
         cwd: checkout.root,
@@ -352,6 +365,7 @@ export class V0TaskExecutor {
         signal: controller.signal,
       });
       await this.assertNotCancelled(task.id);
+      await this.updateWorkflow(task.id, "preparing-pr", "The reviewed branch was pushed; preparing the GitHub pull request.");
       headSha = (await this.git(checkout.root, ["rev-parse", "HEAD"])).stdout.trim() || null;
       if (headSha) await this.options.persistence.v0Tasks.markPushed?.({ taskId: task.id, branchName, headSha });
 
@@ -368,6 +382,7 @@ export class V0TaskExecutor {
         headSha,
         pullRequestNumber: pullRequest.number,
         pullRequestUrl: pullRequest.url,
+        workflow: this.workflow("completed", "Pull request created and task completed."),
         adeProvenance: AdeDeliveryRuntime.provenanceSummary(reviewResult.provenance),
       });
     } catch (error) {
@@ -381,6 +396,9 @@ export class V0TaskExecutor {
         finishedAt: this.now().toISOString(),
         branchName,
         headSha,
+        workflow: this.workflow(cancelled ? "cancelled" : "failed", cancelled ? "The task was cancelled." : failure.summary, {
+          recoverable: false, remediation: "none", humanInputRequired: false,
+        }),
         errorCode: cancelled ? null : failure.code,
         errorSummary: cancelled ? null : redactDiagnostic(failure.summary),
       });
@@ -635,6 +653,34 @@ export class V0TaskExecutor {
       stream: "system",
       message: redactDiagnostic(message, 4000),
     });
+  }
+
+  private workflow(
+    state: V0TaskWorkflowState,
+    reason: string,
+    overrides: Partial<Pick<V0TaskWorkflow, "recoverable" | "remediation" | "humanInputRequired" | "attempt" | "maxAttempts">> = {},
+  ): V0TaskWorkflow {
+    return {
+      state,
+      reason: redactDiagnostic(reason, 500),
+      recoverable: overrides.recoverable ?? false,
+      remediation: overrides.remediation ?? "none",
+      humanInputRequired: overrides.humanInputRequired ?? false,
+      attempt: overrides.attempt ?? 0,
+      maxAttempts: overrides.maxAttempts ?? 0,
+      updatedAt: this.now().toISOString(),
+    };
+  }
+
+  private async updateWorkflow(
+    taskId: string,
+    state: V0TaskWorkflowState,
+    reason: string,
+    overrides: Partial<Pick<V0TaskWorkflow, "recoverable" | "remediation" | "humanInputRequired" | "attempt" | "maxAttempts">> = {},
+  ): Promise<void> {
+    const workflow = this.workflow(taskId, state, reason, overrides);
+    await this.options.persistence.v0Tasks.updateWorkflow?.({ taskId, workflow });
+    await this.log(taskId, JSON.stringify({ event: "task.workflow", ...workflow })).catch(() => undefined);
   }
 
   private async logSetupInspection(taskId: string, setup: AdeSetupEvaluation): Promise<void> {
