@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { withExecutionDiagnostics } from "../src/v0/ExecutionDiagnostics.js";
 
 import type { AgentExecutor, AgentExecutionRequest, AgentExecutionResult } from "../src/AgentExecutor.js";
 import { AdeDeliveryError, AdeDeliveryRuntime, type AdeDeliveryPlan, type AdeDeliveryWorkContext } from "../src/AdeDeliveryRuntime.js";
@@ -71,6 +73,41 @@ test("blocks an ADE setup evaluation that is incomplete", async () => {
     runtime.prepare({ cwd: "C:/checkout", work: work("Implement the API") }),
     (error: unknown) => error instanceof AdeDeliveryError && error.code === "ADE_SETUP_INCOMPLETE" && error.safeSummary.includes("context.generated"),
   );
+});
+
+test("preserves bounded setup reasons, remediation, config errors and capability evidence without secrets", async () => {
+  const commands = new FakeCommands();
+  commands.setupExitCode = 1;
+  commands.setupStdout = JSON.stringify({ version: "ade.project-setup/v1", adeVersion: "0.7.0", readiness: "invalid", missingRequiredIds: ["config.valid"],
+    requirements: [{ id: "config.valid", status: "unsatisfied", detail: "Old config schema. credential-value", remediation: "Migrate the config with ADE." }],
+    configurationErrors: ["Unknown config key: oldRules. ghp_privateToken"],
+    executionCapabilities: [{ id: "delivery-plan", status: "missing", detail: "Configure an implementation profile." }], missingExecutionCapabilityIds: ["delivery-plan"],
+    environment: { secret: "must-not-copy" } });
+  const evaluation = await withExecutionDiagnostics(["credential-value"], () => new AdeDeliveryRuntime({ commands }).inspectSetup({ cwd: "C:/checkout", work: work("setup") }));
+  assert.equal(evaluation.classification, "invalid");
+  assert.match(evaluation.diagnostics[0]!.detail, /Old config schema/);
+  assert.equal(evaluation.diagnostics[0]!.remediation, "Migrate the config with ADE.");
+  assert.deepEqual(evaluation.missingExecutionCapabilityIds, ["delivery-plan"]);
+  assert.match(evaluation.configurationErrors[0]!, /oldRules/);
+  assert.doesNotMatch(JSON.stringify(evaluation), /credential-value|ghp_privateToken|must-not-copy/);
+});
+
+for (const readiness of ["ready", "incomplete"] as const) test(`legacy ADE declaration is diagnostic, not an override of ${readiness} readiness`, async () => {
+  const commands = new FakeCommands();
+  commands.setupExitCode = readiness === "ready" ? 0 : 1;
+  commands.setupStdout = JSON.stringify({ version: "ade.project-setup/v1", adeVersion: "0.7.0", readiness,
+    missingRequiredIds: readiness === "ready" ? [] : ["context.generated"] });
+  const evaluation = await new AdeDeliveryRuntime({ commands }).inspectSetup({ cwd: fileURLToPath(new URL("./fixtures/legacy-ade/", import.meta.url)), work: work("setup") });
+  assert.equal(evaluation.declaredDependency, "^0.3.0");
+  assert.equal(evaluation.classification, readiness === "ready" ? "compatible" : "outdated");
+  assert.equal(evaluation.readiness, readiness);
+});
+
+for (const missing of ["config.ade-config", "context.generated"]) test(`classifies missing setup requirement ${missing}`, async () => {
+  const commands = new FakeCommands(); commands.setupExitCode = 1;
+  commands.setupStdout = JSON.stringify({ version: "ade.project-setup/v1", adeVersion: "0.7.0", readiness: "incomplete", missingRequiredIds: [missing] });
+  const evaluation = await new AdeDeliveryRuntime({ commands }).inspectSetup({ cwd: "C:/checkout", work: work("setup") });
+  assert.equal(evaluation.classification, missing === "config.ade-config" ? "absent" : "incomplete");
 });
 
 test("does not publish after a deterministic ADE review failure", async () => {
