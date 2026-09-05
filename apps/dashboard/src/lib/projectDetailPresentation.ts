@@ -65,6 +65,6 @@ export function summarizeProjectDetail(project: ProjectView, readiness: ProjectS
   }
   return { phase, status, label, reason, action, initializing: Boolean(initialization),
     stepBlocked: Boolean(blocker) || (phase === "initialization" && ["blocked", "incompatible"].includes(status)),
-    visibleWork: work.filter((item) => (item.active || item.needsAttention || ["ready", "pending", "queued"].includes(item.status))
+    visibleWork: work.filter((item) => (item.active || item.needsAttention || item.historical || ["ready", "pending", "queued"].includes(item.status))
       && (!item.initialization || item.active || !readiness.ready)) };
 }

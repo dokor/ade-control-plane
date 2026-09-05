@@ -92,6 +92,34 @@ test("initialization dominates old failures and cannot be queued again", async (
   assert.equal(summary.action.href, "/tasks/task-1");
 });
 
+test("a historical failed manual task stays visible without blocking a ready project", async () => {
+  const { state, input } = overviewFixture();
+  state.v0Tasks.push({
+    id: "old-failure", projectId: project().id, source: { type: "prompt", prompt: "not exposed" }, prompt: "not exposed",
+    status: "FAILED", cancelRequested: false, branchName: "ade/old-failure", pullRequestNumber: null, pullRequestUrl: null,
+    errorCode: "EXECUTION_FAILED", errorSummary: "Task execution failed.", createdAt: NOW, startedAt: NOW, finishedAt: NOW, updatedAt: NOW,
+  });
+  const detail = await buildProjectDetail({ ...input, projectId: project().id });
+  assert.ok(detail);
+  const oldFailure = detail.work.find(({ id }) => id === "old-failure");
+  assert.equal(oldFailure?.historical, true);
+  assert.equal(oldFailure?.needsAttention, false);
+  const summary = summarizeProjectDetail(detail.project, {
+    ready: true, requirements: [], missingLabels: [], missingFiles: [], plannedFiles: [], invalidFiles: [], checkedAt: NOW,
+  }, detail.work);
+  assert.equal(summary.status, "ready");
+  assert.equal(summary.action.label, "Open tasks");
+  assert.equal(summary.visibleWork[0]?.id, "old-failure");
+  const html = renderToStaticMarkup(createElement(ProjectSetupPanel, {
+    project: detail.project,
+    readiness: { ready: true, requirements: [], missingLabels: [], missingFiles: [], plannedFiles: [], invalidFiles: [], checkedAt: NOW },
+    work: detail.work,
+    refreshIntervalMs: 15000,
+  }));
+  assert.match(html, /History · failed/);
+  assert.doesNotMatch(html, /Review blocked work/);
+});
+
 test("persisted initialization is restored only on its own project", async () => {
   const { state, input } = overviewFixture();
   state.v0Tasks.push({ id: "initialization", projectId: project().id, source: { type: "ade-initialize" }, prompt: "not exposed",

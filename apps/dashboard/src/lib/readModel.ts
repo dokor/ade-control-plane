@@ -157,6 +157,7 @@ export interface OverviewViewModel {
 
 export interface OverviewWorkItem {
   initialization?: boolean;
+  historical?: boolean;
   id: string;
   projectId: string;
   projectName: string;
@@ -339,15 +340,16 @@ export async function buildOverview(
   }));
   // Include the manual-task path; it uses a separate persistence contract.
   const tasks = await read("Manual tasks", () => persistence.v0Tasks.list(30), []);
-  for (const task of tasks.filter(({ status }) => ["PENDING", "RUNNING", "FAILED"].includes(status))) {
-    work.push({
+    for (const task of tasks.filter(({ status }) => ["PENDING", "RUNNING", "FAILED"].includes(status))) {
+      const historical = task.status === "FAILED";
+      work.push({
       initialization: task.source.type === "ade-initialize",
       id: task.id, projectId: task.projectId, projectName: projectNames.get(task.projectId) ?? "Unknown project",
       title: task.source.type === "ade-initialize" ? "Prepare ADE"
         : task.source.type === "github-issue" ? `GitHub issue #${task.source.issueNumber}` : "Manual task",
       status: task.status.toLowerCase(), stage: task.status === "RUNNING" ? "Executing task" : task.status.toLowerCase(),
       startedAt: task.startedAt, href: `/tasks/${task.id}`,
-      active: task.status === "PENDING" || task.status === "RUNNING", needsAttention: task.status === "FAILED",
+        active: task.status === "PENDING" || task.status === "RUNNING", needsAttention: false, historical,
       reason: sanitizeText(task.errorSummary ?? "Open the task to view execution progress.", 240),
     });
   }
