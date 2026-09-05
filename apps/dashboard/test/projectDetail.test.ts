@@ -39,6 +39,21 @@ for (const state of projectDetailStates) test(`project detail renders ${state} w
   assert.ok(html.includes(expected[state]), expected[state]);
 });
 
+test("completed ADE setup is collapsed by default and keeps a visible summary", async () => {
+  const props = await projectDetailFixture("ready");
+  const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));
+  assert.match(html, /<details class="panel project-setup"><summary class="project-setup-summary">/);
+  assert.match(html, /ADE Setup/);
+  assert.match(html, /Complete/);
+});
+
+test("ADE setup stays expanded by default while action is required", async () => {
+  const props = await projectDetailFixture("setup-required");
+  const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));
+  assert.match(html, /<details class="panel project-setup" open=""><summary class="project-setup-summary">/);
+  assert.match(html, /Action required/);
+});
+
 test("setup GitHub links open a protected new tab, including both PR review links", async () => {
   const props = await projectDetailFixture("pr-pending");
   const html = renderToStaticMarkup(createElement(ProjectSetupPanel, props));

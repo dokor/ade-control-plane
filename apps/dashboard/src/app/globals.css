@@ -204,6 +204,10 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
 .project-headline { padding: 8px 0 0; }
 .project-headline h2 { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .project-headline p { margin: 8px 0; max-width: 85ch; }
+.project-setup-summary { cursor: pointer; font-size: 21px; font-weight: 700; }
+.project-setup-summary::marker { color: var(--muted); }
+.project-setup-summary-content { display: inline-flex; width: calc(100% - 24px); align-items: center; justify-content: space-between; gap: 12px; vertical-align: middle; }
+.project-setup-content { padding-top: 18px; }
 .project-detail .setup-process { list-style: none; padding: 0; margin: 18px 0 28px; }
 .project-detail .setup-process-step { padding: 16px; }
 .project-detail .setup-process-step.current { border-width: 2px; }
