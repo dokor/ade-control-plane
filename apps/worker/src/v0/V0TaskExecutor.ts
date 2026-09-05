@@ -825,7 +825,7 @@ export class V0TaskExecutor {
     await this.log(taskId, JSON.stringify({ event: "ade.setup.inspected", readiness: setup.readiness, classification: setup.classification,
       runtimeVersion: setup.runtimeVersion, setupContractVersion: setup.setupContractVersion, declaredDependency: setup.declaredDependency }));
     for (const id of setup.missingRequiredIds) await this.log(taskId, JSON.stringify({ event: "ade.setup.missing-required", id }));
-    for (const id of setup.missingExecutionCapabilityIds) await this.log(task.id, JSON.stringify({ event: "ade.setup.missing-capability", id }));
+    for (const id of setup.missingExecutionCapabilityIds) await this.log(taskId, JSON.stringify({ event: "ade.setup.missing-capability", id }));
     for (const diagnostic of setup.diagnostics) await this.log(taskId, JSON.stringify({ event: "ade.setup.requirement", ...diagnostic }));
     for (const detail of setup.configurationErrors) await this.log(taskId, JSON.stringify({ event: "ade.setup.configuration-error", detail }));
   }
