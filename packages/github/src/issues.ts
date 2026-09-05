@@ -24,6 +24,10 @@ export interface GithubIssueDetails extends GithubIssueSummary {
 
 export interface GithubIssueLifecycleClient {
   getIssueDetails(repository: GithubRepositoryRef, issueNumber: number): Promise<GithubIssueDetails | null>;
+  /** Returns all repository label names. An absent method means labels could not be observed. */
+  listRepositoryLabels?(
+    repository: GithubRepositoryRef,
+  ): Promise<readonly string[]>;
   updateIssueBody(repository: GithubRepositoryRef, issueNumber: number, body: string): Promise<GithubIssueDetails>;
   /** Replaces only Control Plane-owned workflow labels and preserves project labels. */
   syncAdeWorkflowLabels(repository: GithubRepositoryRef, issueNumber: number, labels: readonly string[]): Promise<GithubIssueDetails>;

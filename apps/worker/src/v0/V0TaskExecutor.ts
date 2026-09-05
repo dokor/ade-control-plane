@@ -151,6 +151,9 @@ export class V0TaskExecutor {
       await this.updateWorkflow(task.id, "preparing", task.source.type === "github-issue" ? "Loading the selected GitHub issue." : "Preparing the task context.");
       let issue = await this.resolveIssue(task, project);
       let issueDetails = await this.resolveIssueDetails(task, project, issue);
+      const observedGithubLabels = task.source.type === "github-issue"
+        ? await this.observeGithubLabels(project)
+        : undefined;
       branchName = `ade/${task.id}`;
       await this.log(task.id, "Preparing allow-listed checkout.");
       await this.assertNotCancelled(task.id);
@@ -237,9 +240,9 @@ export class V0TaskExecutor {
         await this.log(task.id, `ADE setup ${setup.classification}; preparing targeted repairs${setup.classification === "outdated" ? " and evaluating an upgrade" : ""} for review.`);
       }
       if (!initialization) {
-        deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
+        deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, ...(observedGithubLabels ? { observedGithubLabels } : {}), signal: controller.signal });
         if (task.source.type === "github-issue" && deliveryPlan.action !== "develop") {
-          const enriched = await this.enrichIssueUntilReady(task, project, checkout.root, issueDetails, deliveryPlan, controller.signal);
+          const enriched = await this.enrichIssueUntilReady(task, project, checkout.root, issueDetails, deliveryPlan, observedGithubLabels, controller.signal);
           issueDetails = enriched.issue;
           issue = issueDetails ?? issue;
           planIssue = { ...planIssue, body: issueDetails?.body ?? planIssue.body, labels: issueDetails?.labels ?? planIssue.labels, updatedAt: issueDetails?.updatedAt ?? planIssue.updatedAt };
@@ -331,7 +334,7 @@ export class V0TaskExecutor {
         });
         await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; initialization configuration validated.`);
         deliveryPlan = initialization ? setupValidationPlan()
-          : await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
+          : await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, ...(observedGithubLabels ? { observedGithubLabels } : {}), signal: controller.signal });
         if (deliveryPlan.action !== "develop") {
           throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
         }
@@ -708,12 +711,29 @@ export class V0TaskExecutor {
     return details;
   }
 
+  private async observeGithubLabels(project: ProjectRecord): Promise<readonly string[] | undefined> {
+    if (!this.options.github.listRepositoryLabels) return undefined;
+    const repository: GithubRepositoryRef = {
+      id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`,
+      owner: project.repositoryOwner,
+      name: project.repositoryName,
+    };
+    try {
+      return await this.options.github.listRepositoryLabels(repository);
+    } catch {
+      // Omitting the field tells ADE that observation was unavailable. An empty
+      // array instead means GitHub was read successfully and no labels exist.
+      return undefined;
+    }
+  }
+
   private async enrichIssueUntilReady(
     task: V0TaskRecord,
     project: ProjectRecord,
     cwd: string,
     issue: GithubIssueDetails | null,
     initialPlan: AdeDeliveryPlan,
+    observedGithubLabels: readonly string[] | undefined,
     signal: AbortSignal,
   ): Promise<{ issue: GithubIssueDetails | null; plan: AdeDeliveryPlan }> {
     if (!issue || !this.options.github.updateIssueBody) {
@@ -726,7 +746,7 @@ export class V0TaskExecutor {
     let plan = initialPlan;
     let nextLifecycle: { action: "enrich" | "develop" | "wait" | "none"; reason: string; enrichmentPrompt?: string } | undefined;
     for (let attempt = 1; attempt <= MAX_ISSUE_ENRICHMENT_ATTEMPTS; attempt += 1) {
-      const lifecycle = nextLifecycle ?? await this.planIssueLifecycle(cwd, currentIssue, signal);
+      const lifecycle = nextLifecycle ?? await this.planIssueLifecycle(cwd, currentIssue, observedGithubLabels, signal);
       nextLifecycle = undefined;
       if (lifecycle.action !== "enrich") {
         if (lifecycle.action === "wait" || lifecycle.action === "none") {
@@ -763,9 +783,10 @@ export class V0TaskExecutor {
       plan = await this.deliveryRuntime.resolveDeliveryPlan({
         cwd,
         issue: { number: currentIssue.number, title: currentIssue.title, body: currentIssue.body, labels: currentIssue.labels, state: currentIssue.state, url: currentIssue.url },
+        ...(observedGithubLabels ? { observedGithubLabels } : {}),
         signal,
       });
-      const revalidatedLifecycle = await this.planIssueLifecycle(cwd, currentIssue, signal);
+      const revalidatedLifecycle = await this.planIssueLifecycle(cwd, currentIssue, observedGithubLabels, signal);
       if (plan.action === "develop" && revalidatedLifecycle.action === "develop") return { issue: currentIssue, plan };
       if (revalidatedLifecycle.action === "wait" || revalidatedLifecycle.action === "none") {
         await this.updateWorkflow(task.id, "waiting-human", revalidatedLifecycle.reason, {
@@ -790,9 +811,10 @@ export class V0TaskExecutor {
   private async planIssueLifecycle(
     cwd: string,
     issue: GithubIssueDetails,
+    observedGithubLabels: readonly string[] | undefined,
     signal: AbortSignal,
   ): Promise<{ action: "enrich" | "develop" | "wait" | "none"; reason: string; enrichmentPrompt?: string }> {
-    const result = await this.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue }), signal });
+    const result = await this.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue, ...(observedGithubLabels ? { observedGithubLabels } : {}) }), signal });
     if (result.exitCode !== 0) throw new V0ExecutionError("ADE_ISSUE_PLAN_FAILED", "ADE could not resolve the issue readiness plan.");
     let parsed: unknown;
     try { parsed = JSON.parse(result.stdout); } catch { throw new V0ExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE returned invalid issue readiness JSON."); }

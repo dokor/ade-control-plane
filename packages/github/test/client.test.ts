@@ -65,6 +65,26 @@ test("retains only a bounded safe GitHub validation detail", async () => {
   );
 });
 
+test("reads repository label names through the authorized client", async () => {
+  let requested = "";
+  const client = new HttpGithubClient({
+    installationId: "installation-1",
+    tokens: { getToken: async () => "short-lived-token" },
+    fetchImplementation: async (url) => {
+      requested = String(url);
+      return Response.json([
+        { name: "backlog-refined", color: "123456" },
+        { name: "ready-for-dev", color: "abcdef" },
+      ]);
+    },
+  });
+  assert.deepEqual(
+    await client.listRepositoryLabels({ id: "1", owner: "dokor", name: "alpha" }),
+    ["backlog-refined", "ready-for-dev"],
+  );
+  assert.equal(requested, "https://api.github.com/repos/dokor/alpha/labels?per_page=100");
+});
+
 test("finds an exact open pull request by head and base", async () => {
   let requested = "";
   const client = new HttpGithubClient({

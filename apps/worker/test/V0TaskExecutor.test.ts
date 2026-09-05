@@ -277,6 +277,36 @@ test("passes the selected GitHub issue through the existing Task pipeline", asyn
   }
 });
 
+test("distinguishes populated, empty, and unavailable repository labels for ADE", async (t) => {
+  for (const scenario of [
+    { name: "populated", labels: ["backlog-refined", "ready-for-dev"] as readonly string[], expected: ["backlog-refined", "ready-for-dev"] },
+    { name: "empty", labels: [] as readonly string[], expected: [] },
+    { name: "unavailable", labels: null, expected: undefined },
+  ]) await t.test(scenario.name, async () => {
+    const context = await setup();
+    try {
+      context.task.source = { type: "github-issue", issueNumber: 23 };
+      const commands = new SuccessfulCommands(context.task);
+      const github = new DeterministicFakeGithubClient();
+      if (scenario.labels) github.labels.push(...scenario.labels.map((name) => ({ name })));
+      if (scenario.labels === null) github.listRepositoryLabels = async () => { throw new Error("private GitHub failure"); };
+      await new V0TaskExecutor({
+        persistence: context.persistence,
+        github,
+        issueReader: { listIssues: async () => [], getIssue: async () => ({ number: 23, title: "Labels", state: "open", url: "https://github.com/dokor/alpha/issues/23", updatedAt: now }) },
+        commands,
+        projectRoot: context.projectRoot,
+        now: () => new Date(now),
+      }).execute(context.task);
+      const input = JSON.parse(commands.calls.find(({ executable, args }) => executable === "ade" && args[0] === "delivery")?.stdin ?? "{}") as { observedGithubLabels?: string[] };
+      assert.deepEqual(input.observedGithubLabels, scenario.expected);
+      assert.doesNotMatch(JSON.stringify(context.logs), /private GitHub failure/);
+    } finally {
+      await context.close();
+    }
+  });
+});
+
 test("runs ADE initialization before validating the newly created configuration", async () => {
   const context = await setup();
   try {
@@ -407,6 +437,7 @@ test("enriches an under-specified GitHub issue and resumes the same task", async
   context.task.source = { type: "github-issue", issueNumber: 23 };
   context.task.prompt = "Implement GitHub issue #23";
   const github = new DeterministicFakeGithubClient();
+  github.labels.push({ name: "backlog-refined" }, { name: "ready-for-dev" }, { name: "in-progress" }, { name: "pr-ready" });
   github.issues.set(23, {
     number: 23,
     title: "Add the projects page",
@@ -448,6 +479,10 @@ test("enriches an under-specified GitHub issue and resumes the same task", async
     assert.equal(context.task.status, "SUCCESS");
     assert.equal(commands.deliveryPlanCalls, 2);
     assert.equal(commands.lifecyclePlanCalls, 2);
+    for (const input of commands.planInputs) assert.deepEqual(
+      (input as { observedGithubLabels?: string[] }).observedGithubLabels,
+      ["backlog-refined", "ready-for-dev", "in-progress", "pr-ready"],
+    );
     assert.match(github.issues.get(23)?.body ?? "", /Existing product context/);
     assert.match(github.issues.get(23)?.body ?? "", /## Acceptance Criteria/);
     assert.match(prompts[0] ?? "", /Existing product context/);
@@ -651,16 +686,19 @@ class SuccessfulCommands implements CommandRunner {
 class EnrichmentCommands implements CommandRunner {
   public deliveryPlanCalls = 0;
   public lifecyclePlanCalls = 0;
+  public readonly planInputs: unknown[] = [];
 
   public constructor(private readonly base: SuccessfulCommands) {}
 
   public async run(input: CommandInput): Promise<CommandResult> {
     if (input.executable === "ade" && input.args[0] === "delivery") {
       this.deliveryPlanCalls += 1;
+      this.planInputs.push(JSON.parse(input.stdin ?? "{}"));
       return result(deliveryPlanResponse(this.deliveryPlanCalls === 1 ? "enrich" : "develop"));
     }
     if (input.executable === "ade" && input.args[0] === "issue") {
       this.lifecyclePlanCalls += 1;
+      this.planInputs.push(JSON.parse(input.stdin ?? "{}"));
       return result(JSON.stringify({ action: this.lifecyclePlanCalls === 1 ? "enrich" : "develop", reason: this.lifecyclePlanCalls === 1 ? "The issue needs an objective and acceptance criteria." : "The issue is ready for development.", ...(this.lifecyclePlanCalls === 1 ? { enrichmentPrompt: "Add the missing objective and at least three acceptance criteria." } : {}) }));
     }
     return this.base.run(input);

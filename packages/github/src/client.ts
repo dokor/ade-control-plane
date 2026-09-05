@@ -169,6 +169,10 @@ export class HttpGithubClient implements GithubClient, GithubPullRequestClient, 
     return normalizeIssueDetails(await response.json().catch(() => null), repository);
   }
 
+  public async listRepositoryLabels(repository: GithubRepositoryRef): Promise<readonly string[]> {
+    return (await this.listLabels(repository)).map(({ name }) => name);
+  }
+
   public async updateIssueBody(repository: GithubRepositoryRef, issueNumber: number, body: string): Promise<GithubIssueDetails> {
     if (new TextEncoder().encode(body).byteLength > 32 * 1024) throw new Error("GitHub issue body exceeds the ADE lifecycle limit.");
     const token = await this.options.tokens.getToken(this.options.installationId);
@@ -528,6 +532,10 @@ export class DeterministicFakeGithubClient
 
   public async getIssueDetails(_repository: GithubRepositoryRef, issueNumber: number): Promise<GithubIssueDetails | null> {
     return this.issues.get(issueNumber) ?? null;
+  }
+
+  public async listRepositoryLabels(_repository: GithubRepositoryRef): Promise<readonly string[]> {
+    return this.labels.map(({ name }) => name);
   }
 
   public async updateIssueBody(_repository: GithubRepositoryRef, issueNumber: number, body: string): Promise<GithubIssueDetails> {

@@ -141,10 +141,11 @@ test("blocks an incompatible ADE delivery contract with its precise reason", asy
   });
   const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0" });
   await assert.rejects(
-    runtime.resolveDeliveryPlan({ cwd: "C:/checkout", issue: { number: 144, title: "Delivery plan", body: "", labels: [], state: "open", url: "https://github.com/dokor/alpha/issues/144" } }),
+    runtime.resolveDeliveryPlan({ cwd: "C:/checkout", issue: { number: 144, title: "Delivery plan", body: "", labels: [], state: "open", url: "https://github.com/dokor/alpha/issues/144" }, observedGithubLabels: ["backlog-refined", "ready-for-dev"] }),
     (error: unknown) => error instanceof AdeDeliveryError && error.code === "ADE_DELIVERY_PLAN_UNSUPPORTED" && error.safeSummary.includes("MISSING_REQUIRED_CAPABILITY"),
   );
   assert.deepEqual(JSON.parse(commands.deliveryPlanStdin ?? "{}").negotiation.requiredCapabilities, ["implementation-context", "deterministic-validation", "specialist-review", "profile-invocations", "correction-and-rereview", "human-publication-gate"]);
+  assert.deepEqual(JSON.parse(commands.deliveryPlanStdin ?? "{}").observedGithubLabels, ["backlog-refined", "ready-for-dev"]);
 });
 
 test("applies a resolved human decision through the versioned ADE contract", async () => {

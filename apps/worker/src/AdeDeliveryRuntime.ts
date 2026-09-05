@@ -194,12 +194,12 @@ export class AdeDeliveryRuntime {
   }
 
   /** Negotiates ADE's repository-owned delivery contract over stdin. */
-  public async resolveDeliveryPlan(input: { cwd: string; issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string }; signal?: AbortSignal }): Promise<AdeDeliveryPlan> {
+  public async resolveDeliveryPlan(input: { cwd: string; issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string }; observedGithubLabels?: readonly string[]; signal?: AbortSignal }): Promise<AdeDeliveryPlan> {
     let result: CommandResult;
     try {
       result = await this.options.commands.run({
         executable: this.executable, args: ["delivery", "plan", "--json"], cwd: input.cwd,
-        stdin: JSON.stringify({ issue: input.issue, negotiation: { acceptedVersions: [ADE_DELIVERY_PLAN_VERSION], requiredCapabilities: ["implementation-context", "deterministic-validation", "specialist-review", "profile-invocations", "correction-and-rereview", "human-publication-gate"] } }),
+        stdin: JSON.stringify({ issue: input.issue, ...(input.observedGithubLabels ? { observedGithubLabels: input.observedGithubLabels } : {}), negotiation: { acceptedVersions: [ADE_DELIVERY_PLAN_VERSION], requiredCapabilities: ["implementation-context", "deterministic-validation", "specialist-review", "profile-invocations", "correction-and-rereview", "human-publication-gate"] } }),
         ...(this.options.environment ? { env: this.options.environment } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
       });

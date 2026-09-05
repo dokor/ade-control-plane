@@ -177,16 +177,18 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       await this.mustRun("git branch preparation", {
         executable: "git", args: ["switch", "--force-create", branchName, `origin/${checkout.baseBranch}`], cwd: checkout.root, env: this.gitEnvironment,
       }, request.signal);
+      const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
       let issue = await this.options.github.getIssueDetails(
-        { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName },
+        repository,
         request.work.issueNumber,
       );
       if (!issue || issue.state !== "open") throw new GithubWorkExecutionError("GITHUB_ISSUE_NOT_FOUND", "The selected GitHub issue is no longer open.");
       if (issue.updatedAt !== request.work.sourceUpdatedAt) {
         throw new GithubWorkExecutionError("GITHUB_ISSUE_STALE", "The GitHub issue changed after it was scheduled; reconcile it before retrying.");
       }
-      let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(request.signal ? { signal: request.signal } : {}) });
-      let lifecycle = await this.planIssueLifecycle(checkout.root, issue, request.signal);
+      const observedGithubLabels = await observeGithubLabels(this.options.github, repository);
+      let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(observedGithubLabels ? { observedGithubLabels } : {}), ...(request.signal ? { signal: request.signal } : {}) });
+      let lifecycle = await this.planIssueLifecycle(checkout.root, issue, observedGithubLabels, request.signal);
       if (lifecycle.action === "enrich") {
         await checkpoint("enriching", "ADE requested issue enrichment before development.");
         if (!lifecycle.enrichmentPrompt) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
@@ -201,8 +203,8 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, request.work.issueNumber,
           upsertGithubWorkMetadata(enrichedBody, metadata),
         );
-        lifecycle = await this.planIssueLifecycle(checkout.root, issue, request.signal);
-        plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(request.signal ? { signal: request.signal } : {}) });
+        lifecycle = await this.planIssueLifecycle(checkout.root, issue, observedGithubLabels, request.signal);
+        plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(observedGithubLabels ? { observedGithubLabels } : {}), ...(request.signal ? { signal: request.signal } : {}) });
       } else if (lifecycle.action === "wait" || lifecycle.action === "none") {
         const decisionRef = `issue-${request.work.issueNumber}-${issue.updatedAt.replace(/[^0-9]/gu, "").slice(0, 14)}`;
         await this.options.persistence?.adeDecisions.upsert({
@@ -349,8 +351,8 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     return result;
   }
 
-  private async planIssueLifecycle(cwd: string, issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string; updatedAt: string }, signal?: AbortSignal) {
-    const result = await this.options.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue }), ...(signal ? { signal } : {}) });
+  private async planIssueLifecycle(cwd: string, issue: { number: number; title: string; body: string; labels: readonly string[]; state: "open" | "closed"; url: string; updatedAt: string }, observedGithubLabels: readonly string[] | undefined, signal?: AbortSignal) {
+    const result = await this.options.commands.run({ executable: this.options.adeExecutable ?? "ade", args: ["issue", "plan", "--json"], cwd, stdin: JSON.stringify({ issue, ...(observedGithubLabels ? { observedGithubLabels } : {}) }), ...(signal ? { signal } : {}) });
     if (result.exitCode !== 0) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_FAILED", "ADE could not resolve the issue lifecycle.");
     let parsed: unknown;
     try { parsed = JSON.parse(result.stdout); } catch { throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE returned invalid lifecycle JSON."); }
@@ -368,6 +370,18 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
     await this.options.github.updateIssueBody(repository, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
     await this.options.github.syncAdeWorkflowLabels(repository, request.work.issueNumber, labelsForGithubWorkState(metadata.state, metadata.pullRequestNumber));
+  }
+}
+
+async function observeGithubLabels(
+  github: GithubIssueLifecycleClient,
+  repository: { id: string; owner: string; name: string },
+): Promise<readonly string[] | undefined> {
+  if (!github.listRepositoryLabels) return undefined;
+  try {
+    return await github.listRepositoryLabels(repository);
+  } catch {
+    return undefined;
   }
 }
 
