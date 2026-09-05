@@ -4,14 +4,23 @@ import { StatusBadge } from "./StatusBadge.js";
 import { formatAge, formatDuration, formatFutureDistance, formatInstant, formatPercent } from "../lib/format.js";
 import { summarizeOverview } from "../lib/overview.js";
 import type { OverviewProjectReadinessPresentation } from "../lib/overviewReadiness.js";
-import { quotaCapacityColor } from "../lib/quotaPresentation.js";
+import { presentQuotaCapacity, quotaCapacityColor } from "../lib/quotaPresentation.js";
 import type { OverviewViewModel } from "../lib/readModel.js";
 
-export function OverviewContent({ overview, projectReadiness = [], controls, quotaControl }: {
-  overview: OverviewViewModel; projectReadiness?: readonly OverviewProjectReadinessPresentation[]; controls?: ReactNode; quotaControl?: ReactNode;
+export function OverviewContent({ overview, projectReadiness = [], quotaStaleAfterMs = 300_000, controls, quotaControl }: {
+  overview: OverviewViewModel; projectReadiness?: readonly OverviewProjectReadinessPresentation[]; quotaStaleAfterMs?: number; controls?: ReactNode; quotaControl?: ReactNode;
 }) {
   const summary = summarizeOverview(overview, projectReadiness);
   const { quota, workerHealth } = overview;
+  const quotaPresentation = presentQuotaCapacity({
+    state: quota.state,
+    usedPercent: quota.usedPercent,
+    snapshotAgeMs: quota.snapshotAgeMs,
+    refreshRequired: quota.refreshRequired,
+    canStartWork: quota.canStartWork,
+    reason: quota.reason,
+    staleAfterMs: quotaStaleAfterMs,
+  });
   return <div className="overview">
     <section className="overview-hero" aria-labelledby="health-title">
       <div className="row"><p className="overview-eyebrow">Control Plane · operational dashboard</p><StatusBadge status={summary.tone}>{summary.tone === "warn" ? "Needs attention" : summary.tone === "unknown" ? "Not confirmed" : summary.tone}</StatusBadge></div>
@@ -52,12 +61,12 @@ export function OverviewContent({ overview, projectReadiness = [], controls, quo
       <section id="capacity" aria-labelledby="capacity-title">
         <div className="overview-section-heading"><h2 id="capacity-title">AI capacity</h2><Link href="/analytics">AI usage →</Link></div>
         <div className="panel">
-          <div className="row"><strong>{quota.provider}</strong><StatusBadge status={quota.state} /></div>
+          <div className="row"><strong>{quota.provider}</strong><StatusBadge status={quotaPresentation.badgeStatus}>{quotaPresentation.badgeLabel}</StatusBadge></div>
           <p className="muted">{quota.accountRef}</p>
-          <p className="overview-metric">{quota.usedPercent === null ? "Usage not reported" : `${formatPercent(quota.usedPercent)} used`}</p>
+          <p className="overview-metric">{quotaPresentation.usageLabel}</p>
           {quota.usedPercent !== null && <meter min={0} max={100} value={quota.usedPercent} style={{ accentColor: quotaCapacityColor(quota.state) }} aria-label={`${quota.provider} quota used`}>{formatPercent(quota.usedPercent)}</meter>}
-          <p>{quota.canStartWork ? "Quota permits new work." : "Quota does not permit new work."}</p>
-          <p className="muted">{quota.reason}</p>
+          <p>{quotaPresentation.schedulingMessage}</p>
+          <p className="muted">{quotaPresentation.detailMessage}</p>
           <p className="muted">{quota.resetsAt ? `Next reset ${formatFutureDistance(quota.resetsAt, Date.parse(overview.generatedAt))}` : "Reset time not reported"}<br />Snapshot {formatAge(quota.snapshotAgeMs)}</p>
           {quotaControl}
         </div>
