@@ -23,8 +23,11 @@ export default async function OverviewPage() {
 async function OverviewData({ config }: { config: DashboardConfig }) {
   let overview: OverviewViewModel | null = null;
   let projectReadiness: OverviewProjectReadinessPresentation[] = [];
+  let quotaStaleAfterMs = 300_000;
   try {
     const persistence = await getPersistence();
+    const settings = await persistence.settings.get();
+    quotaStaleAfterMs = settings.quotaStaleAfterMs;
     overview = await buildOverview({
       persistence, quotaProvider: config.quotaProvider,
       quotaAccountRef: config.quotaAccountRef, adeRuntimeVersion: config.adeRuntimeVersion,
@@ -56,7 +59,7 @@ async function OverviewData({ config }: { config: DashboardConfig }) {
     // Never serialize a database connection error into the page.
     console.error("Overview read model unavailable");
   }
-  return overview ? <OverviewContent overview={overview} projectReadiness={projectReadiness} quotaControl={<QuotaRefreshButton />} controls={<div className="actions">
+  return overview ? <OverviewContent overview={overview} projectReadiness={projectReadiness} quotaStaleAfterMs={quotaStaleAfterMs} quotaControl={<QuotaRefreshButton />} controls={<div className="actions">
       <ControlButton type={overview.schedulerMode === "running" ? "global.pause" : "global.resume"}
         label={overview.schedulerMode === "running" ? "Pause globally" : "Resume scheduling"}
         confirm={overview.schedulerMode === "running" ? "Pause all scheduling?" : "Resume global scheduling?"} />
