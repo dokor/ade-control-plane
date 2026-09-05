@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "root": ".",
+  "sections": [
+    "stack",
+    "packages",
+    "modules",
+    "commands",
+    "conventions",
+    "entryPoints",
+    "sensitiveZones",
+    "adrs"
+  ],
+  "stack": {
+    "name": "ade-control-plane",
+    "version": "0.0.0",
+    "moduleType": "module",
+    "packageManager": "pnpm@10.15.0",
+    "engines": {
+      "node": ">=22"
+    },
+    "dependencies": [
+      "@ade-control-plane/host-runner"
+    ],
+    "devDependencies": [
+      "@types/node",
+      "tsx",
+      "typescript"
+    ]
+  },
+  "packages": [
+    {
+      "name": "@ade-control-plane/dashboard",
+      "path": "apps/dashboard"
+    },
+    {
+      "name": "@ade-control-plane/worker",
+      "path": "apps/worker"
+    },
+    {
+      "name": "@ade-control-plane/ade-client",
+      "path": "packages/ade-client"
+    },
+    {
+      "name": "@ade-control-plane/core",
+      "path": "packages/core"
+    },
+    {
+      "name": "@ade-control-plane/database",
+      "path": "packages/database"
+    },
+    {
+      "name": "@ade-control-plane/github",
+      "path": "packages/github"
+    },
+    {
+      "name": "@ade-control-plane/host-runner",
+      "path": "packages/host-runner"
+    },
+    {
+      "name": "@ade-control-plane/quota",
+      "path": "packages/quota"
+    },
+    {
+      "name": "@ade-control-plane/runner-protocol",
+      "path": "packages/runner-protocol"
+    }
+  ],
+  "modules": [],
+  "commands": [
+    {
+      "name": "dev:dashboard",
+      "script": "pnpm --filter @ade-control-plane/dashboard dev"
+    },
+    {
+      "name": "dev:worker",
+      "script": "pnpm --filter @ade-control-plane/worker dev"
+    },
+    {
+      "name": "test",
+      "script": "pnpm -r --if-present test"
+    },
+    {
+      "name": "typecheck",
+      "script": "pnpm -r --if-present typecheck && tsc --noEmit -p runner/tsconfig.json"
+    }
+  ],
+  "conventions": [],
+  "entryPoints": [],
+  "sensitiveZones": [
+    ".env*",
+    "**/*.key",
+    "**/*.pem",
+    "**/secrets.*"
+  ],
+  "adrs": [],
+  "fingerprint": "4d1d2eb8afa5286a0a4f090aa43e133cdf67ebc11ab7bb93b310fab869d7fc39"
+}
