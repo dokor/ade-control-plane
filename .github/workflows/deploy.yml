@@ -4,6 +4,13 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      confirm_legacy_local_build:
+        description: Build and deploy the current main revision locally with the installed legacy wrapper
+        required: true
+        type: boolean
+        default: false
 permissions:
   contents: read
 # Serialization includes image preparation so releases cannot overtake one another.
@@ -78,3 +85,21 @@ jobs:
           DASHBOARD_IMAGE: ${{ needs.dashboard-image.outputs.image }}
           WORKER_IMAGE: ${{ needs.worker-image.outputs.image }}
         run: sudo -n /usr/local/sbin/ade-control-plane-deploy "$DEPLOY_SHA" "$DASHBOARD_IMAGE" "$WORKER_IMAGE"
+  legacy-local-fallback:
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_legacy_local_build
+    runs-on: [self-hosted, linux, arm64, ade-deploy]
+    timeout-minutes: 30
+    environment:
+      name: production
+    steps:
+      - name: Deploy current main with the installed legacy wrapper
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          READY: ${{ vars.ADE_PREBUILT_DEPLOY_READY }}
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = refs/heads/main || { echo 'The fallback only accepts the current main branch.' >&2; exit 1; }
+          test "$READY" != true || { echo 'The prebuilt deployment cutover is active; use the normal deployment workflow.' >&2; exit 1; }
+          [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'GitHub did not provide a full commit SHA.' >&2; exit 1; }
+          echo "Explicit legacy local-build fallback for main@$DEPLOY_SHA"
+          sudo -n /usr/local/sbin/ade-control-plane-deploy "$DEPLOY_SHA"

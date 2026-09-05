@@ -52,6 +52,9 @@ test("prebuilt deployment keeps migration ordering, digest checks and manual-onl
   assert.ok(deploy.indexOf("database migration failed") < deploy.indexOf('up -d --no-build --no-deps'));
   assert.match(workflow, /cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /--local/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /GITHUB_REF" = refs\/heads\/main/);
+  assert.match(workflow, /ade-control-plane-deploy "\$DEPLOY_SHA"\n/);
   assert.match(build, /ubuntu-24.04-arm/);
   assert.doesNotMatch(build, /setup-qemu/);
   assert.match(build, /cache-to: type=gha/);

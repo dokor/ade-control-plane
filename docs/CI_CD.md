@@ -78,6 +78,22 @@ this is not a promise of an offline rebuild. If GitHub itself is unavailable, an
 already staged revision and a separately reviewed offline procedure are needed;
 the wrapper deliberately still validates/fetches the requested Git object.
 
+### Temporary fallback before the administrator cutover
+
+While the host still has the legacy one-argument wrapper and terminal access is
+unavailable, a repository operator can open **Actions → Deploy production → Run
+workflow**, select `main`, enable `confirm_legacy_local_build`, and run it. This is
+an explicit manual action: normal releases never select it. The job is serialized
+with production releases, uses the protected `production` environment, accepts
+only GitHub's current `main` SHA, and invokes only the already allow-listed legacy
+sudo command. It does not install files, change sudoers, expose Docker, or handle
+new credentials.
+
+This transitional path is deliberately disabled when
+`ADE_PREBUILT_DEPLOY_READY=true`. Remove it after an administrator installs the new
+wrapper and confirms GHCR pull access. It keeps production deployable without a
+terminal, but builds on Raspberry and therefore does not deliver #218's speedup.
+
 For a normal rollback, use a retained validated SHA and its two recorded immutable
 digests followed by `--rollback`. Without this explicit flag, normal releases
 cannot move backwards or diverge from the recorded production revision, including
