@@ -6,7 +6,7 @@ const executorSource = new URL("../src/v0/V0TaskExecutor.ts", import.meta.url);
 
 test("ADE initialization readiness is decoupled from issue delivery admission", async () => {
   const source = await readFile(executorSource, "utf8");
-  const completeReadySetup = source.match(/const completeReadySetup = async[\s\S]*?\n      };\n      executionStage\("Prepare ADE configuration"\);/u)?.[0] ?? "";
+  const completeReadySetup = source.match(/const completeReadySetup = async[\s\S]*?executionStage\("Prepare ADE configuration"\);/u)?.[0] ?? "";
 
   assert.match(completeReadySetup, /recordAdeReadiness/u);
   assert.doesNotMatch(completeReadySetup, /resolveDeliveryPlan/u);
