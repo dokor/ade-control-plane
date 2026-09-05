@@ -49,8 +49,16 @@ export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs,
       <h2>Project status <StatusBadge status={summary.status}>{summary.label}</StatusBadge></h2>
       <p>{summary.reason}</p>
     </header>
-    <section className="panel project-setup" aria-labelledby="ade-setup-title">
-      <h2 id="ade-setup-title">ADE Setup</h2>
+    <details className="panel project-setup" open={!readiness.ready}>
+      <summary className="project-setup-summary">
+        <span className="project-setup-summary-content">
+          <span id="ade-setup-title">ADE Setup</span>
+          <StatusBadge status={readiness.ready ? "ready" : summary.stepBlocked ? "blocked" : "setup-required"}>
+            {readiness.ready ? "Complete" : summary.initializing ? "In progress" : summary.stepBlocked ? "Needs attention" : "Action required"}
+          </StatusBadge>
+        </span>
+      </summary>
+      <div className="project-setup-content" aria-labelledby="ade-setup-title">
       <ol className="setup-process" aria-label="ADE onboarding process">
         {["Prepare repository", "Initialize ADE", "Ready for work"].map((title, index) => {
           const current = index === activeStep;
@@ -96,7 +104,8 @@ export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs,
           <p className="muted">{item.detail}</p>
         </li>)}</ul>
       </details>
-    </section>
+      </div>
+    </details>
     <section className="panel project-state" aria-labelledby="project-state-title">
       <h2 id="project-state-title">Project state</h2>
       <div className="project-state-columns">
