@@ -212,22 +212,17 @@ export class V0TaskExecutor {
         const head = (await this.git(checkout.root, ["rev-parse", "HEAD"])).stdout.trim();
         const base = (await this.git(checkout.root, ["rev-parse", `origin/${checkout.baseBranch}`])).stdout.trim();
         if (!head || head !== base) throw new V0ExecutionError("ADE_SETUP_HEAD_CHANGED", "Read-only readiness cannot be recorded for unreviewed commits outside the default branch.");
-        deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
-        if (deliveryPlan.action !== "develop") {
-          throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
-        }
         throwIfAborted(controller.signal);
         await this.assertNotCancelled(task.id);
         await this.recordAdeReadiness(project, checkout.root, {
           status: "compatible", runtimeVersion: setup.runtimeVersion, configVersion: setup.setupContractVersion,
-          resolvedProfiles: [...new Set([this.adeProfile, deliveryPlan.implementationProfile, ...deliveryPlan.reviews.map(({ profile }) => profile)])],
-          resolvedRules: deliveryPlan.validationRuleIds, contextStatus: "fresh", missingRequiredCapabilityIds: [],
+          resolvedProfiles: [], resolvedRules: [], contextStatus: "fresh", missingRequiredCapabilityIds: [],
         });
         await this.options.persistence.v0Tasks.complete({
           taskId: task.id, status: "SUCCESS", finishedAt: this.now().toISOString(),
           adeProvenance: { adeRuntimeVersion: setup.runtimeVersion, adeSetupContractVersion: setup.setupContractVersion, adeConfigStatus: "validated" },
         });
-        await this.log(task.id, "Read-only ADE setup and delivery capabilities were recorded for the default-branch runner checkout.");
+        await this.log(task.id, "Read-only ADE setup and execution capabilities were recorded for the default-branch runner checkout.");
       };
       executionStage("Prepare ADE configuration");
       if (initialization) {
@@ -279,7 +274,7 @@ export class V0TaskExecutor {
       await this.log(task.id, initialization
         ? "Starting ADE initialization in the workspace-write sandbox."
         : "Delivery gate: ready-for-dev; starting Codex in workspace-write sandbox.");
-      await this.updateWorkflow(task.id, initialization ? "developing" : "developing", initialization ? "Codex is preparing the ADE configuration." : "Codex is implementing the task.");
+      await this.updateWorkflow(task.id, initialization ? "preparing" : "developing", initialization ? "Codex is preparing the ADE configuration." : "Codex is implementing the task.");
       executionStage("Run Codex");
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
@@ -323,7 +318,9 @@ export class V0TaskExecutor {
 
       if (!prepared) {
         executionStage("Validate generated ADE configuration");
-        await this.updateWorkflow(task.id, "validating-issue", "Re-validating ADE readiness after the agent changed the repository.");
+        if (!initialization) {
+          await this.updateWorkflow(task.id, "validating-issue", "Re-validating ADE readiness after the agent changed the repository.");
+        }
         prepared = await this.deliveryRuntime.prepare({
           cwd: checkout.root,
           work,
@@ -333,13 +330,14 @@ export class V0TaskExecutor {
           onSetupEvaluation: (setup) => this.logSetupInspection(task.id, setup),
         });
         await this.log(task.id, `ADE runtime ${prepared.runtimeVersion}; initialization configuration validated.`);
-        deliveryPlan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
+        deliveryPlan = initialization ? setupValidationPlan()
+          : await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue: planIssue, signal: controller.signal });
         if (deliveryPlan.action !== "develop") {
           throw new V0ExecutionError("ADE_DELIVERY_NOT_READY", `ADE has not admitted this task to development: ${deliveryPlan.reason}`);
         }
       }
 
-      await this.updateWorkflow(task.id, "reviewing", "Running ADE deterministic and profile review gates.");
+      await this.updateWorkflow(task.id, "reviewing", initialization ? "Running ADE deterministic setup validation." : "Running ADE deterministic and profile review gates.");
       executionStage("Run ADE post-agent gates");
       reviewResult = await this.deliveryRuntime.runPostAgentGates({
         cwd: checkout.root,
@@ -350,7 +348,9 @@ export class V0TaskExecutor {
         signal: controller.signal,
         onOutput: (output) => this.logCommandOutput(task.id, output),
       });
-      await this.log(task.id, `ADE deterministic review and profiles passed: ${reviewResult.provenance.selectedProfiles.join(", ")}.`);
+      await this.log(task.id, initialization
+        ? "ADE deterministic setup review passed."
+        : `ADE deterministic review and profiles passed: ${reviewResult.provenance.selectedProfiles.join(", ")}.`);
       await this.assertNotCancelled(task.id);
       await this.mustRun(task.id, "git commit", {
         executable: "git",
@@ -979,6 +979,20 @@ function setupGaps(setup: AdeSetupEvaluation): string[] {
     .map((entry) => `${entry.id} (${entry.status}, ${entry.criticality}): ${entry.detail}${entry.remediation ? ` Fix: ${entry.remediation}` : ""}`);
   return [...setup.configurationErrors, ...details, ...setup.missingRequiredIds.map((id) => `Missing required: ${id}`),
     ...setup.missingExecutionCapabilityIds.map((id) => `Missing capability: ${id}`)];
+}
+
+function setupValidationPlan(): AdeDeliveryPlan {
+  return {
+    version: "ade.delivery-plan/v1",
+    action: "develop",
+    reason: "Validate ADE setup changes without applying issue-readiness gates.",
+    implementationProfile: "setup",
+    reviews: [],
+    validationRuleIds: [],
+    maximumCorrectionAttempts: 1,
+    correctionInstructions: null,
+    publicationReady: true,
+  };
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
