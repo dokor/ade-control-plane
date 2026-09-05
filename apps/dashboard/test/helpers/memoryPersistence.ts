@@ -107,6 +107,10 @@ export function createMemoryPersistence(
           source: input.source ?? { type: "prompt", prompt: input.prompt },
           prompt: input.prompt,
           status: "PENDING",
+          workflow: {
+            state: "queued", reason: null, recoverable: false, remediation: "none", humanInputRequired: false,
+            attempt: 0, maxAttempts: 0, updatedAt: input.createdAt,
+          },
           cancelRequested: false,
           branchName: null,
           pullRequestNumber: null,
@@ -133,6 +137,8 @@ export function createMemoryPersistence(
         task.status = "RUNNING";
         task.startedAt = startedAt;
         task.updatedAt = startedAt;
+        task.workflow = { state: "preparing", reason: "The worker claimed the task.", recoverable: false, remediation: "none", humanInputRequired: false,
+          attempt: 0, maxAttempts: 0, updatedAt: startedAt };
         return task;
       },
       async requestCancel(taskId, requestedAt) {
@@ -145,6 +151,8 @@ export function createMemoryPersistence(
         if (task.status === "PENDING") {
           task.status = "CANCELLED";
           task.finishedAt = requestedAt;
+          task.workflow = { state: "cancelled", reason: "The task was cancelled before execution.", recoverable: false, remediation: "none", humanInputRequired: false,
+            attempt: 0, maxAttempts: 0, updatedAt: requestedAt };
         }
         return task;
       },
@@ -154,6 +162,13 @@ export function createMemoryPersistence(
         task.status = input.status;
         task.finishedAt = input.finishedAt;
         task.updatedAt = input.finishedAt;
+        return task;
+      },
+      async updateWorkflow(input) {
+        const task = state.v0Tasks.find(({ id }) => id === input.taskId);
+        if (!task) throw new Error("Task not found.");
+        task.workflow = input.workflow;
+        task.updatedAt = input.workflow.updatedAt;
         return task;
       },
       async appendLog(input) {

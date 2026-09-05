@@ -132,6 +132,16 @@ export interface TaskTimelineEvent {
   status: TaskTimelineEventStatus;
   title: string;
   detail: string | null;
+  durationMs?: number | null;
+  substeps?: readonly TaskTimelineSubstep[];
+}
+
+export interface TaskTimelineSubstep {
+  id: string;
+  occurredAt: string;
+  status: TaskTimelineEventStatus;
+  title: string;
+  detail: string | null;
 }
 
 export interface TaskExecutionSummary {
@@ -432,7 +442,7 @@ export function buildTaskTimeline(
     events.push(terminalEvent);
   }
 
-  return events
+  return collapseTimeline(events
     .map((event, index) => ({ event, index, timestamp: Date.parse(event.occurredAt) }))
     .sort((left, right) => {
       if (Number.isNaN(left.timestamp) && Number.isNaN(right.timestamp)) return left.index - right.index;
@@ -440,7 +450,63 @@ export function buildTaskTimeline(
       if (Number.isNaN(right.timestamp)) return -1;
       return left.timestamp - right.timestamp || left.index - right.index;
     })
-    .map(({ event }) => event);
+    .map(({ event }) => event));
+}
+
+function collapseTimeline(
+  events: readonly TaskTimelineEvent[],
+): readonly TaskTimelineEvent[] {
+  const withSetup = groupSetupEvents(events);
+  const withDurations: TaskTimelineEvent[] = [];
+  for (let index = 0; index < withSetup.length; index += 1) {
+    const current = withSetup[index]!;
+    const next = withSetup[index + 1];
+    if (current.status === "running" && next && next.title === current.title && (next.status === "success" || next.status === "failed")) {
+      withDurations.push({ ...current, status: next.status, detail: next.detail, durationMs: durationBetween(current.occurredAt, next.occurredAt) });
+      index += 1;
+    } else {
+      withDurations.push(current);
+    }
+  }
+  const rootFailure = withDurations.find((event) => event.status === "failed" && !propagatedFailure(event)) ?? withDurations.find((event) => event.status === "failed");
+  return withDurations.filter((event) => !propagatedFailure(event) || event === rootFailure);
+}
+
+function groupSetupEvents(events: readonly TaskTimelineEvent[]): readonly TaskTimelineEvent[] {
+  const setup = events.filter((event) => event.kind === "setup");
+  if (setup.length < 2) return events;
+  const first = setup[0]!;
+  const substeps = setup.map((event) => ({
+    id: event.id,
+    occurredAt: event.occurredAt,
+    status: event.status,
+    title: event.title,
+    detail: event.detail,
+  }));
+  const status = setup.some(({ status: item }) => item === "failed") ? "failed" : setup.some(({ status: item }) => item === "warning") ? "warning" : setup.some(({ status: item }) => item === "running") ? "running" : "success";
+  const last = setup.at(-1)!;
+  const grouped: TaskTimelineEvent = {
+    id: `setup:${first.id}`,
+    occurredAt: first.occurredAt,
+    kind: "setup",
+    status,
+    title: "ADE setup",
+    detail: "Repository preparation, configuration and capability checks.",
+    durationMs: durationBetween(first.occurredAt, last.occurredAt),
+    substeps,
+  };
+  const setupIds = new Set(setup.map(({ id }) => id));
+  return events.filter(({ id }) => !setupIds.has(id) || id === first.id)
+    .map((event) => event.id === first.id ? grouped : event);
+}
+
+function propagatedFailure(event: TaskTimelineEvent): boolean {
+  return event.status === "failed" && (event.title === "Task failed" || event.title === "Execution stopped with an error" || event.title === "Codex execution failed");
+}
+
+function durationBetween(start: string, end: string): number | null {
+  const duration = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(duration) && duration >= 0 ? duration : null;
 }
 
 function summarizeTask(
@@ -462,6 +528,15 @@ function summarizeTask(
     };
   }
   if (task.status === "FAILED") {
+    if (task.workflow?.state === "waiting-human" || task.workflow?.humanInputRequired) {
+      return {
+        status: "warning",
+        title: "Waiting for information",
+        detail: task.workflow.reason ?? task.errorSummary ?? "Additional issue information is required before development can continue.",
+        firstFailure,
+        completedEvents,
+      };
+    }
     return {
       status: "failed",
       title: "Task failed",
@@ -545,6 +620,36 @@ function taskLogToTimelineEvent(
   if (diagnostic) return { id: `diagnostic:${log.id}`, occurredAt: log.occurredAt, kind: "error", status: "failed",
     title: `${diagnostic.stage}: ${diagnostic.code}`, detail: diagnostic.message };
   const message = log.message.trim();
+  const structured = parseStructuredLog(message);
+  if (structured?.event === "task.workflow" && typeof structured.state === "string") {
+    const workflowState = structured.state;
+    const workflowLabels: Readonly<Record<string, string>> = {
+      queued: "Waiting for worker", preparing: "Preparing task", "issue-not-ready": "Issue readiness",
+      "enriching-issue": "Issue enrichment", "validating-issue": "Validating issue", "ready-for-dev": "Ready for development",
+      developing: "Development", reviewing: "Reviewing", "preparing-pr": "Preparing pull request",
+      "waiting-human": "Waiting for information", completed: "Completed", failed: "Failed", cancelled: "Cancelled",
+    };
+    const workflowStatus: Readonly<Record<string, TaskTimelineEventStatus>> = {
+      queued: "pending", preparing: "running", "issue-not-ready": "warning", "enriching-issue": "running",
+      "validating-issue": "running", "ready-for-dev": "success", developing: "running", reviewing: "running",
+      "preparing-pr": "running", "waiting-human": "warning", completed: "success", failed: "failed", cancelled: "cancelled",
+    };
+    return event(log, index, workflowState === "failed" ? "error" : "task", workflowStatus[workflowState] ?? "info", workflowLabels[workflowState] ?? "Workflow update", typeof structured.reason === "string" ? structured.reason : null);
+  }
+  if (structured?.event === "ade.setup.inspected") {
+    const readiness = typeof structured.readiness === "string" ? structured.readiness : "unknown";
+    return event(log, index, "setup", readiness === "invalid" ? "failed" : readiness === "ready" ? "success" : "warning", "ADE setup check", typeof structured.classification === "string" ? `Readiness: ${structured.classification}.` : "ADE setup was inspected.");
+  }
+  if (structured?.event === "ade.setup.missing-required" || structured?.event === "ade.setup.missing-capability") {
+    return event(log, index, "setup", "warning", "Missing ADE capability", typeof structured.id === "string" ? structured.id : "A required capability is missing.");
+  }
+  if (structured?.event === "ade.setup.requirement") {
+    const status = structured.status === "satisfied" || structured.status === "available" ? "success" : structured.criticality === "required" ? "failed" : "warning";
+    return event(log, index, "setup", status, typeof structured.id === "string" ? structured.id : "ADE requirement", typeof structured.detail === "string" ? structured.detail : null);
+  }
+  if (structured?.event === "ade.setup.configuration-error") {
+    return event(log, index, "setup", "failed", "ADE configuration error", typeof structured.detail === "string" ? structured.detail : null);
+  }
   const command = /^(git fetch|git branch preparation|git commit|git push) (started|passed|failed)\.?$/u.exec(message);
   if (command) {
     const commandName = command[1] ?? "command";
@@ -616,6 +721,16 @@ function event(
   detail: string | null,
 ): TaskTimelineEvent {
   return { id: `log:${log.id}:${index}`, occurredAt: log.occurredAt, kind, status, title, detail };
+}
+
+function parseStructuredLog(message: string): Record<string, unknown> | null {
+  if (message.length > 4_096 || !message.startsWith("{")) return null;
+  try {
+    const value: unknown = JSON.parse(message);
+    return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 export function safePullRequestUrl(value: string | null): string | null {

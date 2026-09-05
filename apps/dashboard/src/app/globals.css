@@ -164,13 +164,16 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
 }
 
 .badge.pending, .badge.queued, .badge.leased, .badge.dispatched,
-.badge.validating {
+.badge.validating, .badge.preparing, .badge.enriching-issue,
+.badge.validating-issue, .badge.developing, .badge.reviewing,
+.badge.preparing-pr {
   --badge-color: var(--accent);
 }
 
 .badge.optional, .badge.waiting-human, .badge.waiting-quota,
 .badge.waiting-runner, .badge.reconciling, .badge.warn,
-.badge.setup-required, .badge.upgrade-required, .badge.stale {
+.badge.setup-required, .badge.upgrade-required, .badge.stale,
+.badge.issue-not-ready {
   --badge-color: var(--warn);
 }
 
@@ -620,7 +623,14 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
 .task-event-status.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 11%, var(--surface)); }
 .task-event-status.failed { color: var(--danger); background: color-mix(in srgb, var(--danger) 11%, var(--surface)); }
 .task-execution-content > time { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.task-event-duration { display: inline-block; margin-left: 8px; color: var(--muted); font-size: 11px; }
 .task-execution-content p { margin: 6px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.task-phase-details { margin-top: 9px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--surface) 75%, var(--muted)); }
+.task-phase-details summary { padding: 7px 9px; cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 700; }
+.task-phase-details ul { display: grid; gap: 5px; margin: 0; padding: 8px 12px 10px 28px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px; }
+.task-phase-details li.success strong { color: var(--ok); }
+.task-phase-details li.warning strong { color: var(--warn); }
+.task-phase-details li.failed strong { color: var(--danger); }
 .task-raw-logs { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .task-raw-logs summary { padding: 13px 14px; cursor: pointer; color: var(--muted); font-weight: 700; }
 .task-raw-logs[open] summary { border-bottom: 1px solid var(--border); color: var(--text); }

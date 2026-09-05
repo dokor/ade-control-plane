@@ -8,13 +8,14 @@ import type {
   ProjectRecord,
   V0TaskLogRecord,
   V0TaskRecord,
+  V0TaskWorkflow,
 } from "@ade-control-plane/database";
 import { DeterministicFakeGithubClient } from "@ade-control-plane/github";
 
 import type { CommandInput, CommandResult, CommandRunner } from "../src/v0/CommandRunner.js";
 import { V0TaskExecutor } from "../src/v0/V0TaskExecutor.js";
 import { ProjectProvisioningError, provisionProjectCheckout } from "../src/v0/ProjectProvisioner.js";
-import { CodexAgentExecutor } from "../src/AgentExecutor.js";
+import { CodexAgentExecutor, type AgentExecutionRequest, type AgentExecutionResult, type AgentExecutor } from "../src/AgentExecutor.js";
 
 const now = "2026-08-27T10:00:00.000Z";
 
@@ -371,6 +372,92 @@ for (const remainsIncomplete of [false, true]) test(`initialization without diff
   } finally { await context.close(); }
 });
 
+test("persists user-facing workflow transitions separately from terminal task status", async () => {
+  const context = await setup();
+  const workflows: V0TaskWorkflow[] = [];
+  context.persistence.v0Tasks.updateWorkflow = async (input: { taskId: string; workflow: V0TaskWorkflow }) => {
+    assert.equal(input.taskId, context.task.id);
+    workflows.push(input.workflow);
+    context.task.workflow = input.workflow;
+    return context.task;
+  };
+  try {
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github: new DeterministicFakeGithubClient(),
+      commands: new SuccessfulCommands(context.task),
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "SUCCESS");
+    assert.deepEqual(workflows.map(({ state }) => state), [
+      "preparing", "preparing", "ready-for-dev", "developing", "reviewing", "preparing-pr",
+    ]);
+    assert.equal(context.task.workflow?.state, "completed");
+    assert.equal(context.task.workflow?.recoverable, false);
+    assert.ok(context.logs.some(({ message }) => message.includes('"event":"task.workflow"')));
+  } finally {
+    await context.close();
+  }
+});
+
+test("enriches an under-specified GitHub issue and resumes the same task", async () => {
+  const context = await setup();
+  context.task.source = { type: "github-issue", issueNumber: 23 };
+  context.task.prompt = "Implement GitHub issue #23";
+  const github = new DeterministicFakeGithubClient();
+  github.issues.set(23, {
+    number: 23,
+    title: "Add the projects page",
+    body: "Existing product context that must be preserved.",
+    labels: [],
+    state: "open",
+    url: "https://github.com/dokor/alpha/issues/23",
+    updatedAt: now,
+  });
+  const commands = new EnrichmentCommands(new SuccessfulCommands(context.task));
+  const prompts: string[] = [];
+  const agent = {
+    provider: "codex" as const,
+    capabilities: ["test"] as const,
+    execute: async (request: AgentExecutionRequest): Promise<AgentExecutionResult> => {
+      prompts.push(request.prompt);
+      const enrichment = request.prompt.includes("Return only the proposed GitHub issue body");
+      return {
+        exitCode: 0,
+        signal: null,
+        stdout: enrichment ? JSON.stringify({ result: "## Objective\nDeliver the projects page.\n\n## Acceptance Criteria\n- The page loads.\n- Projects are listed.\n- Errors are visible." }) : '{"status":"pass","findings":[]}',
+        stderr: "",
+        usage: { totalTokens: 1, usageSource: "test" },
+      };
+    },
+  } satisfies AgentExecutor;
+
+  try {
+    await new V0TaskExecutor({
+      persistence: context.persistence,
+      github,
+      issueReader: { listIssues: async () => [], getIssue: async () => ({ number: 23, title: "Add the projects page", state: "open", url: "https://github.com/dokor/alpha/issues/23", updatedAt: now }) },
+      commands,
+      agentExecutor: agent,
+      projectRoot: context.projectRoot,
+      now: () => new Date(now),
+    }).execute(context.task);
+
+    assert.equal(context.task.status, "SUCCESS");
+    assert.equal(commands.deliveryPlanCalls, 2);
+    assert.equal(commands.lifecyclePlanCalls, 2);
+    assert.match(github.issues.get(23)?.body ?? "", /Existing product context/);
+    assert.match(github.issues.get(23)?.body ?? "", /## Acceptance Criteria/);
+    assert.match(prompts[0] ?? "", /Existing product context/);
+    assert.ok(context.logs.some(({ message }) => /Issue enrichment attempt 1\/2 started/.test(message)));
+    assert.ok(context.logs.some(({ message }) => message.includes('"state":"enriching-issue"')));
+  } finally {
+    await context.close();
+  }
+});
+
 test("partial setup sends exact sanitized remediation to Codex and retains structured logs", async () => {
   const context = await setup();
   try {
@@ -535,7 +622,7 @@ class SuccessfulCommands implements CommandRunner {
       if (this.noChanges) return result("");
       const statusCall = this.statusCalls++;
       if (statusCall === 0) return result("");
-      if (statusCall === 1) {
+      if (statusCall === 1 || (statusCall === 2 && !this.codexStarted)) {
         if (this.task.source.type === "ade-initialize") return result(" M ade.config.yaml");
         return result(this.adeArtifactsDirty ? "?? outputs/context/context-pack.md" : "");
       }
@@ -558,6 +645,25 @@ class SuccessfulCommands implements CommandRunner {
       if (this.cancelAfterCodex) this.task.cancelRequested = true;
     }
     return result("");
+  }
+}
+
+class EnrichmentCommands implements CommandRunner {
+  public deliveryPlanCalls = 0;
+  public lifecyclePlanCalls = 0;
+
+  public constructor(private readonly base: SuccessfulCommands) {}
+
+  public async run(input: CommandInput): Promise<CommandResult> {
+    if (input.executable === "ade" && input.args[0] === "delivery") {
+      this.deliveryPlanCalls += 1;
+      return result(deliveryPlanResponse(this.deliveryPlanCalls === 1 ? "enrich" : "develop"));
+    }
+    if (input.executable === "ade" && input.args[0] === "issue") {
+      this.lifecyclePlanCalls += 1;
+      return result(JSON.stringify({ action: this.lifecyclePlanCalls === 1 ? "enrich" : "develop", reason: this.lifecyclePlanCalls === 1 ? "The issue needs an objective and acceptance criteria." : "The issue is ready for development.", ...(this.lifecyclePlanCalls === 1 ? { enrichmentPrompt: "Add the missing objective and at least three acceptance criteria." } : {}) }));
+    }
+    return this.base.run(input);
   }
 }
 
@@ -621,8 +727,14 @@ async function setup(options: { checkoutExists?: boolean } = {}) {
         pullRequestUrl?: string | null;
         errorCode?: string | null;
         errorSummary?: string | null;
+        workflow?: V0TaskWorkflow | null;
       }) => {
         Object.assign(task, input, { updatedAt: input.finishedAt });
+        return task;
+      },
+      updateWorkflow: async (input: { taskId: string; workflow: V0TaskWorkflow }) => {
+        assert.equal(input.taskId, task.id);
+        task.workflow = input.workflow;
         return task;
       },
     },
@@ -647,10 +759,10 @@ function result(stdout: string, exitCode = 0): CommandResult {
   return { exitCode, signal: null, stdout, stderr: "" };
 }
 
-function deliveryPlanResponse(): string {
+function deliveryPlanResponse(action: "enrich" | "develop" = "develop"): string {
   return JSON.stringify({
     version: "ade.delivery-plan/v1", status: "supported", plan: {
-      lifecycle: { action: "develop", reason: "Ready for development." },
+      lifecycle: { action, reason: action === "develop" ? "Ready for development." : "Issue needs refinement." },
       implementation: { profile: "implementation" }, validations: [], reviews: [
         { profile: "backend", reason: "Configured by ADE.", invocation: { version: "ade.profile-invocation/v1", kind: "specialist-review", instructions: "Run the ADE backend review." } },
       ],

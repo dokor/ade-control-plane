@@ -42,6 +42,7 @@ import type {
   WorkerWakeup,
   WorkerWakeupRepository,
   V0TaskTransitionInput,
+  V0TaskWorkflowUpdateInput,
   AgentUsageInput,
   AgentUsageRepository,
   AgentUsageQuery,
@@ -302,6 +303,16 @@ function mapV0Task(row: TimestampRow): V0TaskRecord {
     headSha: row.head_sha === null || row.head_sha === undefined ? null : String(row.head_sha),
     prRetryRequested: Boolean(row.pr_retry_requested),
     adeProvenance: row.ade_provenance === null || row.ade_provenance === undefined ? null : toJsonObject(row.ade_provenance),
+    workflow: row.workflow_state === null || row.workflow_state === undefined ? null : {
+      state: String(row.workflow_state) as V0TaskRecord["workflow"] extends infer T ? T extends { state: infer S } ? S : never : never,
+      reason: row.workflow_reason === null ? null : String(row.workflow_reason),
+      recoverable: Boolean(row.workflow_recoverable),
+      remediation: String(row.workflow_remediation) as "enrich-issue" | "wait-for-input" | "none",
+      humanInputRequired: Boolean(row.workflow_human_input_required),
+      attempt: Number(row.workflow_attempt),
+      maxAttempts: Number(row.workflow_max_attempts),
+      updatedAt: toIsoString(row.workflow_updated_at) ?? toIsoString(row.updated_at) ?? "",
+    },
     pullRequestNumber:
       row.pull_request_number === null ? null : Number(row.pull_request_number),
     pullRequestUrl: row.pull_request_url === null ? null : String(row.pull_request_url),
@@ -2266,7 +2277,7 @@ class PostgresV0TaskRepository implements V0TaskRepository {
       const row = selected.rows[0];
       if (!row) return null;
       const updated = await client.query<TimestampRow>(
-        "UPDATE v0_tasks SET status = 'RUNNING', started_at = $2, updated_at = $2 WHERE id = $1 AND status = 'PENDING' RETURNING *",
+        "UPDATE v0_tasks SET status = 'RUNNING', started_at = $2, updated_at = $2, workflow_state = 'preparing', workflow_reason = 'The worker claimed the task.', workflow_updated_at = $2 WHERE id = $1 AND status = 'PENDING' RETURNING *",
         [row.id, startedAt],
       );
       return updated.rows[0] ? mapV0Task(updated.rows[0]) : null;
@@ -2296,7 +2307,12 @@ class PostgresV0TaskRepository implements V0TaskRepository {
       `UPDATE v0_tasks SET status = $2, finished_at = $3, updated_at = $3,
        branch_name = COALESCE($4, branch_name), head_sha = COALESCE($5, head_sha),
        pull_request_number = COALESCE($6, pull_request_number), pull_request_url = COALESCE($7, pull_request_url),
-       error_code = $8, error_summary = $9, ade_provenance = COALESCE($10::jsonb, ade_provenance), pr_retry_requested = false
+       error_code = $8, error_summary = $9, ade_provenance = COALESCE($10::jsonb, ade_provenance),
+       workflow_state = COALESCE($11, CASE WHEN $2 = 'SUCCESS' THEN 'completed' WHEN $2 = 'FAILED' THEN 'failed' ELSE 'cancelled' END),
+       workflow_reason = COALESCE($12, workflow_reason), workflow_recoverable = COALESCE($13, false),
+       workflow_remediation = COALESCE($14, 'none'), workflow_human_input_required = COALESCE($15, false),
+       workflow_attempt = COALESCE($16, workflow_attempt), workflow_max_attempts = COALESCE($17, workflow_max_attempts),
+       workflow_updated_at = $3, pr_retry_requested = false
        WHERE id = $1 AND (status = 'RUNNING' OR (status = 'FAILED' AND pr_retry_requested = true)) RETURNING *`,
       [
         input.taskId,
@@ -2309,6 +2325,13 @@ class PostgresV0TaskRepository implements V0TaskRepository {
         input.errorCode ?? null,
         truncateUtf8(sanitizeV0Log(input.errorSummary ?? ""), 4096) || null,
         input.adeProvenance ? JSON.stringify(input.adeProvenance) : null,
+        input.workflow?.state ?? null,
+        input.workflow?.reason ?? null,
+        input.workflow?.recoverable ?? null,
+        input.workflow?.remediation ?? null,
+        input.workflow?.humanInputRequired ?? null,
+        input.workflow?.attempt ?? null,
+        input.workflow?.maxAttempts ?? null,
       ],
     );
     const updated = result.rows[0];
@@ -2322,6 +2345,22 @@ class PostgresV0TaskRepository implements V0TaskRepository {
         `V0 task ${input.taskId} is already ${current.status}.`,
       );
     }
+    return current;
+  }
+
+  public async updateWorkflow(input: V0TaskWorkflowUpdateInput): Promise<V0TaskRecord> {
+    const result = await this.pool.query<TimestampRow>(
+      `UPDATE v0_tasks SET workflow_state = $2, workflow_reason = $3, workflow_recoverable = $4,
+       workflow_remediation = $5, workflow_human_input_required = $6, workflow_attempt = $7,
+       workflow_max_attempts = $8, workflow_updated_at = $9, updated_at = $9
+       WHERE id = $1 AND status IN ('PENDING', 'RUNNING') RETURNING *`,
+      [input.taskId, input.workflow.state, input.workflow.reason, input.workflow.recoverable,
+        input.workflow.remediation, input.workflow.humanInputRequired, input.workflow.attempt,
+        input.workflow.maxAttempts, input.workflow.updatedAt],
+    );
+    if (result.rows[0]) return mapV0Task(result.rows[0]);
+    const current = await this.getById(input.taskId);
+    if (!current) throw new DatabaseRecordNotFoundError(`V0 task ${input.taskId} was not found.`);
     return current;
   }
 
