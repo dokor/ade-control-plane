@@ -65,7 +65,7 @@
       "reviewProfiles": [],
       "validationRuleIds": [],
       "maxCorrectionAttempts": 1,
-      "requireHumanApprovalBeforePublish": true
+      "requireHumanApprovalBeforePublish": false
     }
   }
 }
