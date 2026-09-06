@@ -4,7 +4,7 @@
 > No secrets, environment values or file contents are included.
 
 - Schema version: 1
-- Fingerprint: `4d1d2eb8afa5286a0a4f090aa43e133cdf67ebc11ab7bb93b310fab869d7fc39`
+- Fingerprint: `50e2d467139a4e6904373eef67c7b6f826c4a4e8f37731caf5ca81708b7d9afd`
 
 ## Stack
 

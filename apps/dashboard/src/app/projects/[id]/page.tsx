@@ -14,6 +14,7 @@ import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { inspectProjectSetup } from "../../../lib/projectSetup.js";
 import { buildProjectDetail } from "../../../lib/readModel.js";
 import { retryabilityExplanation } from "../../../lib/retry.js";
+import { projectRefreshPolicy } from "../../../lib/projectRefreshPolicy.js";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,7 @@ export default async function ProjectPage({
   );
 
   const { project, availableActions } = detail;
+  const refreshPolicy = projectRefreshPolicy(project, setupReadiness, detail.work);
   const safeRetry = detail.executions.find(
     ({ id: executionId }) => executionId === availableActions.safeRetryExecutionId,
   );
@@ -53,13 +55,13 @@ export default async function ProjectPage({
     <Shell
       title={project.name}
       actorRef={session.actorRef}
-      refreshIntervalMs={config.refreshIntervalMs}
+      refreshIntervalMs={refreshPolicy.intervalMs}
     >
       <p className="muted">
         <Link href="/">← Overview</Link>
       </p>
 
-      <ProjectSetupAssistant project={project} work={detail.work} readiness={setupReadiness} refreshIntervalMs={config.refreshIntervalMs} />
+      <ProjectSetupAssistant project={project} work={detail.work} readiness={setupReadiness} refreshIntervalMs={refreshPolicy.intervalMs} />
 
       {detail.openDecisions.length > 0 ? (
         <section>

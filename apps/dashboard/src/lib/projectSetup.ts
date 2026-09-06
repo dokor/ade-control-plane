@@ -36,6 +36,8 @@ export interface ProjectSetupReadiness {
   checkedAt: string;
   setupPullRequestUrl?: string | null;
   setupPullRequestLookupFailed?: boolean;
+  /** The repository inspection failed; this is operational, not ADE state. */
+  inspectionFailed?: boolean;
   capabilitySnapshot?: {
     status: "fresh" | "stale" | "incompatible" | "unknown";
     observedAt: string | null;
@@ -96,7 +98,7 @@ export async function inspectProjectSetup(
   if (!inspected) {
     requirements.push({ key: "repository-access", label: "Repository accessible", state: "invalid", detail: "GitHub rejected or could not complete the repository setup checks.", repairable: false, source: "repository" });
     requirements.push({ key: "github-app", label: "GitHub App access", state: "invalid", detail: "Check the App installation and repository contents/metadata permissions.", repairable: false, source: "runtime" });
-    return { ready: false, requirements, missingLabels, missingFiles, plannedFiles, invalidFiles, checkedAt: now };
+    return { ready: false, requirements, missingLabels, missingFiles, plannedFiles, invalidFiles, checkedAt: now, inspectionFailed: true };
   }
   const [profile, labels, defaultBranchHead, files] = inspected;
   const fileMap = new Map(files);
