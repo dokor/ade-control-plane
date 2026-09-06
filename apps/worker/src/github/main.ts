@@ -16,6 +16,8 @@ import { GithubWorkCodexExecutor } from "../GithubWorkCodexExecutor.js";
 import { AdeDeliveryRuntime } from "../AdeDeliveryRuntime.js";
 import { GithubWorkOrchestrator } from "../GithubWorkOrchestrator.js";
 import { GithubWorkNotifier } from "../GithubWorkNotifier.js";
+import { HttpGithubPullRequestStatusReader } from "../GithubPullRequestStatusReader.js";
+import { ReconcilingGithubWorkReader } from "../ReconcilingGithubWorkReader.js";
 import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js";
 import { WorkerWakeCoordinator } from "../WorkerWakeCoordinator.js";
 import { UnifiedProductionWorker } from "../UnifiedProductionWorker.js";
@@ -73,7 +75,12 @@ async function main(): Promise<void> {
     const quota = createQuotaCoordinator(store, config);
     const orchestrator = new GithubWorkOrchestrator({
       persistence: store,
-      reader: new HttpGithubWorkAdapter({ tokens, installationId: config.github.installationId }),
+      reader: new ReconcilingGithubWorkReader({
+        reader: new HttpGithubWorkAdapter({ tokens, installationId: config.github.installationId }),
+        pullRequests: new HttpGithubPullRequestStatusReader({ tokens, installationId: config.github.installationId }),
+        lifecycle: github,
+        persistence: store,
+      }),
       dispatcher: new GithubWorkCodexExecutor({
         workspaces,
         github, commands, projectRoot: config.projectRoot,
