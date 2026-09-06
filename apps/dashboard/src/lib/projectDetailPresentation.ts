@@ -6,7 +6,7 @@ export function summarizeProjectDetail(project: ProjectView, readiness: ProjectS
   const initialization = work.find((item) => item.initialization && item.active);
   const phase = initialization ? "initialization" : projectSetupPhase(readiness);
   const failedInitialization = work.find((item) => item.initialization && item.status === "failed");
-  const blocker = readiness.requirements.find((item) => item.key !== "runner-capability-check"
+  const blocker = readiness.inspectionFailed ? undefined : readiness.requirements.find((item) => item.key !== "runner-capability-check"
     && item.state !== "ready" && item.state !== "optional" && !item.repairable);
   const attention = work.find((item) => item.needsAttention && !item.initialization);
   type Action = { label: string; href?: string; prepare?: boolean; refresh?: boolean };
@@ -21,6 +21,10 @@ export function summarizeProjectDetail(project: ProjectView, readiness: ProjectS
     reason = initialization.status === "pending" ? "ADE initialization is queued. Follow the task for progress and any generated PR."
       : "The worker is preparing ADE. Follow the task for progress and any generated PR.";
     action = { label: "View initialization", href: initialization.href };
+  } else if (readiness.inspectionFailed) {
+    status = project.status; label = "Refresh unavailable";
+    reason = "Repository checks failed temporarily. The stored project state has not changed; retry the checks later.";
+    action = { label: "Retry checks", refresh: true };
   } else if (blocker) {
     status = blocker.key === "ade-config" || blocker.key === "profiles" ? "incompatible" : "blocked";
     label = status === "incompatible" ? "Incompatible" : "Blocked";

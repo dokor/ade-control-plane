@@ -136,6 +136,7 @@ export function ProjectSetupPanel({ project, work, readiness, refreshIntervalMs,
     </section>
     <details className="panel project-disclosure"><summary>Technical details &amp; refresh</summary>
       <p className="muted">Last repository check: {formatInstant(readiness.checkedAt)}. Checks refresh every {Math.max(5, Math.ceil(refreshIntervalMs / 1000))} seconds while this tab is visible.</p>
+      <p className="muted">Automatic refresh reads the stored project view and inspects ADE setup on GitHub. It does not synchronize work, write project history, or create an event when nothing changed.</p>
       <button type="button" onClick={onRefresh} disabled={refreshing || pending}>{refreshing ? "Refreshing…" : "Refresh checks"}</button>
       {readiness.setupPullRequestUrl ? <p><a href={readiness.setupPullRequestUrl} target="_blank" rel="noreferrer noopener">View setup PR</a></p> : null}
       <dl className="project-metadata">

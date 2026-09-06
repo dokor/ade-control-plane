@@ -452,10 +452,23 @@ client-supplied `retryability` can only be ignored, never trusted: only
 
 ### Live updates
 
-Server reads plus controlled polling (`DASHBOARD_REFRESH_SECONDS`, default 5m)
-via `router.refresh()`, paused while the tab is hidden. Operators can also
-refresh the current page manually. No SSE or WebSocket, and the scheduler never
-depends on a connected browser.
+Server reads plus controlled polling via `router.refresh()`, paused while the
+tab is hidden. On project detail, the interval is explicitly adaptive: 15s for
+ADE initialization, execution, reconciliation, stale capability checks, and
+other expected transitions; 5m for an initialized stable project; and 60s after
+a temporary inspection failure. Other pages use `DASHBOARD_REFRESH_SECONDS`
+(default 5m). Operators can always refresh manually and see an in-progress
+indicator.
+
+A project-page refresh reads the PostgreSQL read model, then performs a
+read-only GitHub inspection of the ADE profile, setup files, labels, default
+branch head, and (when relevant) the setup PR. It does not run the worker's
+GitHub work synchronization, write the database, or create a business/audit
+event. Consequently, an unchanged inspection creates no history entry;
+significant initialization, compatibility, blocking, execution, and operator
+transitions continue to be recorded by their existing mutation/worker paths.
+No SSE or WebSocket is used, and the scheduler never depends on a connected
+browser.
 
 ### Global state
 
