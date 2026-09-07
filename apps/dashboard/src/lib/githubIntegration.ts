@@ -32,6 +32,17 @@ export function presentGithubIntegration(
     };
   }
 
+  if (overview.workerHealth.status === "stale/unhealthy") {
+    return {
+      status: "unknown",
+      badgeStatus: "unknown",
+      badgeLabel: "Not confirmed",
+      reason: "Worker health is stale, so current GitHub integration health cannot be confirmed.",
+      lastSuccessfulReconcileAt,
+      needsAttention: false,
+    };
+  }
+
   if (lastSuccessfulReconcileAt) {
     return {
       status: "healthy",
