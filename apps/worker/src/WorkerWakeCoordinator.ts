@@ -15,7 +15,7 @@ export class WorkerWakeCoordinator {
     const event: WorkerWakeEvent = {
       reason: input.reason.slice(0, 100),
       projectId: input.projectId ?? null,
-      fullReconcile: input.fullReconcile ?? false,
+      fullReconcile: input.fullReconcile ?? input.reason === "github-reconcile-requested",
     };
     if (this.pending) {
       this.pending = {
