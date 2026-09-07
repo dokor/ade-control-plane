@@ -7,6 +7,7 @@ import { Shell } from "../../../../../components/Shell.js";
 import { requireAuthenticatedContext } from "../../../../../lib/auth.js";
 import { formatInstant } from "../../../../../lib/format.js";
 import { getPersistence } from "../../../../../lib/persistence.js";
+import { formatProvenanceKey } from "../../../../../lib/provenancePresentation.js";
 import { buildGithubWorkDetail, safePullRequestUrl } from "../../../../../lib/taskReadModel.js";
 
 export const dynamic = "force-dynamic";
@@ -90,7 +91,7 @@ export default async function GithubWorkDetailPage({
       {Object.keys(detail.provenance).length > 0 ? (
         <section className="task-log-section">
           <div className="task-history-heading"><div><p className="task-kicker">ADE provenance</p><h2>Runtime and policy evidence</h2></div></div>
-          <dl className="task-detail-meta">{Object.entries(detail.provenance).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>
+          <dl className="task-detail-meta">{Object.entries(detail.provenance).map(([key, value]) => <div key={key}><dt>{formatProvenanceKey(key)}</dt><dd>{value}</dd></div>)}</dl>
         </section>
       ) : null}
 
