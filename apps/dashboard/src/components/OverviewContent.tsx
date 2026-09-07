@@ -29,7 +29,7 @@ export function OverviewContent({ overview, projectReadiness = [], quotaStaleAft
       <div className="overview-signals">
         <div><span>Worker</span><StatusBadge status={workerHealth.status === "stale/unhealthy" ? "unknown" : workerHealth.status}>{workerHealth.status === "stale/unhealthy" ? "Not confirmed" : workerHealth.status}</StatusBadge></div>
         <div><span>Scheduler</span><StatusBadge status={overview.schedulerMode}>{overview.schedulerMode === "safe_mode" ? "Safe mode" : overview.schedulerMode}</StatusBadge></div>
-        <div><span>GitHub sync</span><StatusBadge status={overview.githubSync === "current" ? "fresh" : overview.githubSync}>{overview.githubSync}</StatusBadge></div>
+        <div><span>GitHub</span><StatusBadge status={summary.githubIntegration.badgeStatus}>{summary.githubIntegration.badgeLabel}</StatusBadge></div>
       </div>
       <div className="overview-footer"><span className="muted">Updated {formatInstant(overview.generatedAt)}</span><Link className="button primary" href={overview.projects.length ? "/tasks" : "/projects/new"}>{overview.projects.length ? "Open tasks" : "Register a project"}</Link></div>
     </section>
