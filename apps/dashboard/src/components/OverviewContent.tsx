@@ -52,7 +52,7 @@ export function OverviewContent({ overview, projectReadiness = [], quotaStaleAft
       <section id="project-readiness" aria-labelledby="readiness-title">
         <div className="overview-section-heading"><h2 id="readiness-title">Project readiness</h2><Link href="/projects/new">Add project</Link></div>
         <div className="panel">
-          <p className="overview-metric">{overview.unavailableSections.includes("Project readiness") ? "Readiness unavailable" : `${summary.ready} of ${overview.projects.length} ADE-ready`}</p>
+          <p className="overview-metric">{overview.unavailableSections.includes("Project readiness") ? "Readiness unavailable" : `${summary.setupReady} of ${overview.projects.length} ADE setup-ready`}</p>
           {summary.readiness.length === 0 ? <p className="muted">Your repositories will appear here after registration.</p>
             : <ul className="overview-projects">{summary.readiness.map((project) => <li key={project.id}><Link href={`/projects/${project.id}`}>{project.name}</Link><span><StatusBadge status={project.badgeStatus}>{project.badgeLabel}</StatusBadge>{project.controlState === "paused" && project.badgeStatus !== "paused" && <> <StatusBadge status="paused" /></>}</span></li>)}</ul>}
         </div>
