@@ -9,6 +9,7 @@ export type ControlCommandType =
   | "global.pause"
   | "global.resume"
   | "global.safe-mode"
+  | "github.reconcile"
   | "runner.drain"
   | "runner.disable"
   | "runner.enable"
@@ -23,6 +24,7 @@ export const CONTROL_COMMAND_TYPES: readonly ControlCommandType[] = [
   "global.pause",
   "global.resume",
   "global.safe-mode",
+  "github.reconcile",
   "runner.drain",
   "runner.disable",
   "runner.enable",
@@ -61,6 +63,7 @@ export type ValidatedControlCommand =
   | { type: "global.pause" }
   | { type: "global.resume" }
   | { type: "global.safe-mode" }
+  | { type: "github.reconcile" }
   | { type: "runner.drain"; runnerId: string }
   | { type: "runner.disable"; runnerId: string }
   | { type: "runner.enable"; runnerId: string }
@@ -177,6 +180,7 @@ export function validateCommand(
     case "global.pause":
     case "global.resume":
     case "global.safe-mode":
+    case "github.reconcile":
       return { type };
     case "project.pause":
     case "project.resume":
