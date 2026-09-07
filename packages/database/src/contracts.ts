@@ -489,7 +489,7 @@ export interface RunnerRepository {
 export interface ExecutionRepository {
   getById(executionId: string): Promise<ExecutionRecord | null>;
   listActive(): Promise<readonly ExecutionRecord[]>;
-  listByProjectId(projectId: string, limit: number): Promise<readonly ExecutionRecord[]>;
+  listByProjectId(projectId: string, limit: number, order?: "asc" | "desc"): Promise<readonly ExecutionRecord[]>;
   markDispatched(executionId: string, startedAt: string): Promise<ExecutionRecord>;
   markRunning(executionId: string, startedAt: string): Promise<ExecutionRecord>;
   /** Records cancellation intent for an active execution without completing it. */
@@ -541,7 +541,7 @@ export interface ProviderQuotaSnapshotRepository {
 export interface ControlCommandRepository {
   getById(commandId: string): Promise<ControlCommandRecord | null>;
   list(): Promise<readonly ControlCommandRecord[]>;
-  listForProject(projectId: string, limit: number): Promise<readonly ControlCommandRecord[]>;
+  listForProject(projectId: string, limit: number, order?: "asc" | "desc"): Promise<readonly ControlCommandRecord[]>;
   recordReceipt(input: ControlCommandReceiptInput): Promise<ControlCommandRecord>;
   updateStatus(
     commandId: string,
@@ -552,7 +552,7 @@ export interface ControlCommandRepository {
 export interface AuditEventRepository {
   append(input: AuditEventInput): Promise<AuditEventRecord>;
   listForExecution(executionId: string): Promise<readonly AuditEventRecord[]>;
-  listForProject(projectId: string, limit: number): Promise<readonly AuditEventRecord[]>;
+  listForProject(projectId: string, limit: number, order?: "asc" | "desc"): Promise<readonly AuditEventRecord[]>;
   listRecent(limit: number): Promise<readonly AuditEventRecord[]>;
 }
 

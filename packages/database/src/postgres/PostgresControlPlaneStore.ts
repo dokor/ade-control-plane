@@ -1435,16 +1435,17 @@ class PostgresExecutionRepository implements ExecutionRepository {
   public async listByProjectId(
     projectId: string,
     limit: number,
+    order?: "asc" | "desc",
   ): Promise<readonly ExecutionRecord[]> {
     const result = await this.pool.query(
       `
         SELECT *
         FROM executions
         WHERE project_id = $1
-        ORDER BY requested_at DESC
+        ORDER BY ${order ? `COALESCE(finished_at, started_at, requested_at) ${order === "asc" ? "ASC" : "DESC"}` : "requested_at DESC"}
         LIMIT $2
       `,
-      [projectId, boundedLimit(limit)],
+      [projectId, boundedLimit(limit, 5_000)],
     );
     return result.rows.map(mapExecution);
   }
@@ -1931,16 +1932,17 @@ class PostgresControlCommandRepository implements ControlCommandRepository {
   public async listForProject(
     projectId: string,
     limit: number,
+    order: "asc" | "desc" = "desc",
   ): Promise<readonly ControlCommandRecord[]> {
     const result = await this.pool.query(
       `
         SELECT *
         FROM control_commands
         WHERE project_id = $1
-        ORDER BY received_at DESC
+        ORDER BY received_at ${order === "asc" ? "ASC" : "DESC"}
         LIMIT $2
       `,
-      [projectId, boundedLimit(limit)],
+      [projectId, boundedLimit(limit, 5_000)],
     );
     return result.rows.map(mapControlCommand);
   }
@@ -2063,16 +2065,17 @@ class PostgresAuditEventRepository implements AuditEventRepository {
   public async listForProject(
     projectId: string,
     limit: number,
+    order: "asc" | "desc" = "desc",
   ): Promise<readonly AuditEventRecord[]> {
     const result = await this.pool.query(
       `
         SELECT *
         FROM audit_events
         WHERE project_id = $1
-        ORDER BY occurred_at DESC
+        ORDER BY occurred_at ${order === "asc" ? "ASC" : "DESC"}
         LIMIT $2
       `,
-      [projectId, boundedLimit(limit)],
+      [projectId, boundedLimit(limit, 5_000)],
     );
     return result.rows.map(mapAuditEvent);
   }

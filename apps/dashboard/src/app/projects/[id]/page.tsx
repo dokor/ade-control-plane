@@ -12,7 +12,7 @@ import { formatInstant } from "../../../lib/format.js";
 import { getPersistence } from "../../../lib/persistence.js";
 import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
 import { inspectProjectSetup } from "../../../lib/projectSetup.js";
-import { buildProjectDetail } from "../../../lib/readModel.js";
+import { buildProjectDetail, type TimelineQuery } from "../../../lib/readModel.js";
 import { retryabilityExplanation } from "../../../lib/retry.js";
 import { projectRefreshPolicy } from "../../../lib/projectRefreshPolicy.js";
 
@@ -20,10 +20,14 @@ export const dynamic = "force-dynamic";
 
 export default async function ProjectPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const search = await searchParams;
+  const timelineQuery = timelineQueryFromSearch(search);
   const { session, config } = await requireAuthenticatedContext(`/projects/${id}`);
   const persistence = await getPersistence();
   const projectRecord = await persistence.projects.getById(id);
@@ -33,6 +37,7 @@ export default async function ProjectPage({
     quotaAccountRef: config.quotaAccountRef,
     projectId: id,
     adeRuntimeVersion: config.adeRuntimeVersion,
+    timeline: timelineQuery,
   });
 
   if (!detail || !projectRecord) notFound();
@@ -194,6 +199,28 @@ export default async function ProjectPage({
 
       <details className="panel project-disclosure">
         <summary>Timeline</summary>
+        <form className="timeline-filters" method="get">
+          <label>Type<select name="eventType" defaultValue={timelineQuery.category ?? ""}>
+            <option value="">All types</option><option value="project">Project</option><option value="project-onboarding">Project onboarding</option><option value="execution">Execution</option><option value="command">Control</option><option value="github">GitHub</option><option value="github-work">GitHub work</option><option value="worker">Worker</option>
+          </select></label>
+          <label>Severity<select name="severity" defaultValue={timelineQuery.severity ?? ""}>
+            <option value="">All severities</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option>
+          </select></label>
+          <label>Outcome<input name="outcome" placeholder="e.g. failed" defaultValue={timelineQuery.outcome ?? ""} /></label>
+          <label>Origin<select name="origin" defaultValue={timelineQuery.origin ?? ""}>
+            <option value="">All origins</option><option value="system">System</option><option value="user">User / actionable</option>
+          </select></label>
+          <label>From<input type="datetime-local" name="from" defaultValue={toDateTimeLocal(timelineQuery.from)} /></label>
+          <label>To<input type="datetime-local" name="to" defaultValue={toDateTimeLocal(timelineQuery.to)} /></label>
+          <label>Order<select name="order" defaultValue={detail.timelineView.query.order}>
+            <option value="newest">Newest first</option><option value="oldest">Oldest first</option>
+          </select></label>
+          <label>View<select name="mode" defaultValue={detail.timelineView.query.mode}>
+            <option value="collapsed">Collapsed</option><option value="all">All events / diagnostic view</option>
+          </select></label>
+          <div className="actions"><button type="submit">Apply</button><Link className="button secondary" href={`/projects/${id}`}>Reset view</Link></div>
+        </form>
+        <p className="muted timeline-state">{timelineStateLabel(detail.timelineView.query)}</p>
         {detail.timeline.length === 0 ? (
           <p className="muted">No persisted event yet.</p>
         ) : (
@@ -209,11 +236,21 @@ export default async function ProjectPage({
                     <strong>{entry.title}</strong>
                   </div>
                   {entry.detail ? <span className="muted"> — {entry.detail}</span> : null}
+                  {entry.occurrences.length > 1 ? (
+                    <details className="timeline-occurrences"><summary>{entry.occurrences.length} occurrences</summary>{entry.occurrences.length > 40 ? <p className="muted">Showing 40 here; use the diagnostic view to page through every original event.</p> : null}<ol>
+                      {entry.occurrences.slice(0, 40).map((occurrence) => <li key={occurrence.id}><time>{formatInstant(occurrence.occurredAt)}</time>{occurrence.detail ? ` — ${occurrence.detail}` : ""}</li>)}
+                    </ol></details>
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
         )}
+        <nav className="timeline-pagination" aria-label="Timeline pages">
+          {detail.timelineView.hasPrevious ? <Link href={timelineHref(id, detail.timelineView.query, detail.timelineView.query.page - 1)}>Previous</Link> : <span />}
+          <span>Page {detail.timelineView.query.page + 1}</span>
+          {detail.timelineView.hasNext ? <Link href={timelineHref(id, detail.timelineView.query, detail.timelineView.query.page + 1)}>Next</Link> : <span />}
+        </nav>
       </details>
       <details className="panel project-disclosure">
         <summary>Danger zone</summary>
@@ -222,4 +259,38 @@ export default async function ProjectPage({
       </details>
     </Shell>
   );
+}
+
+function one(value: string | string[] | undefined): string | undefined { return Array.isArray(value) ? value[0] : value; }
+function timelineQueryFromSearch(search: Record<string, string | string[] | undefined>): TimelineQuery {
+  const severity = one(search.severity);
+  const origin = one(search.origin);
+  const order = one(search.order);
+  const mode = one(search.mode);
+  const category = one(search.eventType) || undefined;
+  const outcome = one(search.outcome) || undefined;
+  const from = parseLocalInstant(one(search.from));
+  const to = parseLocalInstant(one(search.to));
+  return {
+    ...(category ? { category } : {}),
+    ...(severity === "info" || severity === "warning" || severity === "error" ? { severity } : {}),
+    ...(outcome ? { outcome } : {}),
+    ...(origin === "system" || origin === "user" ? { origin } : {}),
+    ...(from ? { from } : {}), ...(to ? { to } : {}),
+    order: order === "oldest" ? "oldest" : "newest", mode: mode === "all" ? "all" : "collapsed",
+    page: Math.max(0, Number.parseInt(one(search.page) ?? "0", 10) || 0),
+  };
+}
+function parseLocalInstant(value: string | undefined): string | undefined { if (!value) return undefined; const date = new Date(value); return Number.isNaN(date.valueOf()) ? undefined : date.toISOString(); }
+function toDateTimeLocal(value: string | undefined): string { return value ? value.slice(0, 16) : ""; }
+function timelineHref(id: string, query: TimelineQuery, page: number): string {
+  const params = new URLSearchParams();
+  if (query.category) params.set("eventType", query.category); if (query.severity) params.set("severity", query.severity); if (query.outcome) params.set("outcome", query.outcome); if (query.origin) params.set("origin", query.origin);
+  if (query.from) params.set("from", toDateTimeLocal(query.from)); if (query.to) params.set("to", toDateTimeLocal(query.to));
+  if (query.order === "oldest") params.set("order", "oldest"); if (query.mode === "all") params.set("mode", "all"); if (page > 0) params.set("page", String(page));
+  const suffix = params.toString(); return `/projects/${id}${suffix ? `?${suffix}` : ""}`;
+}
+function timelineStateLabel(query: TimelineQuery): string {
+  const active = [query.category && `type ${query.category}`, query.severity && `severity ${query.severity}`, query.outcome && `outcome ${query.outcome}`, query.origin && `${query.origin} origin`, query.from && `from ${formatInstant(query.from)}`, query.to && `to ${formatInstant(query.to)}`].filter(Boolean);
+  return `${query.mode === "all" ? "All events / diagnostic view" : "Collapsed system events"} · ${query.order === "oldest" ? "oldest first" : "newest first"}${active.length ? ` · ${active.join(" · ")}` : " · no filters"}`;
 }
