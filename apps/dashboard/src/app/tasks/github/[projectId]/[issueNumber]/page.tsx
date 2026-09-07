@@ -47,7 +47,7 @@ export default async function GithubWorkDetailPage({
       </section>
 
       <dl className="task-detail-meta">
-        <div><dt>Source revision</dt><dd>{work.sourceUpdatedAt}</dd></div>
+        <div><dt>Source revision</dt><dd><time dateTime={work.sourceUpdatedAt}>{formatInstant(work.sourceUpdatedAt)}</time></dd></div>
         <div><dt>Execution</dt><dd>{execution ? `${execution.id.slice(0, 8)} · ${execution.status}` : "not scheduled"}</dd></div>
         <div><dt>Branch</dt><dd>{workflow?.branchName ?? work.branchName ?? "not created yet"}</dd></div>
         <div><dt>Head SHA</dt><dd>{workflow?.headSha?.slice(0, 12) ?? "not pushed"}</dd></div>
