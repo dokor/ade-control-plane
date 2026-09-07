@@ -42,6 +42,7 @@ export default async function ProjectPage({
     await loadGithubRuntime(),
     undefined,
     await persistence.githubWork.getProfile(projectRecord.id),
+    config.adeRuntimeVersion,
   );
 
   const { project, availableActions } = detail;

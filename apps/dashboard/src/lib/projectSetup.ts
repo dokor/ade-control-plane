@@ -74,6 +74,7 @@ export async function inspectProjectSetup(
   runtime: GithubRuntime | null,
   now = new Date().toISOString(),
   compatibility?: GithubWorkProfileRecord | null,
+  expectedAdeRuntimeVersion = "unknown",
 ): Promise<ProjectSetupReadiness> {
   const setupClient = asSetupClient(runtime?.client);
   const requirements: ProjectSetupRequirement[] = [];
@@ -149,22 +150,24 @@ export async function inspectProjectSetup(
   });
   requirements.push({ key: "github-app", label: "GitHub App access", state: "ready", detail: "The configured App can read repository setup data.", repairable: false, source: "runtime" });
 
+  const runnerProofStatus = runnerCapabilityProofStatus(
+    compatibility,
+    defaultBranchHead,
+    expectedAdeRuntimeVersion,
+  );
   if (compatibility !== undefined) {
     const missing = compatibility?.missingRequiredCapabilityIds ?? [];
-    const verified = compatibility?.adeStatus === "compatible" && compatibility.runnerCheckoutRef === defaultBranchHead;
     requirements.push({
       key: "runner-capability-check",
       label: "Runner ADE capability check",
-      state: verified ? "ready" : compatibility?.runnerCheckoutRef && compatibility.adeStatus !== "compatible" ? "invalid" : "missing",
-      detail: verified
-        ? `Runner checkout ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} matches the default branch and passed ADE ${compatibility?.adeRuntimeVersion ?? "runtime"} setup and delivery checks.`
-        : compatibility?.adeStatus === "compatible" && compatibility.runnerCheckoutRef
-          ? "Runner checkout is stale relative to the repository default branch; refresh it before scheduling."
-        : missing.length > 0
-          ? `Runner checkout is missing required ADE capabilities: ${missing.join(", ")}.`
-          : compatibility?.runnerCheckoutRef
-            ? "Runner capability validation failed. Review ADE configuration and initialization task logs before retrying."
-            : "After merging the setup PR, click “Start ADE initialization” to verify that the worker checkout can resolve ADE workflows.",
+      state: runnerProofStatus === "fresh" ? "ready" : runnerProofStatus === "incompatible" ? "invalid" : "missing",
+      detail: runnerCapabilityProofDetail(
+        compatibility,
+        defaultBranchHead,
+        expectedAdeRuntimeVersion,
+        runnerProofStatus,
+        missing,
+      ),
       repairable: false,
       source: "runtime",
     });
@@ -188,8 +191,7 @@ export async function inspectProjectSetup(
     plannedFiles: [...new Set(plannedFiles)], invalidFiles, checkedAt: now,
     setupPullRequestUrl, setupPullRequestLookupFailed,
     capabilitySnapshot: {
-      status: !hasRunnerResult ? "unknown" : compatibility?.adeStatus === "compatible"
-        ? compatibility.runnerCheckoutRef === defaultBranchHead ? "fresh" : "stale" : "incompatible",
+      status: !hasRunnerResult ? "unknown" : runnerProofStatus,
       observedAt: hasRunnerResult ? compatibility?.observedAt ?? null : null,
       checkoutRef: compatibility?.runnerCheckoutRef ?? null,
     },
@@ -246,6 +248,63 @@ export function requiredGithubSetupLabels(): readonly GithubLabel[] {
 
 function repositoryRef(project: ProjectRecord): GithubRepositoryRef {
   return { id: project.repositoryId ?? `${project.repositoryOwner}/${project.repositoryName}`, owner: project.repositoryOwner, name: project.repositoryName };
+}
+
+function runnerCapabilityProofStatus(
+  compatibility: GithubWorkProfileRecord | null | undefined,
+  defaultBranchHead: string,
+  expectedAdeRuntimeVersion: string,
+): "fresh" | "stale" | "incompatible" | "unknown" {
+  if (!compatibility?.runnerCheckoutRef) return "unknown";
+  if (compatibility.adeStatus !== "compatible") return "incompatible";
+
+  // When the dashboard knows the expected ADE runtime, compatibility is tied
+  // to ADE versions/contracts rather than to every repository commit. This
+  // prevents ordinary deploys from invalidating a successful initialization.
+  if (expectedAdeRuntimeVersion !== "unknown") {
+    if (compatibility.contractVersion !== GITHUB_WORK_PROFILE_VERSION) return "stale";
+    if (compatibility.adeRuntimeVersion !== expectedAdeRuntimeVersion) return "stale";
+    return "fresh";
+  }
+
+  // Conservative fallback for installations that do not expose an ADE runtime
+  // version yet: preserve the historical revision check rather than trusting an
+  // unverifiable proof indefinitely.
+  return compatibility.runnerCheckoutRef === defaultBranchHead ? "fresh" : "stale";
+}
+
+function runnerCapabilityProofDetail(
+  compatibility: GithubWorkProfileRecord | null | undefined,
+  defaultBranchHead: string,
+  expectedAdeRuntimeVersion: string,
+  status: "fresh" | "stale" | "incompatible" | "unknown",
+  missing: readonly string[],
+): string {
+  if (status === "fresh") {
+    return expectedAdeRuntimeVersion === "unknown"
+      ? `Runner checkout ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} matches the default branch and passed ADE ${compatibility?.adeRuntimeVersion ?? "runtime"} setup and delivery checks.`
+      : `Runner proof ${compatibility?.runnerCheckoutRef?.slice(0, 12) ?? "verified"} passed ADE ${compatibility?.adeRuntimeVersion ?? expectedAdeRuntimeVersion} with contract ${compatibility?.contractVersion ?? GITHUB_WORK_PROFILE_VERSION}. Repository commits do not invalidate this proof while ADE versions remain unchanged.`;
+  }
+
+  if (status === "stale") {
+    if (expectedAdeRuntimeVersion !== "unknown") {
+      if (compatibility?.contractVersion !== GITHUB_WORK_PROFILE_VERSION) {
+        return `Runner proof uses ADE contract ${compatibility?.contractVersion ?? "unknown"}; Control Plane expects ${GITHUB_WORK_PROFILE_VERSION}. Re-run ADE initialization after the contract change.`;
+      }
+      return `Runner proof used ADE ${compatibility?.adeRuntimeVersion ?? "unknown"}; Control Plane expects ${expectedAdeRuntimeVersion}. Re-run ADE initialization after the runtime change.`;
+    }
+    if (compatibility?.runnerCheckoutRef !== defaultBranchHead) {
+      return "Runner checkout is stale relative to the repository default branch; refresh it before scheduling.";
+    }
+  }
+
+  if (missing.length > 0) {
+    return `Runner checkout is missing required ADE capabilities: ${missing.join(", ")}.`;
+  }
+  if (compatibility?.runnerCheckoutRef) {
+    return "Runner capability validation failed. Review ADE configuration and initialization task logs before retrying.";
+  }
+  return "After merging the setup PR, click “Start ADE initialization” to verify that the worker checkout can resolve ADE workflows.";
 }
 
 async function readProfile(

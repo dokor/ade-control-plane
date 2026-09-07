@@ -45,6 +45,7 @@ async function OverviewData({ config }: { config: DashboardConfig }) {
           runtime,
           undefined,
           await persistence.githubWork.getProfile(record.id),
+          config.adeRuntimeVersion,
         );
         return presentOverviewProjectReadiness(
           project,
