@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { AutoRefresh } from "./AutoRefresh.js";
 import { HeaderQuotaIndicator } from "./HeaderQuotaIndicator.js";
+import { ProjectsMenu } from "./ProjectsMenu.js";
 import { SignOutButton } from "./SignOutButton.js";
 
 export function Shell({
@@ -23,6 +24,7 @@ export function Shell({
         <h1>{title}</h1>
         <nav className="primary">
           <Link href="/">Dashboard</Link>
+          <ProjectsMenu />
           <Link href="/tasks">Tasks</Link>
           <Link href="/runners">Runners</Link>
           <Link href="/analytics">Analytics</Link>
