@@ -34,6 +34,82 @@ nav.primary button {
   margin: 0;
 }
 
+.projects-menu {
+  position: relative;
+}
+
+.projects-menu summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 600;
+  list-style: none;
+}
+
+.projects-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.projects-menu summary::after {
+  content: "▾";
+  margin-left: 5px;
+  font-size: 11px;
+  transition: transform 120ms ease;
+}
+
+.projects-menu[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.projects-menu summary:focus-visible,
+.projects-menu-panel a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.projects-menu-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(300px, calc(100vw - 28px));
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+.projects-menu-panel ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+nav.primary .projects-menu-panel a {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.projects-menu-panel a:hover {
+  background: var(--bg);
+}
+
+.projects-menu-state {
+  display: block;
+  padding: 8px 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   header.top {
     flex-wrap: wrap;
