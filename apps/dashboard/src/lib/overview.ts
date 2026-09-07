@@ -16,9 +16,15 @@ export function summarizeOverview(
     const presentation = presentationByProject.get(project.id);
     return {
       ...project,
-      readiness: presentation ? (presentation.ready ? "ready" : presentation.status) : fallbackReadiness,
+      setupReadiness: presentation ? (presentation.setupReady ? "ready" : "not-ready") : fallbackReadiness,
       badgeStatus: presentation?.status ?? fallbackReadiness,
       badgeLabel: presentation?.label ?? fallbackReadiness,
+      canonicalReason: presentation?.reason ?? null,
+      canonicalActionLabel: presentation?.actionLabel ?? null,
+      canonicalActionHref: presentation?.actionHref ?? null,
+      canonicalPhase: presentation?.phase ?? null,
+      canonicalNeedsAttention: presentation?.needsAttention ?? false,
+      hasCanonicalPresentation: Boolean(presentation),
       progress: presentation?.progress ?? fallbackProgress(fallbackReadiness),
       originalIndex: index,
     };
@@ -29,6 +35,25 @@ export function summarizeOverview(
       status: work.status, href: work.href, action: "Review work" });
   }
   for (const project of readiness) {
+    const hasSpecificWorkAttention = overview.work.some((work) => work.projectId === project.id && work.needsAttention);
+    if (project.hasCanonicalPresentation) {
+      // The project page, readiness badge and project-level alert all consume the
+      // same presentation. A specific work alert wins when setup itself is ready.
+      if (project.canonicalNeedsAttention && !(project.canonicalPhase === "ready" && hasSpecificWorkAttention)) {
+        alerts.push({
+          id: `project:${project.id}`,
+          title: `${project.name} · ${project.badgeLabel}`,
+          reason: project.canonicalReason ?? project.waitingReason ?? "Project status needs attention.",
+          status: project.badgeStatus,
+          href: project.canonicalActionHref ?? `/projects/${project.id}`,
+          action: project.canonicalActionLabel ?? "Review project",
+        });
+      }
+      continue;
+    }
+
+    // Safe fallback for partial overview loads where repository setup inspection
+    // was unavailable. Canonical presentation is preferred whenever it exists.
     if (["setup-required", "incompatible", "blocked"].includes(project.badgeStatus)) {
       alerts.push({ id: `setup:${project.id}`, title: `${project.name} needs ADE preparation`,
         reason: project.badgeStatus === "incompatible" ? "ADE readiness failed. Review the compatibility checks."
@@ -39,8 +64,7 @@ export function summarizeOverview(
       alerts.push({ id: `runner:${project.id}`, title: `${project.name} needs a compatible runner`,
         reason: "No online runner meets this project's execution requirements.", status: "blocked",
         href: `/projects/${project.id}`, action: "Review project" });
-    } else if (["reconciling", "unknown"].includes(project.status) && project.readiness === "ready"
-      && !overview.work.some((work) => work.projectId === project.id && work.needsAttention)) {
+    } else if (["reconciling", "unknown"].includes(project.status) && project.setupReadiness === "ready" && !hasSpecificWorkAttention) {
       alerts.push({ id: `reconcile:${project.id}`, title: `${project.name} needs reconciliation`,
         reason: project.waitingReason ?? "Refresh the project state before retrying work.", status: "reconciling",
         href: `/projects/${project.id}`, action: "Review project" });
@@ -62,15 +86,15 @@ export function summarizeOverview(
   }
   const rank = (status: string) => ["failed", "blocked", "incompatible"].includes(status) ? 0 : status === "waiting-human" ? 1 : 2;
   alerts.sort((a, b) => rank(a.status) - rank(b.status));
-  const ready = readiness.filter((project) => project.readiness === "ready").length;
-  const enabledReady = readiness.some((project) => project.readiness === "ready" && project.controlState === "enabled");
+  const setupReady = readiness.filter((project) => project.setupReadiness === "ready").length;
+  const enabledReady = readiness.some((project) => project.badgeStatus === "ready" && project.controlState === "enabled");
   const headline = unavailableSections.length ? "Some status information is unavailable"
     : overview.schedulerMode !== "running" ? "Scheduling is paused"
     : projects.length === 0 ? "Connect your first project"
     : alerts.length ? "Attention required"
     : !enabledReady ? "Enable a project to run work" : "Ready for work";
   return {
-    headline, ready, readiness, alerts,
+    headline, setupReady, readiness, alerts,
     description: overview.schedulerMode !== "running" ? "New work is paused. Check current executions before resuming scheduling."
       : projects.length === 0 ? "Register a repository, prepare ADE, then submit your first task."
       : `${overview.work.filter((item) => item.active).length} executions in progress. ${alerts.length} items need attention.`,
