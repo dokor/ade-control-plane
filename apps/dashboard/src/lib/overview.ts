@@ -9,27 +9,27 @@ export function summarizeOverview(
   const readinessAvailable = !unavailableSections.includes("Project readiness");
   const presentationByProject = new Map(readinessPresentation.map((item) => [item.id, item]));
   const readiness = projects.map((project, index) => {
-    const fallbackReadiness = project.controlState === "disabled" ? "disabled"
-      : !readinessAvailable ? "unknown"
+    const fallbackSetupReadiness = !readinessAvailable ? "unknown"
       : project.adeStatus === "compatible" ? "ready"
       : project.adeStatus === "setup-required" || project.adeStatus === "validating" ? "setup-required" : "incompatible";
+    const fallbackStatus = project.controlState === "disabled" ? "disabled" : fallbackSetupReadiness;
     const presentation = presentationByProject.get(project.id);
     return {
       ...project,
-      setupReadiness: presentation ? (presentation.setupReady ? "ready" : "not-ready") : fallbackReadiness,
-      badgeStatus: presentation?.status ?? fallbackReadiness,
-      badgeLabel: presentation?.label ?? fallbackReadiness,
+      setupReadiness: presentation ? (presentation.setupReady ? "ready" : "not-ready") : fallbackSetupReadiness,
+      badgeStatus: presentation?.status ?? fallbackStatus,
+      badgeLabel: presentation?.label ?? fallbackStatus,
       canonicalReason: presentation?.reason ?? null,
       canonicalActionLabel: presentation?.actionLabel ?? null,
       canonicalActionHref: presentation?.actionHref ?? null,
       canonicalPhase: presentation?.phase ?? null,
       canonicalNeedsAttention: presentation?.needsAttention ?? false,
       hasCanonicalPresentation: Boolean(presentation),
-      progress: presentation?.progress ?? fallbackProgress(fallbackReadiness),
+      progress: presentation?.progress ?? fallbackProgress(fallbackSetupReadiness),
       originalIndex: index,
     };
   }).sort((left, right) => right.progress - left.progress || left.originalIndex - right.originalIndex);
-  const alerts: { id: string; title: string; reason: string; href: string; action: string; status: string }[] = [];
+  const alerts: { id: string; title: string; reason: string; href: string; action: string; status: string; label?: string }[] = [];
   for (const work of overview.work.filter((item) => item.needsAttention)) {
     alerts.push({ id: work.id, title: `${work.projectName} · ${work.title}`, reason: work.reason,
       status: work.status, href: work.href, action: "Review work" });
@@ -45,6 +45,7 @@ export function summarizeOverview(
           title: `${project.name} · ${project.badgeLabel}`,
           reason: project.canonicalReason ?? project.waitingReason ?? "Project status needs attention.",
           status: project.badgeStatus,
+          label: project.badgeLabel,
           href: project.canonicalActionHref ?? `/projects/${project.id}`,
           action: project.canonicalActionLabel ?? "Review project",
         });
