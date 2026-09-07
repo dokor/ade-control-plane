@@ -15,7 +15,7 @@ test("healthy Overview gives a next action and keeps capacity below work", async
   const html = renderToStaticMarkup(createElement(OverviewContent, { overview: view }));
   assert.match(html, /No blockers or pending human actions/);
   assert.match(html, /No active executions/);
-  assert.match(html, /1 of 1 ADE-ready/);
+  assert.match(html, /1 of 1 ADE setup-ready/);
   assert.ok(html.indexOf("Running now") < html.indexOf("AI capacity"));
   assert.ok(html.indexOf("AI capacity") < html.indexOf("Attention required"));
   assert.match(html, /href="\/tasks"/);

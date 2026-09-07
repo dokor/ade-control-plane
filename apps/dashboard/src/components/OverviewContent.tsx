@@ -52,7 +52,7 @@ export function OverviewContent({ overview, projectReadiness = [], quotaStaleAft
       <section id="project-readiness" aria-labelledby="readiness-title">
         <div className="overview-section-heading"><h2 id="readiness-title">Project readiness</h2><Link href="/projects/new">Add project</Link></div>
         <div className="panel">
-          <p className="overview-metric">{overview.unavailableSections.includes("Project readiness") ? "Readiness unavailable" : `${summary.ready} of ${overview.projects.length} ADE-ready`}</p>
+          <p className="overview-metric">{overview.unavailableSections.includes("Project readiness") ? "Readiness unavailable" : `${summary.setupReady} of ${overview.projects.length} ADE setup-ready`}</p>
           {summary.readiness.length === 0 ? <p className="muted">Your repositories will appear here after registration.</p>
             : <ul className="overview-projects">{summary.readiness.map((project) => <li key={project.id}><Link href={`/projects/${project.id}`}>{project.name}</Link><span><StatusBadge status={project.badgeStatus}>{project.badgeLabel}</StatusBadge>{project.controlState === "paused" && project.badgeStatus !== "paused" && <> <StatusBadge status="paused" /></>}</span></li>)}</ul>}
         </div>
@@ -78,7 +78,7 @@ export function OverviewContent({ overview, projectReadiness = [], quotaStaleAft
       <div className="overview-section-heading"><h2 id="attention-title">Attention required</h2><span className="muted">{summary.alerts.length} {overview.unavailableSections.length ? "known " : ""}items</span></div>
       {summary.alerts.length === 0 ? <div className="panel overview-calm"><StatusBadge status={overview.unavailableSections.length ? "unknown" : "healthy"} /><p>{overview.unavailableSections.length ? "Some checks are unavailable. Health cannot be confirmed yet." : "No blockers or pending human actions reported."}</p></div>
         : <ul className="overview-attention">{summary.alerts.map((item) => <li key={item.id}>
-          <div><StatusBadge status={item.status} /><h3>{item.title}</h3><p className="muted">{item.reason}</p></div>
+          <div><StatusBadge status={item.status}>{item.label}</StatusBadge><h3>{item.title}</h3><p className="muted">{item.reason}</p></div>
           <Link href={item.href} aria-label={`${item.action}: ${item.title}`}>{item.action} →</Link>
         </li>)}</ul>}
     </section>
