@@ -35,7 +35,7 @@ export function presentOverviewProjectReadiness(
     actionLabel: summary.action.label,
     actionHref: overviewProjectActionHref(project.id, summary.action.href),
     phase: summary.phase,
-    needsAttention: ["setup-required", "incompatible", "blocked", "waiting-human", "reconciling", "unknown", "failed"].includes(summary.status),
+    needsAttention: ["setup-required", "incompatible", "blocked", "waiting-human", "waiting-runner", "reconciling", "unknown", "failed"].includes(summary.status),
     progress: phaseRank * 1_000 + passed * 10 + (summary.initializing ? 5 : 0),
   };
 }
