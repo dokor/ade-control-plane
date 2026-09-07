@@ -1,3 +1,4 @@
+import { presentGithubIntegration } from "./githubIntegration.js";
 import type { OverviewProjectReadinessPresentation } from "./overviewReadiness.js";
 import type { OverviewViewModel } from "./readModel.js";
 
@@ -6,6 +7,7 @@ export function summarizeOverview(
   readinessPresentation: readonly OverviewProjectReadinessPresentation[] = [],
 ) {
   const { projects, unavailableSections } = overview;
+  const githubIntegration = presentGithubIntegration(overview);
   const readinessAvailable = !unavailableSections.includes("Project readiness");
   const presentationByProject = new Map(readinessPresentation.map((item) => [item.id, item]));
   const readiness = projects.map((project, index) => {
@@ -77,9 +79,16 @@ export function summarizeOverview(
       : "A healthy worker cannot be confirmed from the latest heartbeat and cycle evidence.",
     href: "/runners", action: "Check runners", status: "blocked" });
   }
-  if (overview.githubSync !== "current" && projects.length > 0) {
-    alerts.push({ id: "github", title: "GitHub sync needs checking", reason: "Repository sync is stale or has not been observed. Project status may be incomplete.",
-      href: "/settings", action: "Check integration", status: "unknown" });
+  if (githubIntegration.needsAttention) {
+    alerts.push({
+      id: "github",
+      title: "GitHub integration needs attention",
+      reason: githubIntegration.reason,
+      href: "/settings#github-integration",
+      action: "Review integration",
+      status: "blocked",
+      label: githubIntegration.badgeLabel,
+    });
   }
   if (overview.quota.state !== "normal") {
     alerts.push({ id: "quota", title: "Provider capacity needs attention", reason: overview.quota.reason,
@@ -95,7 +104,7 @@ export function summarizeOverview(
     : alerts.length ? "Attention required"
     : !enabledReady ? "Enable a project to run work" : "Ready for work";
   return {
-    headline, setupReady, readiness, alerts,
+    headline, setupReady, readiness, alerts, githubIntegration,
     description: overview.schedulerMode !== "running" ? "New work is paused. Check current executions before resuming scheduling."
       : projects.length === 0 ? "Register a repository, prepare ADE, then submit your first task."
       : `${overview.work.filter((item) => item.active).length} executions in progress. ${alerts.length} items need attention.`,
