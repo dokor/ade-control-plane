@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildOverview, buildProjectDetail } from "../src/lib/readModel.js";
+import { buildOverview, buildProjectDetail, collapseTimelineEntries, queryTimeline, type TimelineEntry } from "../src/lib/readModel.js";
 import {
   createMemoryPersistence,
   createMemoryState,
@@ -17,6 +17,33 @@ import {
 } from "./helpers/fixtures.js";
 
 const SECOND_PROJECT_ID = "99999999-9999-4999-8999-999999999999";
+
+function timelineEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
+  return { id: "event-1", occurredAt: NOW, kind: "audit", title: "Project event: Project checkout ready", detail: "Result: Ready", severity: "info", category: "project", origin: "system", outcome: "ready", occurrences: [], equivalenceKey: "same", collapsible: true, ...overrides };
+}
+
+test("collapses only consecutive equivalent observed system events and retains originals", () => {
+  const collapsed = collapseTimelineEntries([
+    timelineEntry({ id: "one", occurredAt: "2026-08-27T09:00:00.000Z" }),
+    timelineEntry({ id: "two", occurredAt: "2026-08-27T10:00:00.000Z" }),
+    timelineEntry({ id: "different-payload", equivalenceKey: "different" }),
+    timelineEntry({ id: "user-action", origin: "user", collapsible: false }),
+  ]);
+  assert.equal(collapsed.length, 3);
+  assert.equal(collapsed[0]?.occurredAt, "2026-08-27T10:00:00.000Z");
+  assert.deepEqual(collapsed[0]?.occurrences.map(({ id }) => id), ["one", "two"]);
+});
+
+test("timeline query filters, orders, resets to defaults, supports diagnostics, and paginates", () => {
+  const entries = Array.from({ length: 42 }, (_, index) => timelineEntry({ id: String(index), occurredAt: new Date(Date.parse(NOW) + index * 1000).toISOString(), severity: index === 0 ? "error" : "info", equivalenceKey: String(index) }));
+  const defaults = queryTimeline(entries);
+  assert.equal(defaults.query.order, "newest"); assert.equal(defaults.query.mode, "collapsed"); assert.equal(defaults.entries.length, 40); assert.equal(defaults.hasNext, true);
+  const second = queryTimeline(entries, { page: 1, order: "oldest", mode: "all" });
+  assert.equal(second.entries.length, 2); assert.equal(second.entries[0]?.id, "40"); assert.equal(second.hasPrevious, true);
+  const filtered = queryTimeline(entries, { severity: "error", origin: "system", from: "2026-08-27T09:59:00.000Z", to: "2026-08-27T10:01:00.000Z", mode: "all" });
+  assert.deepEqual(filtered.entries.map(({ id }) => id), ["0"]);
+  assert.equal(queryTimeline([timelineEntry(), timelineEntry({ id: "two" })], { mode: "all" }).entries.length, 2);
+});
 
 function input(state: MemoryState, overrides: { now?: string } = {}) {
   return {

@@ -497,10 +497,9 @@ export function createMemoryPersistence(
           ["queued", "leased", "dispatched", "running"].includes(status),
         );
       },
-      async listByProjectId(projectId, limit) {
-        return state.executions
-          .filter((execution) => execution.projectId === projectId)
-          .slice(0, limit);
+      async listByProjectId(projectId, limit, order) {
+        const matches = state.executions.filter((execution) => execution.projectId === projectId);
+        return (order ? matches.sort((left, right) => (order === "asc" ? 1 : -1) * (left.finishedAt ?? left.startedAt ?? left.requestedAt).localeCompare(right.finishedAt ?? right.startedAt ?? right.requestedAt)) : matches).slice(0, limit);
       },
       async markDispatched() {
         return unsupported("executions.markDispatched");
@@ -560,9 +559,10 @@ export function createMemoryPersistence(
       async list() {
         return [...state.commands];
       },
-      async listForProject(projectId, limit) {
+      async listForProject(projectId, limit, order = "desc") {
         return state.commands
           .filter((command) => command.projectId === projectId)
+          .sort((left, right) => (order === "asc" ? 1 : -1) * left.receivedAt.localeCompare(right.receivedAt))
           .slice(0, limit);
       },
       async recordReceipt(input: ControlCommandReceiptInput) {
@@ -630,9 +630,10 @@ export function createMemoryPersistence(
       async listForExecution(executionId) {
         return state.auditEvents.filter((event) => event.executionId === executionId);
       },
-      async listForProject(projectId, limit) {
+      async listForProject(projectId, limit, order = "desc") {
         return state.auditEvents
           .filter((event) => event.projectId === projectId)
+          .sort((left, right) => (order === "asc" ? 1 : -1) * left.occurredAt.localeCompare(right.occurredAt))
           .slice(0, limit);
       },
       async listRecent(limit) {

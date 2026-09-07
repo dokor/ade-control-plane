@@ -135,6 +135,41 @@ export interface TimelineEntry {
   title: string;
   detail: string | null;
   severity: "info" | "warning" | "error";
+  category: string;
+  origin: "system" | "user";
+  outcome: string | null;
+  occurrences: readonly TimelineOccurrence[];
+  equivalenceKey: string;
+  collapsible: boolean;
+}
+
+export interface TimelineOccurrence {
+  id: string;
+  occurredAt: string;
+  detail: string | null;
+}
+
+export type TimelineOrder = "newest" | "oldest";
+export type TimelineMode = "collapsed" | "all";
+export interface TimelineQuery {
+  category?: string;
+  severity?: TimelineEntry["severity"];
+  outcome?: string;
+  origin?: TimelineEntry["origin"];
+  from?: string;
+  to?: string;
+  order?: TimelineOrder;
+  mode?: TimelineMode;
+  page?: number;
+}
+
+export interface TimelineView {
+  entries: readonly TimelineEntry[];
+  query: Required<Pick<TimelineQuery, "order" | "mode" | "page">> & Omit<TimelineQuery, "order" | "mode" | "page">;
+  hasPrevious: boolean;
+  hasNext: boolean;
+  pageSize: number;
+  totalLoaded: number;
 }
 
 export interface OverviewViewModel {
@@ -198,6 +233,7 @@ export interface ProjectDetailViewModel {
   schedulerMode: SchedulerMode;
   executions: readonly ExecutionView[];
   timeline: readonly TimelineEntry[];
+  timelineView: TimelineView;
   humanDecisions: readonly AttentionItem[];
   openDecisions: readonly DecisionView[];
   availableActions: {
@@ -426,7 +462,7 @@ function buildWorkerHealth(
 }
 
 export async function buildProjectDetail(
-  input: ReadModelInput & { projectId: string },
+  input: ReadModelInput & { projectId: string; timeline?: TimelineQuery },
 ): Promise<ProjectDetailViewModel | null> {
   const now = input.now ?? new Date().toISOString();
   const { persistence } = input;
@@ -437,23 +473,33 @@ export async function buildProjectDetail(
   const view =
     overview.projects.find(({ id }) => id === project.id) ??
     toProjectView(project, null, selectProjectGithubWork(null, [], now), null, null, now, input.adeRuntimeVersion);
-  const [executions, auditEvents, commands, decisions] = await Promise.all([
+  const timelineQuery = normalizeTimelineQuery(input.timeline);
+  const hasTimelineFilters = Boolean(timelineQuery.category || timelineQuery.severity || timelineQuery.outcome || timelineQuery.origin || timelineQuery.from || timelineQuery.to);
+  const timelineFetchLimit = hasTimelineFilters ? 5_000 : Math.min((timelineQuery.page + 1) * TIMELINE_PAGE_SIZE + 1, 5_000);
+  const timelineStoreOrder = timelineQuery.order === "oldest" ? "asc" : "desc";
+  const [executions, timelineExecutions, auditEvents, commands, decisions] = await Promise.all([
     persistence.executions.listByProjectId(project.id, 20),
-    persistence.auditEvents.listForProject(project.id, 30),
-    persistence.controlCommands.listForProject(project.id, 20),
+    persistence.executions.listByProjectId(project.id, timelineFetchLimit, timelineStoreOrder),
+    persistence.auditEvents.listForProject(project.id, timelineFetchLimit, timelineStoreOrder),
+    persistence.controlCommands.listForProject(project.id, timelineFetchLimit, timelineStoreOrder),
     persistence.adeDecisions.listOpenByProjectId(project.id),
   ]);
   const executionViews = executions.map((execution) =>
     toExecutionView(execution, project.name),
   );
   const safeRetry = executionViews.find(({ retryability }) => retryability === "safe");
+  const timelineView = queryTimeline(
+    buildTimeline(timelineExecutions.map((execution) => toExecutionView(execution, project.name)), auditEvents, commands),
+    timelineQuery,
+  );
 
   return {
     project: view,
     work: overview.work.filter((item) => item.projectId === project.id),
     schedulerMode: overview.schedulerMode,
     executions: executionViews,
-    timeline: buildTimeline(executionViews, auditEvents, commands),
+    timeline: timelineView.entries,
+    timelineView,
     humanDecisions: overview.attention.filter(
       (item) => item.projectId === project.id && item.key.startsWith("human:"),
     ),
@@ -862,6 +908,12 @@ function buildTimeline(
           : execution.status === "unknown"
             ? ("warning" as const)
             : ("info" as const),
+      category: "execution",
+      origin: "system" as const,
+      outcome: execution.status,
+      occurrences: [],
+      equivalenceKey: JSON.stringify(["execution", execution.status, execution.workRef, execution.errorCode]),
+      collapsible: false,
     })),
     ...auditEvents.map((event) => ({
       id: `audit:${event.id}`,
@@ -876,6 +928,13 @@ function buildTimeline(
         event.action === "project.checkout.failed" ? provisioningDiagnostic(event) : null,
       ].filter((value): value is string => value !== null).join(" · ") || null,
       severity: normalizeSeverity(event.severity),
+      category: event.category,
+      origin: event.actorType === "system" ? ("system" as const) : ("user" as const),
+      outcome: event.result,
+      occurrences: [],
+      equivalenceKey: auditEquivalenceKey(event),
+      collapsible: event.actorType === "system" && normalizeSeverity(event.severity) === "info" &&
+        ["project.checkout.ready", "worker.cycle-succeeded", "github.status"].includes(event.action),
     })),
     ...commands.map((command) => ({
       id: `command:${command.id}`,
@@ -891,12 +950,94 @@ function buildTimeline(
         command.status === "rejected" || command.status === "failed"
           ? ("warning" as const)
           : ("info" as const),
+      category: "command",
+      origin: "user" as const,
+      outcome: command.status,
+      occurrences: [],
+      equivalenceKey: JSON.stringify(["command", command.commandType, command.status, command.resultSummary]),
+      collapsible: false,
     })),
   ];
 
   return entries.sort(
     (left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt),
   );
+}
+
+const TIMELINE_PAGE_SIZE = 40;
+
+export function normalizeTimelineQuery(query: TimelineQuery = {}): TimelineView["query"] {
+  const page = Number.isSafeInteger(query.page) && (query.page ?? 0) >= 0 ? Math.min(query.page ?? 0, 124) : 0;
+  return {
+    ...(query.category ? { category: query.category } : {}),
+    ...(query.severity ? { severity: query.severity } : {}),
+    ...(query.outcome ? { outcome: query.outcome } : {}),
+    ...(query.origin ? { origin: query.origin } : {}),
+    ...(query.from && !Number.isNaN(Date.parse(query.from)) ? { from: query.from } : {}),
+    ...(query.to && !Number.isNaN(Date.parse(query.to)) ? { to: query.to } : {}),
+    order: query.order === "oldest" ? "oldest" : "newest",
+    mode: query.mode === "all" ? "all" : "collapsed",
+    page,
+  };
+}
+
+export function queryTimeline(entries: readonly TimelineEntry[], rawQuery: TimelineQuery = {}): TimelineView {
+  const query = normalizeTimelineQuery(rawQuery);
+  const filtered = entries.filter((entry) =>
+    (!query.category || entry.category === query.category) &&
+    (!query.severity || entry.severity === query.severity) &&
+    (!query.outcome || entry.outcome === query.outcome) &&
+    (!query.origin || entry.origin === query.origin) &&
+    (!query.from || Date.parse(entry.occurredAt) >= Date.parse(query.from)) &&
+    (!query.to || Date.parse(entry.occurredAt) <= Date.parse(query.to))
+  );
+  const ordered = [...filtered].sort((left, right) => {
+    const delta = Date.parse(left.occurredAt) - Date.parse(right.occurredAt);
+    return query.order === "oldest" ? delta : -delta;
+  });
+  const visible = query.mode === "all" ? ordered : collapseTimelineEntries(ordered);
+  const start = query.page * TIMELINE_PAGE_SIZE;
+  return {
+    entries: visible.slice(start, start + TIMELINE_PAGE_SIZE),
+    query,
+    hasPrevious: query.page > 0,
+    hasNext: visible.length > start + TIMELINE_PAGE_SIZE,
+    pageSize: TIMELINE_PAGE_SIZE,
+    totalLoaded: visible.length,
+  };
+}
+
+export function collapseTimelineEntries(entries: readonly TimelineEntry[]): readonly TimelineEntry[] {
+  const collapsed: TimelineEntry[] = [];
+  for (const entry of entries) {
+    const occurrence: TimelineOccurrence = { id: entry.id, occurredAt: entry.occurredAt, detail: entry.detail };
+    const previous = collapsed.at(-1);
+    // User actions and state-changing records stay individually visible in the default view.
+    if (previous && entry.collapsible && previous.collapsible && equivalentTimelineEntries(previous, entry)) {
+      collapsed[collapsed.length - 1] = {
+        ...previous,
+        occurredAt: Date.parse(entry.occurredAt) > Date.parse(previous.occurredAt) ? entry.occurredAt : previous.occurredAt,
+        occurrences: [...previous.occurrences, occurrence],
+      };
+    } else {
+      collapsed.push({ ...entry, occurrences: [occurrence] });
+    }
+  }
+  return collapsed;
+}
+
+function equivalentTimelineEntries(left: TimelineEntry, right: TimelineEntry): boolean {
+  return left.kind === right.kind && left.category === right.category && left.title === right.title &&
+    left.severity === right.severity && left.outcome === right.outcome && left.detail === right.detail &&
+    left.origin === right.origin && left.equivalenceKey === right.equivalenceKey;
+}
+
+function auditEquivalenceKey(event: AuditEventRecord): string {
+  const materialMetadata = Object.entries(event.metadata)
+    .filter(([key]) => !["occurredAt", "observedAt", "timestamp"].includes(key))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => [key, typeof value === "string" ? sanitizeText(value, 400) : value]);
+  return JSON.stringify([event.category, event.action, event.severity, event.result, sanitizeText(event.reason ?? ""), materialMetadata]);
 }
 
 const TIMELINE_CATEGORY_LABELS: Readonly<Record<string, string>> = {
