@@ -24,6 +24,7 @@ export default async function GithubWorkDetailPage({
   const detail = await buildGithubWorkDetail(await getPersistence(), projectId, issueNumber);
   if (!detail) notFound();
   const { project, work, workflow, execution } = detail;
+  const stageLabel = work.state === "ready" && !workflow ? "Queued for ADE" : detail.stageLabel;
   const pullRequestUrl = safePullRequestUrl(workflow?.pullRequestUrl ?? null);
   const openDecision = detail.decision?.status === "open" ? detail.decision.options : [];
 
@@ -37,7 +38,7 @@ export default async function GithubWorkDetailPage({
           <p>{project.repositoryOwner}/{project.repositoryName}</p>
         </div>
         <div className="task-detail-state">
-          <span className={`badge ${work.state}`}>{detail.stageLabel}</span>
+          <span className={`badge ${work.state}`}>{stageLabel}</span>
           {pullRequestUrl ? <a className="button primary" href={pullRequestUrl} target="_blank" rel="noreferrer noopener">Open PR #{workflow?.pullRequestNumber}</a> : null}
           <a className="button" href={work.issueUrl} target="_blank" rel="noreferrer noopener">Open issue</a>
           {execution && ["queued", "leased", "dispatched", "running"].includes(execution.status) ? <ControlButton
@@ -62,7 +63,7 @@ export default async function GithubWorkDetailPage({
       <section className={`task-outcome ${detail.firstFailure ? "failed" : "running"}`} aria-live="polite">
         <div>
           <p className="task-kicker">Current action</p>
-          <h2>{detail.stageLabel}</h2>
+          <h2>{stageLabel}</h2>
           <p>{detail.nextAction}</p>
           {detail.firstFailure ? <p className="task-outcome-failure">First failure: {detail.firstFailure.title} — {detail.firstFailure.detail}</p> : null}
         </div>
