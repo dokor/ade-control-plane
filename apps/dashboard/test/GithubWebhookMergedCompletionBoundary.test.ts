@@ -6,7 +6,9 @@ const webhookSource = new URL("../src/lib/githubWebhook.ts", import.meta.url);
 
 test("merged ADE pull requests complete both GitHub metadata and durable workflow", async () => {
   const source = await readFile(webhookSource, "utf8");
-  const reconciliation = source.match(/async function reconcilePullRequestLifecycle[\s\S]*?\n}\n\nclass GithubWebhookLifecycleError/u)?.[0] ?? "";
+  const start = source.indexOf("async function reconcilePullRequestLifecycle");
+  const end = source.indexOf("class GithubWebhookLifecycleError", start);
+  const reconciliation = start >= 0 && end >= 0 ? source.slice(start, end) : "";
 
   assert.match(reconciliation, /nextState === "completed" \? null/u);
   assert.match(reconciliation, /deliveryWorkflows\.getByExecutionId/u);
