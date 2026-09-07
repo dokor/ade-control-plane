@@ -76,7 +76,7 @@ test("setup-ready project with stale work projection keeps one canonical status 
 
   const { input } = overviewFixture();
   const base = await buildOverview(input);
-  const overview = { ...base, projects: base.projects.map((project) => project.id === detail.project.id ? { ...project, status: "unknown", waitingReason: detail.project.waitingReason } : project) };
+  const overview = { ...base, projects: base.projects.map((project) => project.id === detail.project.id ? { ...project, status: "unknown" as const, waitingReason: detail.project.waitingReason } : project) };
   const summary = summarizeOverview(overview, [canonical]);
   const projectAlert = summary.alerts.find(({ id }) => id === `project:${detail.project.id}`);
 
