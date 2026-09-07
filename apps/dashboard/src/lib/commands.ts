@@ -296,6 +296,13 @@ async function applyCommand(
     case "global.safe-mode":
       await updateMode(context, "safe_mode");
       return "Safe mode enabled; only reconciliation continues.";
+    case "github.reconcile":
+      await persistence.wakeups?.signal({
+        reason: "github-reconcile-requested",
+        projectId: null,
+        signaledAt: context.now,
+      });
+      return "GitHub reconciliation requested; the worker will refresh registered projects on its next cycle.";
     case "runner.drain":
       await persistence.runners.updateState(command.runnerId, "draining");
       return "Runner is draining; running work finishes and no new work is dispatched.";
