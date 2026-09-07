@@ -73,11 +73,10 @@ export function summarizeOverview(
         href: `/projects/${project.id}`, action: "Review project" });
     }
   }
-  if (overview.workerHealth.status === "stale/unhealthy" || overview.workerHealth.status === "degraded-github") {
-    alerts.push({ id: "worker", title: "Worker needs attention", reason: overview.workerHealth.status === "degraded-github"
-      ? "The latest worker cycle failed. Review runtime health before starting more work."
-      : "A healthy worker cannot be confirmed from the latest heartbeat and cycle evidence.",
-    href: "/runners", action: "Check runners", status: "blocked" });
+  if (overview.workerHealth.status === "stale/unhealthy") {
+    alerts.push({ id: "worker", title: "Worker needs attention",
+      reason: "A healthy worker cannot be confirmed from the latest heartbeat and cycle evidence.",
+      href: "/runners", action: "Check runners", status: "blocked" });
   }
   if (githubIntegration.needsAttention) {
     alerts.push({
