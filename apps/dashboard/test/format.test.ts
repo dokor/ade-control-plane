@@ -7,6 +7,7 @@ const NOW = Date.parse("2026-09-01T12:00:00.000Z");
 
 test("formats absolute timestamps in the Europe/Paris timezone", () => {
   assert.equal(formatInstant("2026-09-04T13:43:21.000Z"), "04/09/2026 15:43:21");
+  assert.equal(formatInstant("2026-09-07T16:00:18.000Z"), "07/09/2026 18:00:18");
   assert.equal(formatInstant("2026-01-15T13:43:21.000Z"), "15/01/2026 14:43:21");
   assert.equal(formatInstant(null), "never");
   assert.equal(formatInstant("not-a-date"), "unknown");
