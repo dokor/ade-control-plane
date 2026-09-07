@@ -211,12 +211,31 @@ async function reconcilePullRequestLifecycle(
   const nextMetadata = {
     ...(readGithubWorkMetadata(issue.body) ?? DEFAULT_GITHUB_WORK_METADATA),
     state: nextState,
-    humanDecisionRef: nextState === "blocked" ? `pr-${pullRequest.number}-reconciliation` : metadata.humanDecisionRef,
+    humanDecisionRef: nextState === "completed" ? null : nextState === "blocked" ? `pr-${pullRequest.number}-reconciliation` : metadata.humanDecisionRef,
   };
   if (nextState !== metadata.state || nextMetadata.humanDecisionRef !== metadata.humanDecisionRef) {
     await client.updateIssueBody(event.repository, work.issueNumber, upsertGithubWorkMetadata(issue.body, nextMetadata));
   }
   await client.syncAdeWorkflowLabels(event.repository, work.issueNumber, labelsForGithubWorkState(nextState, metadata.pullRequestNumber));
+
+  if (nextState === "completed" && work.executionRef && dependencies.persistence.deliveryWorkflows) {
+    const workflow = await dependencies.persistence.deliveryWorkflows.getByExecutionId(work.executionRef);
+    if (workflow?.stage === "waiting-human" && workflow.pullRequestNumber === pullRequest.number && workflow.branchName === work.branchName) {
+      await dependencies.persistence.deliveryWorkflows.transition({
+        workflowId: workflow.id,
+        expectedStage: "waiting-human",
+        stage: "completed",
+        attempt: workflow.attempt,
+        reason: "GitHub confirmed the correlated ADE pull request was merged.",
+        idempotencyKey: `${workflow.id}:merged-pr:${pullRequest.number}:completed`,
+        occurredAt: dependencies.now ?? new Date().toISOString(),
+        branchName: work.branchName,
+        pullRequestNumber: pullRequest.number,
+        humanDecisionRef: null,
+      });
+    }
+  }
+
   await reconcileGithubWork(dependencies, project, event.repository);
   return nextState === "completed"
     ? "Merged pull request completed ADE work."
