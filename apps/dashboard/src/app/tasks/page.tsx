@@ -146,7 +146,7 @@ export default async function TasksPage({
           <div className="task-history">
             {dashboard.githubWork.map((work) => (
               <article key={work.id} className="task-history-row">
-                <div className="task-history-status"><span className={`badge ${work.state}`}>{work.stage}</span></div>
+                <div className="task-history-status"><span className={`badge ${work.state}`}>{work.state === "ready" ? "Queued for ADE" : work.stage}</span></div>
                 <div className="task-history-main">
                   <span className="badge badge-neutral task-history-project">{work.projectName}</span>
                   <h3>GitHub issue #{work.issueNumber}</h3>
