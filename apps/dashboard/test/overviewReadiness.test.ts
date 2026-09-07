@@ -23,7 +23,7 @@ function presentation(
     reason: `${label} reason`,
     actionLabel: "Review project",
     actionHref: `/projects/${id}`,
-    needsAttention: ["setup-required", "incompatible", "blocked", "waiting-human", "reconciling", "unknown", "failed"].includes(status),
+    needsAttention: ["setup-required", "incompatible", "blocked", "waiting-human", "waiting-runner", "reconciling", "unknown", "failed"].includes(status),
   };
 }
 
@@ -87,9 +87,15 @@ test("setup-ready project with stale work projection keeps one canonical status 
     title: `${detail.project.name} · ${canonical.label}`,
     reason: canonical.reason,
     status: canonical.status,
+    label: canonical.label,
     href: canonical.actionHref,
     action: canonical.actionLabel,
   });
+
+  const html = renderToStaticMarkup(createElement(OverviewContent, { overview, projectReadiness: [canonical] }));
+  assert.match(html, /ADE setup-ready/);
+  assert.match(html, /Attention required/);
+  assert.match(html, /The GitHub work projection is stale or missing, so eligibility is unknown\./);
 });
 
 test("specific work attention takes precedence over a redundant ready-phase project alert", async () => {
