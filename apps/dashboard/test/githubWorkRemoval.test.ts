@@ -32,11 +32,14 @@ test("uses selected work identity and maps idempotency and safe rejections", asy
 test("explicit readmission resets only lifecycle metadata, preserving issue prose and dependencies", async () => {
   const old = upsertGithubWorkMetadata("Keep the original issue text", { ...DEFAULT_GITHUB_WORK_METADATA, state: "failed", priority: 90, dependsOn: [42], executionRef: "old-execution", branchName: "ade/old", pullRequestNumber: 7 });
   let updated = "";
+  let labels: readonly string[] = [];
   const client = { getIssueDetails: async () => ({ number: 165, state: "open", body: old }),
-    updateIssueBody: async (_repo: unknown, _number: number, body: string) => { updated = body; } } as unknown as GithubIssueLifecycleClient;
+    updateIssueBody: async (_repo: unknown, _number: number, body: string) => { updated = body; },
+    syncAdeWorkflowLabels: async (_repo: unknown, _number: number, nextLabels: readonly string[]) => { labels = nextLabels; } } as unknown as GithubIssueLifecycleClient;
   await admitGithubIssue(project(), client, 165, true);
   assert.match(updated, /Keep the original issue text/);
   const metadata = readGithubWorkMetadata(updated);
   assert.equal(metadata?.state, "ready"); assert.equal(metadata?.priority, 90); assert.deepEqual(metadata?.dependsOn, [42]);
   assert.equal(metadata?.executionRef, null); assert.equal(metadata?.branchName, null); assert.equal(metadata?.pullRequestNumber, null);
+  assert.deepEqual(labels, ["backlog-refined"]);
 });

@@ -17,7 +17,10 @@ export function labelsForGithubWorkState(
   pullRequestNumber: number | null,
 ): readonly AdeWorkflowLabel[] {
   switch (state) {
-    case "ready": return ["backlog-refined", "ready-for-dev"];
+    // `ready` is the GitHub-work scheduler state: the issue is admitted and
+    // runnable by ADE, but the ADE delivery plan has not necessarily reached
+    // its distinct `ready-for-dev` stage yet.
+    case "ready": return ["backlog-refined"];
     case "running": return ["in-progress"];
     case "waiting-human": return pullRequestNumber === null ? ["waiting-human"] : ["waiting-human", "pr-ready"];
     case "blocked":

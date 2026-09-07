@@ -1,5 +1,5 @@
 import type { ProjectRecord } from "@ade-control-plane/database";
-import { DEFAULT_GITHUB_WORK_METADATA, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient } from "@ade-control-plane/github";
+import { DEFAULT_GITHUB_WORK_METADATA, labelsForGithubWorkState, readGithubWorkMetadata, upsertGithubWorkMetadata, type GithubIssueLifecycleClient } from "@ade-control-plane/github";
 import { githubWorkStage } from "./taskReadModel.js";
 import { ControlError } from "./errors.js";
 
@@ -11,5 +11,6 @@ export async function admitGithubIssue(project: ProjectRecord, client: GithubIss
   const metadata = resetRemoved ? { ...DEFAULT_GITHUB_WORK_METADATA, priority: previous?.priority ?? 50, dependsOn: previous?.dependsOn ?? [] }
     : previous ?? DEFAULT_GITHUB_WORK_METADATA;
   if (resetRemoved || !previous) await client.updateIssueBody(repository, issue.number, upsertGithubWorkMetadata(issue.body, metadata));
-  return { issueNumber: issue.number, stage: githubWorkStage(metadata.state, null) };
+  await client.syncAdeWorkflowLabels(repository, issue.number, labelsForGithubWorkState(metadata.state, metadata.pullRequestNumber));
+  return { issueNumber: issue.number, stage: metadata.state === "ready" ? "Queued for ADE" : githubWorkStage(metadata.state, null) };
 }
