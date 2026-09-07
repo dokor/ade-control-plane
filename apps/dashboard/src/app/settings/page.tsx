@@ -1,8 +1,11 @@
 import { ControlButton } from "../../components/ControlButton.js";
 import { Shell } from "../../components/Shell.js";
+import { StatusBadge } from "../../components/StatusBadge.js";
 import { requireAuthenticatedContext } from "../../lib/auth.js";
 import { formatInstant } from "../../lib/format.js";
+import { presentGithubIntegration } from "../../lib/githubIntegration.js";
 import { getPersistence } from "../../lib/persistence.js";
+import { buildOverview } from "../../lib/readModel.js";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +13,13 @@ export default async function SettingsPage() {
   const { session, config } = await requireAuthenticatedContext("/settings");
   const persistence = await getPersistence();
   const settings = await persistence.settings.get();
+  const overview = await buildOverview({
+    persistence,
+    quotaProvider: config.quotaProvider,
+    quotaAccountRef: config.quotaAccountRef,
+    tolerateUnavailable: true,
+  });
+  const githubIntegration = presentGithubIntegration(overview);
 
   return (
     <Shell
@@ -50,6 +60,29 @@ export default async function SettingsPage() {
             confirm="Enable safe mode?"
             disabled={settings.schedulerMode === "safe_mode"}
             disabledReason="Already in safe mode."
+          />
+        </div>
+      </section>
+
+      <section className="panel" id="github-integration">
+        <h2>GitHub integration</h2>
+        <p className="value">
+          <StatusBadge status={githubIntegration.badgeStatus}>{githubIntegration.badgeLabel}</StatusBadge>
+        </p>
+        <p className="detail">{githubIntegration.reason}</p>
+        <p className="detail">
+          Last successful reconciliation: {formatInstant(githubIntegration.lastSuccessfulReconcileAt)}
+        </p>
+        <p className="detail">
+          Project projections: {overview.githubSync === "current" ? "current" : overview.githubSync === "stale" ? "some need refresh" : "not fully observed"}.
+        </p>
+        <p className="muted">
+          Integration health is global. A stale or missing project projection is reported on that project and does not mark GitHub itself unavailable.
+        </p>
+        <div className="actions">
+          <ControlButton
+            type="github.reconcile"
+            label="Refresh GitHub state"
           />
         </div>
       </section>
