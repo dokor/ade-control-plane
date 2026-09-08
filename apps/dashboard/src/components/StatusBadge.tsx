@@ -33,6 +33,7 @@ const TONE_BY_STATUS: Readonly<Record<string, BadgeTone>> = {
   throttled: "warning",
   "upgrade-required": "warning",
   "waiting-human": "warning",
+  "waiting-dependency": "warning",
   "waiting-quota": "warning",
   "waiting-runner": "warning",
   warn: "warning",

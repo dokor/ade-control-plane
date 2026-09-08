@@ -37,6 +37,7 @@ export type ProjectStatus =
   | "running"
   | "ready"
   | "waiting-human"
+  | "waiting-dependency"
   | "waiting-quota"
   | "waiting-runner"
   | "paused"
@@ -662,6 +663,7 @@ const EXCLUSION_STATUS: Readonly<Record<ExclusionCode, ProjectStatus>> = {
   "ade-not-ready": "unknown",
   "no-runnable-work": "completed",
   "waiting-human": "waiting-human",
+  "waiting-dependency": "waiting-dependency",
   reconciling: "reconciling",
   "reconcile-first": "reconciling",
   "work-blocked": "reconciling",
@@ -684,6 +686,7 @@ const EXCLUSION_REASON: Readonly<Record<ExclusionCode, string>> = {
   "ade-not-ready": "The GitHub work projection is stale or missing, so eligibility is unknown.",
   "no-runnable-work": "GitHub reports no runnable work.",
   "waiting-human": "GitHub work is waiting for a human decision.",
+  "waiting-dependency": "GitHub work is waiting for an explicit dependency to complete.",
   reconciling: "The previous outcome is ambiguous and is being reconciled.",
   "reconcile-first": "This GitHub issue revision has already been attempted and must be reconciled before another run.",
   "work-blocked": "GitHub work is explicitly blocked.",
@@ -729,7 +732,7 @@ function toProjectView(
       : exclusion
         ? EXCLUSION_STATUS[exclusion]
         : "ready",
-    waitingReason: exclusion ? EXCLUSION_REASON[exclusion] : selection.reason,
+    waitingReason: exclusion ? (selection.reason ?? EXCLUSION_REASON[exclusion]) : selection.reason,
     exclusion,
     stage: profile?.contractVersion ?? null,
     milestone: item ? `GitHub issue #${item.issueNumber}` : null,

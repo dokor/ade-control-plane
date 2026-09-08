@@ -159,6 +159,24 @@ test("marks a stale GitHub projection as unknown rather than idle", async () => 
   assert.ok(overview.attention.some(({ key }) => key.startsWith("reconcile:")));
 });
 
+test("shows dependency-blocked GitHub work as waiting instead of completed", async () => {
+  const state = twoProjectState();
+  state.projects = [project()];
+  state.githubWorkProfiles = [state.githubWorkProfiles[0]!];
+  state.githubWorkItems = [{
+    ...state.githubWorkItems[0]!,
+    state: "ready",
+    dependsOn: [99],
+  }];
+
+  const overview = await buildOverview(input(state));
+  const argos = overview.projects.find(({ slug }) => slug === "argos");
+
+  assert.equal(argos?.status, "waiting-dependency");
+  assert.match(argos?.waitingReason ?? "", /#99/);
+  assert.equal(argos?.snapshotFresh, true);
+});
+
 test("project detail exposes a sanitized timeline and gated controls", async () => {
   const state = twoProjectState();
   state.executions = [

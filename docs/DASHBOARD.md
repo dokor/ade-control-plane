@@ -219,6 +219,7 @@ Prefer explicit user-facing states:
 - `running`;
 - `ready`;
 - `waiting-human`;
+- `waiting-dependency`;
 - `waiting-quota`;
 - `waiting-runner`;
 - `paused`;
@@ -481,7 +482,7 @@ side effect.
 
 The Overview presents operational health, required actions, active work,
 project ADE readiness, then provider capacity, in the same order on desktop
-and mobile. Each blocked, failed, reconciling or waiting-human issue has its
+and mobile. Each blocked, failed, reconciling, waiting-human or waiting-dependency issue has its
 own detail link, even when another issue in the same project can run. Active
 work uses persisted ADE checkpoints and execution timestamps; manual tasks
 remain visible alongside GitHub work. Detailed evidence stays on task pages.

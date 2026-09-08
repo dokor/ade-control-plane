@@ -170,7 +170,7 @@ section > h2 { font-size: 15px; margin: 0 0 10px; }
   --badge-color: var(--accent);
 }
 
-.badge.optional, .badge.waiting-human, .badge.waiting-quota,
+.badge.optional, .badge.waiting-human, .badge.waiting-dependency, .badge.waiting-quota,
 .badge.waiting-runner, .badge.reconciling, .badge.warn,
 .badge.setup-required, .badge.upgrade-required, .badge.stale,
 .badge.issue-not-ready {

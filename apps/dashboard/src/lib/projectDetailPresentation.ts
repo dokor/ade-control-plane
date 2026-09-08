@@ -59,6 +59,10 @@ export function summarizeProjectDetail(project: ProjectView, readiness: ProjectS
     status = "waiting-runner"; label = "Waiting for runner";
     reason = "ADE setup is complete, but no compatible runner is online.";
     action = { label: "Check runners", href: "/runners" };
+  } else if (project.status === "waiting-dependency") {
+    status = "waiting-dependency"; label = "Waiting for dependency";
+    reason = project.waitingReason ?? "Work is waiting for an explicit dependency to complete.";
+    action = { label: "Review work", href: "#project-work" };
   } else if (["waiting-human", "waiting-quota", "reconciling", "unknown", "failed"].includes(project.status)) {
     status = project.status; label = project.status === "waiting-quota" ? "Waiting for capacity" : "Attention required";
     reason = project.waitingReason ?? "Work needs attention before it can continue.";
