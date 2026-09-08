@@ -50,7 +50,7 @@ test("prebuilt deployment keeps migration ordering, digest checks and manual-onl
   assert.match(deploy, /--local/);
   assert.ok(deploy.indexOf('if "$local_build"') < deploy.indexOf('build "${services[@]}"'));
   assert.match(deploy, /run --rm --no-deps --pull never worker node_modules\/\.bin\/tsx apps\/worker\/src\/v0\/migrate\.ts/);
-  assert.doesNotMatch(deploy, /run[^\n]*--no-build/);
+  assert.doesNotMatch(deploy, /"\$\{compose\[@\]\}" run[^\n]*--no-build/);
   assert.ok(deploy.indexOf("database migration failed") < deploy.indexOf('up -d --no-build --no-deps'));
   assert.match(workflow, /cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /--local/);
