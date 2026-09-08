@@ -2,6 +2,8 @@
 
 ADE Control Plane is the orchestration and supervision layer around **AI Delivery Engine (ADE)**. Import GitHub projects, prepare their ADE setup, run ordinary issues, and follow durable workflows, blockers, pull requests and AI usage from a mobile-friendly Dashboard.
 
+The Control Plane is provider-neutral at the delivery level: ADE owns the workflow and produces the same validated implementation handoff whether the configured coding provider is **Codex** or **Claude Code**.
+
 ## Product MVP
 
 The functional MVP has three parts:
@@ -11,14 +13,38 @@ The functional MVP has three parts:
 3. **Provide an operational Dashboard.** Show setup/readiness, task stages, actionable blockers and decisions, issue/branch/PR correlation, usage/quota/dispatch state, cancellation and safe terminal test-work cleanup.
 
 ```text
-ordinary GitHub issue → refinement/enrichment when needed
-→ ADE workflow/profile/skill/rule resolution → implementation
-→ deterministic validations → ADE reviews → bounded corrections
-→ branch / push / PR → human review or decision
-→ resume the same workflow when required → human merge → completed
+ordinary GitHub issue
+→ refinement/enrichment when needed
+→ ADE workflow/profile/skill/rule resolution
+→ validated ADE implementation handoff
+→ Codex OR Claude Code
+→ deterministic validations
+→ ADE specialist reviews + bounded corrections
+→ branch / push / PR
+→ human review or decision
+→ resume the same workflow when required
+→ human merge
+→ completed
 ```
 
 Human decisions can occur before publication; merge is always an explicit human action.
+
+## Provider-neutral ADE contract
+
+ADE is the source of truth for delivery semantics. A project prepared for ADE should expose a root `AGENTS.md` containing the provider-neutral instructions that every coding agent must follow.
+
+Provider-specific files are adapters only. For example, a `CLAUDE.md` may tell Claude Code to read `AGENTS.md`, but it must not maintain a second, divergent delivery workflow.
+
+For an execution, the order of authority is:
+
+1. the structured ADE execution / implementation handoff;
+2. the repository root `AGENTS.md`;
+3. ADE-selected repository skills and technical documentation;
+4. free-form GitHub issue/comment prose as reference material.
+
+Changing `V0_AGENT_PROVIDER` changes the executable adapter, not the ADE lifecycle, readiness gates, specialist reviews, validations, publication boundary or human merge gate.
+
+See [Agent executors](docs/AGENT_EXECUTORS.md) and [ADE runtime](docs/ADE_RUNTIME.md).
 
 ### Qualification status
 
@@ -36,7 +62,8 @@ The separate [#88 H24/48h+ soak](https://github.com/dokor/ade-control-plane/issu
 - Prepare ADE/setup PRs, declared skill-path repair, initialization and runner capability proof; no-diff initialization reinspects readiness instead of failing automatically.
 - Ordinary open-issue admission without manual ADE metadata, refinement/enrichment and ADE-owned delivery plans and validated implementation handoffs.
 - Repository-defined ADE profiles, skills, rules, deterministic validations, specialist reviews and bounded corrections.
-- Provider-neutral agent execution: Codex and Claude Code when their runtime and credentials are configured.
+- Provider-neutral agent execution through a shared `AgentExecutor` contract, with Codex and Claude Code adapters when their runtime and credentials are configured.
+- A shared provider-neutral repository instruction convention based on root `AGENTS.md`; provider-specific files remain adapters only.
 - PostgreSQL-backed delivery workflows/checkpoints, restart-safe publication recovery and same-workflow human-decision resume.
 - Cancellation, lease heartbeats, execution deadlines, startup reconciliation and GitHub label/branch/PR/merge lifecycle synchronization.
 - Dashboard Overview, project setup/status, durable workflow details/blockers/evidence, safe removal of correlated terminal test work, and AI usage/quota visibility.
@@ -53,18 +80,28 @@ Dashboard / control API ↔ PostgreSQL durable state
                                   ↓
                              ADE runtime
                                   ↓
-                     Codex / Claude agent executor
+               validated implementation handoff
                                   ↓
-                  allow-listed Git checkout / branch
+                    AgentExecutor abstraction
+                       ↙                 ↘
+                    Codex             Claude Code
+                       ↘                 ↙
+                  isolated execution workspace
                                   ↓
-                         GitHub PR / reconciliation
+                    ADE validation / reviews
+                                  ↓
+                  GitHub branch / PR / reconciliation
+                                  ↓
+                         explicit human merge
 ```
 
 **ADE owns** project workflows, profiles, skills, rules, gates, review/correction semantics and versioned delivery contracts. Repository configuration determines what the work requires.
 
 **Control Plane owns** registration, scheduling, persistence, orchestration, provider dispatch, quotas, Git/GitHub side effects, PR correlation, reconciliation and observability. It consumes ADE's plans; it does not reconstruct project delivery graphs or choose profiles through local heuristics.
 
-The current Compose stack runs an authenticated Next.js Dashboard, private PostgreSQL and the unified GitHub-work worker. The worker runs ADE, the agent and Git in the configured isolated execution environment. The host-runner/UDS packages remain available foundations; a separate distributed/host-runner topology is not a prerequisite for the current functional flow.
+**The coding provider owns only implementation inside the assigned workspace.** It must not redefine ADE policy or perform publication steps that the worker owns.
+
+The current Compose stack runs an authenticated Next.js Dashboard, private PostgreSQL and the unified GitHub-work worker. The worker runs ADE, the selected agent and Git in the configured isolated execution environment. The host-runner/UDS packages remain available foundations; a separate distributed/host-runner topology is not a prerequisite for the current functional flow.
 
 ## Getting started
 
@@ -94,10 +131,15 @@ Configure:
 - `DATABASE_URL` or `DATABASE_URL_FILE` for the development database.
 - Dashboard URL, signed-session secret and operator password hash (the hash command is documented in the example).
 - GitHub App ID, installation ID and private-key file; configure the webhook secret/actor allow-lists if using webhook delivery.
-- Absolute `V0_PROJECT_ROOT`, separate `V0_GIT_HOME` and `CODEX_HOME`, ADE/agent executable configuration and provider credentials.
-- Valid quota observations and enabled project/scheduler state before expecting dispatch.
+- Absolute `V0_PROJECT_ROOT` and separate worker Git home.
+- `V0_AGENT_PROVIDER=codex` or `V0_AGENT_PROVIDER=claude-code`.
+- The corresponding provider executable, home/environment and credentials.
+- ADE executable/runtime version configuration.
+- Valid quota observations when supported and enabled project/scheduler state before expecting dispatch.
 
-See [Dashboard](docs/DASHBOARD.md), [worker configuration](docs/V0_CODEX_WORKER.md), [GitHub integration](docs/GITHUB_INTEGRATION.md) and [secret handling](secrets/README.md) for the detailed configuration. The unified worker runs database migrations at startup.
+The provider-specific environment only controls invocation. Both providers receive the same ADE workflow contract.
+
+See [Dashboard](docs/DASHBOARD.md), [agent executors](docs/AGENT_EXECUTORS.md), [worker configuration](docs/V0_CODEX_WORKER.md), [GitHub integration](docs/GITHUB_INTEGRATION.md) and [secret handling](secrets/README.md) for detailed configuration. The unified worker runs database migrations at startup.
 
 In separate terminals with the appropriate environment:
 
@@ -106,16 +148,17 @@ pnpm dev:dashboard
 pnpm --filter @ade-control-plane/worker dev:github-work
 ```
 
-Use the explicit `dev:github-work` entrypoint for the product lifecycle; the root `dev:worker` command is not a substitute for this unified worker. The Compose image bundles its ADE runtime and private Codex App Server; local runs must supply their own configured runtime.
+Use the explicit `dev:github-work` entrypoint for the product lifecycle; the root `dev:worker` command is not a substitute for this unified worker. The Compose image bundles its ADE runtime and private Codex App Server where configured; local runs must supply their own selected provider runtime.
 
 ### First project and issue
 
 1. Sign in to Dashboard and import/register an allowed GitHub repository.
 2. Open the project and follow **ADE Setup**: prepare missing state and review/merge any setup PR on GitHub.
-3. Run ADE initialization to refresh the worker checkout and record real capability/readiness evidence. Resolve reported gaps; a setup PR alone is not readiness.
-4. Select an ordinary open issue and press **Run** once.
-5. Follow the workflow detail, validations/reviews, blockers and AI usage/quota views. Resolve a human decision on the existing workflow if needed.
-6. Review and merge the generated PR explicitly; confirm reconciliation reaches `completed`.
+3. Ensure the prepared repository has a root `AGENTS.md`. A provider-specific file such as `CLAUDE.md` may defer to it but should not duplicate the ADE workflow.
+4. Run ADE initialization to refresh the worker checkout and record real capability/readiness evidence. Resolve reported gaps; a setup PR alone is not readiness.
+5. Select an ordinary open issue and press **Run** once.
+6. Follow the workflow detail, validations/reviews, blockers and AI usage/quota views. Resolve a human decision on the existing workflow if needed.
+7. Review and merge the generated PR explicitly; confirm reconciliation reaches `completed`.
 
 See [project onboarding](docs/PROJECT_ONBOARDING.md) and [release qualification](docs/RELEASE_GATE.md). Production qualification remains pending until the evidence required by #185/#189/#153 is recorded.
 
@@ -129,8 +172,9 @@ For first installation, permissions, network boundaries and recovery, use [deplo
 
 | Location | Responsibility |
 | --- | --- |
+| `AGENTS.md` | Canonical provider-neutral instructions for coding agents working on Control Plane |
 | `apps/dashboard` | Next.js UI, authenticated control API and read models |
-| `apps/worker` | Unified scheduler/orchestrator, ADE CLI boundary and agent/Git execution |
+| `apps/worker` | Unified scheduler/orchestrator, ADE CLI boundary and provider-neutral agent/Git execution |
 | `packages/database` | PostgreSQL contracts, migrations, workflows, logs and audit persistence |
 | `packages/github` | GitHub App/API integration, lifecycle metadata and synchronization |
 | `packages/ade-client` | Versioned ADE adapter/client contracts |
@@ -141,8 +185,10 @@ For first installation, permissions, network boundaries and recovery, use [deplo
 ## Further reading
 
 - [Documentation index](docs/README.md) and [product target](docs/PRODUCT_TARGET.md)
+- [Canonical agent instructions](AGENTS.md) and [agent executors](docs/AGENT_EXECUTORS.md)
 - [Security boundaries](docs/SECURITY.md)
 - [Dashboard](docs/DASHBOARD.md) and [operations](docs/OPERATIONS.md)
 - [ADE runtime](docs/ADE_RUNTIME.md) and [GitHub work contract](docs/GITHUB_WORK_CONTRACT.md)
+- [Project onboarding](docs/PROJECT_ONBOARDING.md)
 - [Runner protocol](docs/RUNNER_PROTOCOL.md)
 - [Release gate](docs/RELEASE_GATE.md) and [scenario evidence](docs/RELEASE_SCENARIOS.md)

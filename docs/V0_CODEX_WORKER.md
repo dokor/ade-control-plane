@@ -1,10 +1,27 @@
-# V0 Codex Worker
+# V0 Agent Worker
 
-The V0 worker implements issue #24: it claims one pending task, runs Codex in an allow-listed local checkout, pushes a dedicated branch and creates a GitHub pull request. It does not expose a network or generic shell API.
+> Historical filename: `V0_CODEX_WORKER.md`. The implementation now supports multiple coding providers through the shared `AgentExecutor` contract.
+
+The worker claims durable work, runs the configured coding provider in an allow-listed workspace, passes the result through ADE validation/review, pushes a dedicated branch and creates a GitHub pull request. It does not expose a network or generic shell API.
+
+## Provider selection
+
+`V0_AGENT_PROVIDER` selects the implementation adapter:
+
+```text
+codex
+claude-code
+```
+
+The provider choice does not select a different ADE workflow. Both adapters receive the same validated ADE handoff and run inside the same checkout, validation, specialist-review, publication and reconciliation lifecycle.
+
+There is no automatic provider fallback. If the selected provider fails, the execution fails explicitly.
+
+See [`AGENT_EXECUTORS.md`](AGENT_EXECUTORS.md) for the adapter contract.
 
 ## Project allow-list
 
-`V0_PROJECT_ROOT` is the only permitted checkout root. A registered project must include relative V0 configuration:
+`V0_PROJECT_ROOT` is the only permitted checkout root. A registered project includes relative V0 configuration such as:
 
 ```json
 {
@@ -15,54 +32,129 @@ The V0 worker implements issue #24: it claims one pending task, runs Codex in an
 }
 ```
 
-The worker resolves both the root and checkout canonically, rejects traversal/symlink escapes, and verifies that `origin` is exactly the registered `github.com/<owner>/<repository>` remote. The checkout must be clean before a task starts.
+The worker resolves both the root and checkout canonically, rejects traversal/symlink escapes, and verifies that `origin` is exactly the registered `github.com/<owner>/<repository>` remote. Executions use isolated workspaces where configured and validate the checkout baseline before starting.
 
-## Execution
+## Repository agent instructions
 
-Start the worker with `pnpm --filter @ade-control-plane/worker start:v0`. It performs the following typed process calls without a shell:
+ADE-enabled projects should expose a root `AGENTS.md` as their canonical provider-neutral instruction contract.
 
-1. fetch the configured base branch;
-2. create/reset `ade/<task-id>` from `origin/<base>`;
-3. run `codex exec --sandbox workspace-write --ephemeral --json -` with the task prompt on stdin;
-4. stage and commit useful changes with repository hooks disabled;
-5. push the dedicated branch;
-6. create a pull request through the narrow GitHub App API and tag `@dokor`;
-7. persist branch, PR and terminal status.
+A provider-specific file such as `CLAUDE.md` may adapt discovery for that provider, but should defer to `AGENTS.md` instead of redefining the workflow.
 
-Codex receives only an allow-listed child environment and its dedicated credential. Database and GitHub App secrets are not inherited. Git uses a separate environment and host credential mechanism such as a dedicated SSH key or credential helper.
+The worker's structured ADE handoff remains more authoritative than free-form repository issue prose.
+
+## GitHub issue execution
+
+For an ordinary GitHub issue, the unified worker follows this flow:
+
+1. prepare the registered checkout/workspace;
+2. fetch and prepare the execution branch;
+3. ask ADE to resolve the issue lifecycle;
+4. if ADE returns `enrich`, execute the provider with ADE's bounded enrichment instruction and update/replan the issue;
+5. require a validated `ade.implementation-handoff/v1` before development;
+6. prepare ADE context for the selected implementation profile;
+7. execute the selected coding provider with the validated handoff;
+8. require useful repository changes;
+9. run ADE deterministic validation and configured specialist reviews;
+10. apply only ADE-bounded correction passes when required;
+11. require ADE's publication gate;
+12. commit and push the reviewed branch;
+13. create/reconcile the GitHub PR;
+14. persist the workflow in a human-waiting state until review/merge reconciliation completes.
+
+The coding provider does not own steps 11–14. The worker owns publication and GitHub lifecycle mutations.
+
+## Provider invocation
+
+### Codex
+
+The Codex adapter currently invokes:
+
+```bash
+codex exec --sandbox workspace-write --ephemeral --json -
+```
+
+The prompt is provided through stdin.
+
+### Claude Code
+
+The Claude Code adapter currently invokes:
+
+```bash
+claude --print --output-format json
+```
+
+The prompt is also provided through stdin.
+
+Both adapters normalize machine-readable usage metrics when the provider emits them.
 
 ## ADE delivery guardrails
 
-The production worker includes the pinned `@alelouet/ai-delivery-engine` CLI.
-Before Codex starts, it validates the project's `ade.config` and creates the
-configured context pack using `V0_ADE_PROFILE` (`chill`, `normal`, or
-`expert`; default `normal`). ADE output directories must be ignored by Git: a
-generated, unignored artifact stops the task before Codex can change source.
+The production worker includes a pinned `@alelouet/ai-delivery-engine` CLI.
 
-After Codex changes are staged, `ade review --staged --json` must pass before
-the worker can commit, push, or create a PR. The resulting PR records the
-context profile and the successful deterministic review; human review and
-merge stay explicit.
+Before implementation, ADE validates repository configuration/readiness, resolves the issue lifecycle and prepares the configured context/profile. Project-specific rules, skills and specialist profiles come from ADE, not from Control Plane heuristics.
 
-The worker starts Codex App Server with the same saved Codex login on its own
-loopback interface only. Its normalized rate-limit observation is a
-fail-closed scheduling gate: unavailable or stale quota starts no task. There
-is no App Server Compose service, published port, Docker network listener, or
-Traefik route.
+After the provider modifies the workspace, the worker calls the shared `AdeDeliveryRuntime` to run:
+
+- deterministic staged validation;
+- configured specialist profile reviews;
+- bounded correction passes where allowed;
+- final publication-gate resolution.
+
+No provider is allowed to bypass a failed ADE gate merely because it produced code successfully.
+
+The generated PR records safe ADE provenance. Raw provider reasoning/chain-of-thought is not persisted.
+
+## Publication ownership
+
+For orchestrated executions, the provider prompt explicitly states that the worker owns:
+
+- commit;
+- push;
+- issue metadata;
+- pull-request creation;
+- lifecycle reconciliation.
+
+This prevents Claude Code or Codex from independently mutating GitHub and creating duplicate or untracked publication state.
+
+Human merge remains explicit. The worker never auto-merges generated PRs.
 
 ## Cancellation and recovery
 
-While Codex runs, the worker polls durable cancellation intent. Cancel or timeout sends `SIGTERM` to the execution process group and escalates to `SIGKILL` after five seconds. No push or PR is attempted after cancellation is observed.
+While a provider runs, the worker observes durable cancellation intent. Cancellation/timeout terminates the owned execution process and prevents later publication from being treated as successful.
 
-After restart, an existing `RUNNING` task is marked `FAILED` (or `CANCELLED` when cancellation was already requested). The worker never retries it implicitly because a branch, push or PR may already exist and require reconciliation.
+Durable ADE workflow checkpoints allow restart reconciliation around publication and human-decision boundaries. The worker must reconcile existing branches/PRs instead of blindly replaying side effects.
+
+## Quota behavior
+
+Quota observation is provider-specific, but scheduling semantics remain explicit:
+
+- Codex may use the private Codex App Server quota source when configured;
+- Claude Code currently has no equivalent live quota source in this worker path;
+- unknown quota is never represented as zero usage;
+- a provider's quota observations must never be applied to another provider's execution.
+
+Provider identity is persisted with usage/execution state.
 
 ## Required runtime configuration
 
+Common configuration includes:
+
 - `DATABASE_URL` or `DATABASE_URL_FILE`;
 - `V0_PROJECT_ROOT`;
+- `V0_AGENT_PROVIDER`;
 - `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`, `GITHUB_APP_PRIVATE_KEY_FILE`;
-- `CODEX_API_KEY_FILE` or persisted CLI authentication under `CODEX_HOME`;
-- `V0_GIT_HOME`, separate from the Codex home and containing only Git push configuration;
-- Git push credentials scoped to the allowed repositories.
+- `V0_GIT_HOME`, separated from provider-specific credentials;
+- Git push credentials scoped to allowed repositories;
+- pinned ADE executable/runtime configuration.
 
-The GitHub App needs repository pull-request write permission. Git push credentials remain separate from the App private key. Docker/ARM64 packaging and healthchecks belong to issue #26.
+Provider-specific configuration then supplies either Codex or Claude Code executable/authentication/environment values.
+
+The GitHub App needs the repository permissions required by the documented GitHub lifecycle. Git push credentials remain separate from the App private key.
+
+## Related implementation docs
+
+- [`AGENT_EXECUTORS.md`](AGENT_EXECUTORS.md)
+- [`ADE_RUNTIME.md`](ADE_RUNTIME.md)
+- [`GITHUB_WORK_CONTRACT.md`](GITHUB_WORK_CONTRACT.md)
+- [`PROJECT_ONBOARDING.md`](PROJECT_ONBOARDING.md)
+- [`OPERATIONS.md`](OPERATIONS.md)
