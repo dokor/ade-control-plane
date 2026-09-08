@@ -1,6 +1,7 @@
 import {
   ActiveTaskConflictError,
   DatabaseRecordNotFoundError,
+  TaskNotTerminalError,
   type ControlPlanePersistence,
   type V0TaskLogStream,
   type V0TaskRecord,
@@ -132,6 +133,28 @@ export async function cancelTask(
   } catch (error) {
     if (error instanceof DatabaseRecordNotFoundError) {
       throw new ControlError("NOT_FOUND", "Task was not found.");
+    }
+    throw error;
+  }
+}
+
+export async function archiveTask(
+  persistence: ControlPlanePersistence,
+  taskId: string,
+  archivedBy: string,
+  now = new Date().toISOString(),
+) {
+  if (!UUID.test(taskId)) {
+    throw new ControlError("NOT_FOUND", "Task was not found.");
+  }
+  try {
+    return await persistence.v0Tasks.archive({ taskId, archivedAt: now, archivedBy });
+  } catch (error) {
+    if (error instanceof DatabaseRecordNotFoundError) {
+      throw new ControlError("NOT_FOUND", "Task was not found.");
+    }
+    if (error instanceof TaskNotTerminalError) {
+      throw new ControlError("CONFLICT", "Only a completed, failed, or cancelled task can be archived.");
     }
     throw error;
   }

@@ -37,6 +37,9 @@ import type {
   RunnerRepository,
   ScheduleExecutionWithLeaseInput,
   V0TaskCreateInput,
+  V0TaskArchiveInput,
+  V0TaskArchiveResult,
+  V0TaskListOptions,
   V0TaskLogInput,
   V0TaskRepository,
   WorkerWakeup,
@@ -92,6 +95,7 @@ import {
   DatabaseRecordNotFoundError,
   ExecutionCompletionConflictError,
   LeaseConflictError,
+  TaskNotTerminalError,
 } from "../errors.js";
 import {
   createPool,
@@ -318,6 +322,8 @@ function mapV0Task(row: TimestampRow): V0TaskRecord {
     pullRequestUrl: row.pull_request_url === null ? null : String(row.pull_request_url),
     errorCode: row.error_code === null ? null : String(row.error_code),
     errorSummary: row.error_summary === null ? null : String(row.error_summary),
+    archivedAt: toIsoString(row.archived_at),
+    archivedBy: row.archived_by === null || row.archived_by === undefined ? null : String(row.archived_by),
     createdAt: toIsoString(row.created_at) ?? "",
     startedAt: toIsoString(row.started_at),
     finishedAt: toIsoString(row.finished_at),
@@ -2264,9 +2270,14 @@ class PostgresV0TaskRepository implements V0TaskRepository {
     return result.rows[0] ? mapV0Task(result.rows[0]) : null;
   }
 
-  public async list(limit: number): Promise<readonly V0TaskRecord[]> {
+  public async list(
+    limit: number,
+    options: V0TaskListOptions = {},
+  ): Promise<readonly V0TaskRecord[]> {
     const result = await this.pool.query<TimestampRow>(
-      "SELECT * FROM v0_tasks ORDER BY created_at DESC, id DESC LIMIT $1",
+      `SELECT * FROM v0_tasks
+       WHERE archived_at IS ${options.archived === true ? "NOT " : ""}NULL
+       ORDER BY created_at DESC, id DESC LIMIT $1`,
       [boundedLimit(limit, 100)],
     );
     return result.rows.map(mapV0Task);
@@ -2380,13 +2391,28 @@ class PostgresV0TaskRepository implements V0TaskRepository {
 
   public async requestPrRetry(taskId: string, requestedAt: string): Promise<V0TaskRecord> {
     const result = await this.pool.query<TimestampRow>(
-      "UPDATE v0_tasks SET pr_retry_requested = true, updated_at = $2 WHERE id = $1 AND status = 'FAILED' AND error_code = 'GITHUB_PR_CREATE_FAILED' RETURNING *",
+      "UPDATE v0_tasks SET pr_retry_requested = true, updated_at = $2 WHERE id = $1 AND status = 'FAILED' AND error_code = 'GITHUB_PR_CREATE_FAILED' AND archived_at IS NULL RETURNING *",
       [taskId, requestedAt],
     );
     if (result.rows[0]) return mapV0Task(result.rows[0]);
     const current = await this.getById(taskId);
     if (!current) throw new DatabaseRecordNotFoundError(`V0 task ${taskId} was not found.`);
     return current;
+  }
+
+  public async archive(input: V0TaskArchiveInput): Promise<V0TaskArchiveResult> {
+    const result = await this.pool.query<TimestampRow>(
+      `UPDATE v0_tasks SET archived_at = $2, archived_by = $3, updated_at = $2
+       WHERE id = $1 AND archived_at IS NULL AND status IN ('SUCCESS', 'FAILED', 'CANCELLED')
+       RETURNING *`,
+      [input.taskId, input.archivedAt, input.archivedBy],
+    );
+    if (result.rows[0]) return { task: mapV0Task(result.rows[0]), alreadyArchived: false };
+
+    const current = await this.getById(input.taskId);
+    if (!current) throw new DatabaseRecordNotFoundError(`V0 task ${input.taskId} was not found.`);
+    if (current.archivedAt) return { task: current, alreadyArchived: true };
+    throw new TaskNotTerminalError(input.taskId);
   }
 
   public async appendLog(input: V0TaskLogInput): Promise<V0TaskLogRecord | null> {

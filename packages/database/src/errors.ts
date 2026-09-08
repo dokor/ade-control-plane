@@ -25,3 +25,10 @@ export class ActiveTaskConflictError extends Error {
     this.name = "ActiveTaskConflictError";
   }
 }
+
+export class TaskNotTerminalError extends Error {
+  public constructor(taskId: string) {
+    super(`V0 task ${taskId} must be terminal before it can be archived.`);
+    this.name = "TaskNotTerminalError";
+  }
+}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ActiveTaskConflictError } from "../src/index.js";
+import { ActiveTaskConflictError, TaskNotTerminalError } from "../src/index.js";
 import { createTestStore } from "./helpers/postgres.js";
 
 if (!process.env.TEST_DATABASE_URL) {
@@ -55,6 +55,20 @@ if (!process.env.TEST_DATABASE_URL) {
         finishedAt: new Date().toISOString(),
       });
       assert.equal(completed.status, "CANCELLED");
+      const archived = await context.store.v0Tasks.archive({
+        taskId: first.id,
+        archivedAt: new Date().toISOString(),
+        archivedBy: "test-operator",
+      });
+      assert.equal(archived.alreadyArchived, false);
+      assert.equal(archived.task.status, "CANCELLED");
+      assert.equal((await context.store.v0Tasks.list(10)).some(({ id }) => id === first.id), false);
+      assert.equal((await context.store.v0Tasks.list(10, { archived: true }))[0]?.id, first.id);
+      assert.equal((await context.store.v0Tasks.archive({
+        taskId: first.id,
+        archivedAt: new Date().toISOString(),
+        archivedBy: "other-operator",
+      })).alreadyArchived, true);
 
       const issueTask = await context.store.v0Tasks.create({
         projectId: project.id,
@@ -63,6 +77,10 @@ if (!process.env.TEST_DATABASE_URL) {
         createdAt: new Date().toISOString(),
       });
       assert.deepEqual(issueTask.source, { type: "github-issue", issueNumber: 23 });
+      await assert.rejects(
+        () => context.store.v0Tasks.archive({ taskId: issueTask.id, archivedAt: new Date().toISOString(), archivedBy: "test-operator" }),
+        TaskNotTerminalError,
+      );
     } finally {
       await context.close();
     }

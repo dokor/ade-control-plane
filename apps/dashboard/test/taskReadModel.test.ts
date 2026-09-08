@@ -83,6 +83,22 @@ test("builds the task runway with enabled projects and the active slot", async (
   assert.equal(dashboard.tasks.length, 2);
 });
 
+test("excludes archived tasks from the operational runway and exposes an explicit audit view", async () => {
+  const archived = task({ id: "77777777-7777-4777-8777-777777777777", archivedAt: NOW, archivedBy: "operator", status: "FAILED" });
+  const persistence = createMemoryPersistence(createMemoryState({
+    projects: [project()],
+    v0Tasks: [archived, task()],
+  }));
+
+  const operational = await buildTaskDashboard(persistence);
+  assert.deepEqual(operational.tasks.map(({ id }) => id), [TASK_ID]);
+  assert.equal(operational.activeTask, null);
+
+  const audit = await buildTaskDashboard(persistence, undefined, { archived: true });
+  assert.deepEqual(audit.tasks.map(({ id }) => id), [archived.id]);
+  assert.equal(audit.tasks[0]?.archivedBy, "operator");
+});
+
 test("shows a persisted GitHub work execution in the Task runway", async () => {
   const githubWork: GithubWorkItemRecord = {
     id: "github-work-1", projectId: project().id, repositoryGithubId: "argos", contractVersion: "ade.github-work/v1",

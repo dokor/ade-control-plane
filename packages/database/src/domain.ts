@@ -460,6 +460,9 @@ export interface V0TaskRecord {
   pullRequestUrl: string | null;
   errorCode: string | null;
   errorSummary: string | null;
+  /** Terminal tasks may be hidden from operational views without erasing evidence. */
+  archivedAt?: string | null;
+  archivedBy?: string | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

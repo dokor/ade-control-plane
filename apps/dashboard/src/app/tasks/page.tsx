@@ -18,12 +18,13 @@ const TASK_HISTORY_PAGE_SIZE = 10;
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ taskPage?: string | string[] }>;
+  searchParams: Promise<{ taskPage?: string | string[]; archived?: string | string[] }>;
 }) {
   const { session, config } = await requireAuthenticatedContext("/tasks");
   const github = await loadGithubRuntime();
-  const dashboard = await buildTaskDashboard(await getPersistence(), github?.issueReader);
   const params = await searchParams;
+  const archived = params.archived === "1";
+  const dashboard = await buildTaskDashboard(await getPersistence(), github?.issueReader, { archived });
   const taskHistory = paginate(
     dashboard.tasks,
     parsePageParam(params.taskPage),
@@ -164,13 +165,16 @@ export default async function TasksPage({
       <section className="task-history-section">
         <div className="task-history-heading">
           <div>
-            <p className="task-kicker">Recent delivery trail</p>
-            <h2>Task history</h2>
+              <p className="task-kicker">{archived ? "Retained audit trail" : "Recent delivery trail"}</p>
+            <h2>{archived ? "Archived tasks" : "Task history"}</h2>
           </div>
           <span>{taskHistory.totalItems} total · page {taskHistory.page}/{taskHistory.totalPages}</span>
+          <Link className="button secondary" href={archived ? "/tasks" : "/tasks?archived=1"}>
+            {archived ? "Current tasks" : "View archived"}
+          </Link>
         </div>
         {dashboard.tasks.length === 0 ? (
-          <div className="task-history-empty">No task has been submitted yet.</div>
+          <div className="task-history-empty">{archived ? "No archived task." : "No task has been submitted yet."}</div>
         ) : (
           <>
             <div className="task-history">
@@ -180,6 +184,7 @@ export default async function TasksPage({
                   <article key={task.id} className="task-history-row">
                     <div className="task-history-status">
                       <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
+                      {task.archivedAt ? <span className="badge badge-neutral">ARCHIVED</span> : null}
                       <time dateTime={task.createdAt} title={formatInstant(task.createdAt)}>{formatHistoryDate(task.createdAt)}</time>
                     </div>
                     <div className="task-history-main">
@@ -213,13 +218,13 @@ export default async function TasksPage({
             {taskHistory.totalPages > 1 ? (
               <nav className="actions" aria-label="Task history pagination">
                 {taskHistory.hasPreviousPage ? (
-                  <Link className="button" href={`/tasks?taskPage=${taskHistory.page - 1}`}>Précédent</Link>
+                  <Link className="button" href={`/tasks?${archived ? "archived=1&" : ""}taskPage=${taskHistory.page - 1}`}>Précédent</Link>
                 ) : (
                   <span className="button" aria-disabled="true">Précédent</span>
                 )}
                 <span>Page {taskHistory.page} sur {taskHistory.totalPages}</span>
                 {taskHistory.hasNextPage ? (
-                  <Link className="button" href={`/tasks?taskPage=${taskHistory.page + 1}`}>Suivant</Link>
+                  <Link className="button" href={`/tasks?${archived ? "archived=1&" : ""}taskPage=${taskHistory.page + 1}`}>Suivant</Link>
                 ) : (
                   <span className="button" aria-disabled="true">Suivant</span>
                 )}

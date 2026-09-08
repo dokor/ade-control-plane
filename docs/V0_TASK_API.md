@@ -21,12 +21,13 @@ All endpoints require the signed Dashboard session. Mutations additionally requi
 
 | Method | Path | Behavior |
 | --- | --- | --- |
-| `GET` | `/api/tasks` | Return the 100 most recent tasks. |
+| `GET` | `/api/tasks` | Return the 100 most recent non-archived tasks. Add `?archived=1` for the explicit archived-only audit view. |
 | `POST` | `/api/tasks` | Create a pending task from `projectId` and either a prompt or a GitHub issue source; return `409` when another task is active. |
 | `POST` | `/api/projects/{id}/initialize` | Create and immediately wake a dedicated ADE initialization task for a project whose setup is required. |
 | `GET` | `/api/github/issues?projectId={id}` | Return the registered project's open ADE-managed issues whose work contract state is `ready`. |
 | `GET` | `/api/tasks/{id}` | Return task detail and up to 2,000 log records. |
 | `POST` | `/api/tasks/{id}/cancel` | Persist cancellation intent or cancel a pending task. |
+| `POST` | `/api/tasks/{id}/archive` | Archive a terminal task from operational views without deleting its detail, bounded logs, branch, PR, or GitHub lifecycle metadata. Replays return the already-archived task unchanged. |
 
 Task prompts are limited to 20,000 characters. Each log message is redacted and limited to 4 KiB, with a durable 1 MiB aggregate limit per task. Responses expose stable error codes and correlation IDs instead of raw exceptions.
 
@@ -68,7 +69,7 @@ setup check and delivery gates before creating the human-reviewed pull request.
 
 Issue titles are read-only Dashboard metadata. Issue bodies and comments are not copied into task persistence or returned by the issue API.
 
-Each `/tasks/{id}` detail page shows the durable lifecycle state, branch, safe GitHub pull-request link, execution duration, a structured chronological history and up to 2,000 sanitized log entries. The history highlights setup, Codex, command, checks, Git, GitHub and error events, including whether each step is pending, running, passed, failed or cancelled. The first recorded failure and the final delivery outcome are surfaced above the timeline; raw stdout/stderr remains available in a collapsed diagnostic panel. `PENDING` tasks can be cancelled and `RUNNING` tasks can be stopped from either page. Pull-request links are rendered only when they use HTTPS on `github.com`; external task content is always rendered as text.
+Each `/tasks/{id}` detail page shows the durable lifecycle state, branch, safe GitHub pull-request link, execution duration, a structured chronological history and up to 2,000 sanitized log entries. The history highlights setup, Codex, command, checks, Git, GitHub and error events, including whether each step is pending, running, passed, failed or cancelled. The first recorded failure and the final delivery outcome are surfaced above the timeline; raw stdout/stderr remains available in a collapsed diagnostic panel. `PENDING` tasks can be cancelled and `RUNNING` tasks can be stopped from either page. A completed, failed, or cancelled task can be archived by a mutation-authorized operator: archived tasks are excluded from dashboard and project-derived operational summaries, but their direct detail URL stays readable and displays the archival timestamp and operator. Archiving does not schedule work or mutate GitHub issues, labels, branches, or pull requests. Pull-request links are rendered only when they use HTTPS on `github.com`; external task content is always rendered as text.
 
 ## Recovery
 

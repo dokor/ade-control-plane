@@ -164,13 +164,18 @@ export interface TaskExecutionSummary {
   completedEvents: number;
 }
 
+export interface TaskDashboardOptions {
+  archived?: boolean;
+}
+
 export async function buildTaskDashboard(
   persistence: TaskPersistence,
   issueReader?: Pick<GithubIssueReader, "getIssue">,
+  options: TaskDashboardOptions = {},
 ): Promise<TaskDashboardModel> {
   const [projects, tasks] = await Promise.all([
     persistence.projects.list(),
-    persistence.v0Tasks.list(30),
+    persistence.v0Tasks.list(30, { archived: options.archived === true }),
   ]);
   const [workItems, executionGroups] = await Promise.all([
     persistence.githubWork.listForProjects(projects.map(({ id }) => id)),
@@ -864,6 +869,7 @@ export function sanitizeTaskRecord(task: V0TaskRecord): V0TaskRecord {
       : task.source,
     prompt: sanitizeText(task.prompt, 20_000),
     errorSummary: task.errorSummary ? sanitizeText(task.errorSummary) : null,
+    archivedBy: task.archivedBy ? sanitizeText(task.archivedBy, 256) : null,
   };
 }
 
