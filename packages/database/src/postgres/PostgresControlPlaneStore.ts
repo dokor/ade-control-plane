@@ -740,8 +740,10 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
       if (item.execution_ref && !ids.includes(String(item.execution_ref))) return reject("ambiguous");
       const workflows = await client.query<TimestampRow>("SELECT * FROM ade_delivery_workflows WHERE (project_id = $1 AND issue_number = $2) OR execution_id = ANY($3::uuid[]) FOR UPDATE", [input.projectId, input.issueNumber, ids]);
       if (workflows.rows.some((row) => String(row.project_id) !== input.projectId || Number(row.issue_number) !== input.issueNumber || !ids.includes(String(row.execution_id)))) return reject("ambiguous");
-      if (executions.rows.some((row) => !["succeeded", "failed", "cancelled"].includes(String(row.status)))) return reject("active");
-      if (workflows.rows.some((row) => row.reconciliation_required === true)) return reject("active");
+      const hasUnknownExecution = executions.rows.some((row) => String(row.status) === "unknown");
+      const discardUnconfirmed = input.discardUnconfirmed === true && hasUnknownExecution;
+      if (executions.rows.some((row) => !["succeeded", "failed", "cancelled", "unknown"].includes(String(row.status))) || (hasUnknownExecution && !discardUnconfirmed)) return reject("active");
+      if (workflows.rows.some((row) => row.reconciliation_required === true) && !discardUnconfirmed) return reject("active");
       if (item.state === "running" && ids.length === 0) return reject("active");
       const lease = await queryOptional(client, "SELECT 1 FROM execution_leases WHERE released_at IS NULL AND (execution_id = ANY($1::uuid[]) OR lease_key = $2)", [ids, `github-work:${input.projectId}:${input.issueNumber}`]);
       if (lease) return reject("active");
@@ -758,14 +760,15 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
       if (sharedDecision) return reject("ambiguous");
       await client.query("INSERT INTO github_work_removals (project_id, issue_number, removed_at, removed_by) VALUES ($1, $2, $3, $4)", [input.projectId, input.issueNumber, input.occurredAt, input.actorRef]);
       // FK cascades remove workflow transitions, leases and usage evidence;
-      // audit rows survive with execution_id SET NULL.
+      // audit rows (including the unreconciled outcome) survive with
+      // execution_id SET NULL.
       await client.query("DELETE FROM executions WHERE id = ANY($1::uuid[])", [ids]);
       await client.query("DELETE FROM v0_tasks WHERE id = ANY($1::uuid[])", [tasks.rows.map((row) => String(row.id))]);
       await client.query("DELETE FROM ade_decisions WHERE project_id = $1 AND decision_ref = ANY($2::text[])", [input.projectId, decisions]);
       await client.query("DELETE FROM github_work_items WHERE id = $1", [input.workId]);
-      await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", action: "github-work.removed",
+      await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", action: discardUnconfirmed ? "github-work.discarded-unconfirmed" : "github-work.removed",
         severity: "info", actorType: "human", actorRef: input.actorRef, projectId: input.projectId, result: "removed",
-        metadata: { issueNumber: input.issueNumber, workId: input.workId, executionIds: ids, taskIds: tasks.rows.map((row) => String(row.id)), decisionRefs: decisions, githubPreserved: true } });
+        metadata: { issueNumber: input.issueNumber, workId: input.workId, executionIds: ids, taskIds: tasks.rows.map((row) => String(row.id)), decisionRefs: decisions, githubPreserved: true, discardedUnconfirmed: discardUnconfirmed } });
       return "removed";
     });
   }

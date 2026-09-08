@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { removeGithubWork, REMOVE_GITHUB_WORK_CONFIRMATION } from "../src/lib/githubWorkRemoval.js";
+import { DISCARD_UNCONFIRMED_GITHUB_WORK_CONFIRMATION, removeGithubWork, REMOVE_GITHUB_WORK_CONFIRMATION } from "../src/lib/githubWorkRemoval.js";
 import { admitGithubIssue } from "../src/lib/githubIssueAdmission.js";
 import { readGithubWorkMetadata, upsertGithubWorkMetadata, DEFAULT_GITHUB_WORK_METADATA, type GithubIssueLifecycleClient } from "@ade-control-plane/github";
 import { project } from "./helpers/fixtures.js";
@@ -16,6 +16,8 @@ test("requires mutation rights and explicit confirmation without invoking persis
   await assert.rejects(removeGithubWork(repository, identity, { ...input, issueNumber: -1 }), /INVALID_COMMAND/);
   assert.match(REMOVE_GITHUB_WORK_CONFIRMATION, /GitHub issue, branches and pull requests will NOT be deleted/);
   assert.match(REMOVE_GITHUB_WORK_CONFIRMATION, /cancelled\/reconciled first/);
+  assert.match(DISCARD_UNCONFIRMED_GITHUB_WORK_CONFIRMATION, /no execution is active/);
+  await assert.rejects(removeGithubWork(repository, identity, { ...input, discardUnconfirmed: "yes" }), /INVALID_COMMAND/);
 });
 
 test("uses selected work identity and maps idempotency and safe rejections", async () => {
@@ -27,6 +29,12 @@ test("uses selected work identity and maps idempotency and safe rejections", asy
     assert.equal(answer.alreadyRemoved, result === "already-removed");
   }
   for (const result of ["active", "ambiguous", "not-found"] as const) await assert.rejects(removeGithubWork({ remove: async () => result }, identity, input), result === "not-found" ? /NOT_FOUND/ : /CONFLICT/);
+});
+
+test("passes an explicit operator discard request without weakening normal removal", async () => {
+  let request: { discardUnconfirmed?: boolean } | undefined;
+  await removeGithubWork({ remove: async (received) => { request = received; return "removed"; } }, identity, { ...input, discardUnconfirmed: true });
+  assert.equal(request?.discardUnconfirmed, true);
 });
 
 test("explicit readmission resets only lifecycle metadata, preserving issue prose and dependencies", async () => {

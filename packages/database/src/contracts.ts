@@ -319,7 +319,19 @@ export interface GithubWorkReconciliationInput {
  * Reconciliation replaces presence atomically; it does not copy issue prose.
  */
 export interface GithubWorkRepository {
-  remove(input: { projectId: string; issueNumber: number; workId: string; actorRef: string; occurredAt: string }): Promise<"removed" | "already-removed" | "not-found" | "active" | "ambiguous">;
+  remove(input: {
+    projectId: string;
+    issueNumber: number;
+    workId: string;
+    actorRef: string;
+    occurredAt: string;
+    /**
+     * An operator may discard a work item whose only non-terminal evidence is
+     * an already-released, unreconciled execution. This never permits removal
+     * while an execution or lease could still be live.
+     */
+    discardUnconfirmed?: boolean;
+  }): Promise<"removed" | "already-removed" | "not-found" | "active" | "ambiguous">;
   getRemoval(projectId: string, issueNumber: number): Promise<string | null>;
   readmit(input: { projectId: string; issueNumber: number; removedAt: string; actorRef: string; occurredAt: string }): Promise<boolean>;
   getProfile(projectId: string): Promise<GithubWorkProfileRecord | null>;
