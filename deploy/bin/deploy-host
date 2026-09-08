@@ -27,7 +27,7 @@ esac
 # The installed bootstrap is intentionally small and stable. It only admits a
 # revision that belongs to the reviewed main history, selects that exact tree,
 # then delegates to the versioned deployment implementation from that revision.
-git fetch --quiet --no-tags origin main || die "could not refresh origin/main"
+git fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main || die "could not refresh origin/main"
 git cat-file -e "${requested_sha}^{commit}" 2>/dev/null || die "requested commit is not present in origin/main history"
 git merge-base --is-ancestor "$requested_sha" refs/remotes/origin/main || die "requested commit is not in origin/main history"
 git checkout --detach --force "$requested_sha" >/dev/null || die "could not select requested commit"
