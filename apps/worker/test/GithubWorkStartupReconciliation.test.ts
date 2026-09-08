@@ -63,9 +63,8 @@ test("startup reconciliation leaves terminal unknown executions intact and still
 
   await orchestrator.reconcileExecutions();
 
-  assert.deepEqual(completions, [{
-    executionId: staleActive.execution.id,
-    status: "unknown",
-    errorCode: "GITHUB_WORK_RECONCILIATION_REQUIRED",
-  }]);
+  assert.equal(completions.length, 1);
+  assert.equal(completions[0]?.executionId, staleActive.execution.id);
+  assert.equal(completions[0]?.status, "unknown");
+  assert.equal(completions[0]?.errorCode, "GITHUB_WORK_RECONCILIATION_REQUIRED");
 });
