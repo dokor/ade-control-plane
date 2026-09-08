@@ -52,6 +52,51 @@ runtime/config/context status, rule-pack and selected-profile identifiers,
 review status and attempt count.
 Raw provider output and chain-of-thought are not persisted.
 
+## Repository code-health delivery policy
+
+This repository uses one `normal` implementation pass followed by four
+repository-selected specialist reviews. ADE owns the selection in
+`ade.config.json`; the Control Plane consumes the resolved delivery contract and
+must not infer profiles from issue wording.
+
+| Profile | Required review concern |
+| --- | --- |
+| `architecture-maintainability` | Check boundaries, coupling, duplication, clarity, testability and whether the change remains the smallest coherent design. |
+| `security` | Check trust boundaries, authorization, input handling, secret/log exposure, process execution and whether privileges or attack surface expanded safely. |
+| `performance-resource-lifecycle` | Check bounded work, I/O and database behavior, process cancellation, cleanup, listener/timer/connection lifetime and likely hot-path regressions. |
+| `final-quality` | Reconcile the implementation, tests, documentation and earlier evidence against the acceptance criteria; identify omissions, regressions and misleading success states. |
+
+ADE 0.11.0 emits a profile invocation for every configured profile. The
+invocation contains the profile ID and a bounded read-only review instruction;
+the resolved `ade.delivery-plan/v1` provenance also contains all selected
+profile IDs and validation rule IDs. This is the durable link between these
+repository-owned concerns and execution evidence. Profile output must use the
+worker's bounded finding contract; raw reasoning is neither requested nor
+stored.
+
+Deterministic validation has three layers: ADE validates the configuration,
+the `development/service-size` rule checks maintainability hotspots in this
+repository's executor and orchestrator files, and the existing `typecheck` and
+`test` tools remain configured for applicable code changes. A service-size
+warning is review evidence, not an automatic architectural failure; type or
+test failures remain blocking.
+
+`po-pm` is intentionally separate from implementation and review profiles. ADE
+may select it only when an issue genuinely lacks the configured minimum
+acceptance criteria. A ready issue remains eligible for `develop`; callers must
+not remove detail, labels or metadata to force enrichment.
+
+To audit the policy locally, use an eligible representative issue as standard
+input to `ade delivery plan --json`. Confirm that the result is `supported`, the
+lifecycle action is `develop`, the four reviews each contain an
+`ade.profile-invocation/v1`, `validations` includes
+`development/service-size`, and provenance names the same profiles/rule and
+`ade.config.json` source. Then run `ade review --staged --json` after preparing
+the audit change. `ade config validate` checks configuration shape; delivery
+plan resolution additionally returns `UNKNOWN_PROFILE` or `UNKNOWN_RULE` for a
+missing referenced name, with no generic fallback. Repository tests pin these
+references so accidental removal or renaming fails CI.
+
 The supported 0.11.0 contract used by Control Plane is:
 
 - Node.js 22 or newer;
