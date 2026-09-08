@@ -54,7 +54,7 @@ test("prebuilt deployment keeps migration ordering, immutable runtime and stable
   assert.doesNotMatch(deploy, /"\$\{compose\[@\]\}" run[^\n]*--no-build/);
   assert.ok(deploy.indexOf("database migration failed") < deploy.indexOf('up -d --no-build --no-deps'));
 
-  assert.match(host, /git fetch --quiet --no-tags origin main/);
+  assert.match(host, /git fetch --quiet --no-tags origin \+refs\/heads\/main:refs\/remotes\/origin\/main/);
   assert.match(host, /git merge-base --is-ancestor "\$requested_sha" refs\/remotes\/origin\/main/);
   assert.match(host, /git checkout --detach --force "\$requested_sha"/);
   assert.match(host, /exec bash "\$APP_DIR\/deploy\/bin\/deploy" "\$@"/);
