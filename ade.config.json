@@ -17,6 +17,16 @@
     "typecheck",
     "test"
   ],
+  "rules": [
+    {
+      "id": "development/service-size",
+      "severity": "warn",
+      "appliesTo": [
+        "**/*Executor.ts",
+        "**/*Orchestrator.ts"
+      ]
+    }
+  ],
   "packs": [
     "development"
   ],
@@ -38,6 +48,34 @@
       "context": "compact",
       "allowProvider": true,
       "tokenBudget": 12000,
+      "privacy": "strict"
+    },
+    "architecture-maintainability": {
+      "mode": "assisted",
+      "context": "full",
+      "allowProvider": true,
+      "tokenBudget": 10000,
+      "privacy": "strict"
+    },
+    "security": {
+      "mode": "assisted",
+      "context": "compact",
+      "allowProvider": true,
+      "tokenBudget": 8000,
+      "privacy": "strict"
+    },
+    "performance-resource-lifecycle": {
+      "mode": "assisted",
+      "context": "full",
+      "allowProvider": true,
+      "tokenBudget": 10000,
+      "privacy": "strict"
+    },
+    "final-quality": {
+      "mode": "assisted",
+      "context": "compact",
+      "allowProvider": true,
+      "tokenBudget": 8000,
       "privacy": "strict"
     }
   },
@@ -62,8 +100,15 @@
     "retryPolicy": "reconcile-first",
     "deliveryPlan": {
       "implementationProfile": "normal",
-      "reviewProfiles": [],
-      "validationRuleIds": [],
+      "reviewProfiles": [
+        "architecture-maintainability",
+        "security",
+        "performance-resource-lifecycle",
+        "final-quality"
+      ],
+      "validationRuleIds": [
+        "development/service-size"
+      ],
       "maxCorrectionAttempts": 1,
       "requireHumanApprovalBeforePublish": false
     }

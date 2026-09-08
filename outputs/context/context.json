@@ -85,7 +85,12 @@
       "script": "pnpm -r --if-present typecheck && tsc --noEmit -p runner/tsconfig.json"
     }
   ],
-  "conventions": [],
+  "conventions": [
+    {
+      "id": "development/service-size",
+      "severity": "warn"
+    }
+  ],
   "entryPoints": [],
   "sensitiveZones": [
     ".env*",
@@ -94,5 +99,5 @@
     "**/secrets.*"
   ],
   "adrs": [],
-  "fingerprint": "50e2d467139a4e6904373eef67c7b6f826c4a4e8f37731caf5ca81708b7d9afd"
+  "fingerprint": "e39bd6c111d74fea6b00cfa4a8661bac7220113e871d6b3dfbb5d5ffd3a0ea6b"
 }

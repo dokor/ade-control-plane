@@ -4,7 +4,7 @@
 > No secrets, environment values or file contents are included.
 
 - Schema version: 1
-- Fingerprint: `50e2d467139a4e6904373eef67c7b6f826c4a4e8f37731caf5ca81708b7d9afd`
+- Fingerprint: `e39bd6c111d74fea6b00cfa4a8661bac7220113e871d6b3dfbb5d5ffd3a0ea6b`
 
 ## Stack
 
@@ -41,7 +41,7 @@
 
 ## Conventions
 
-- none
+- `development/service-size` (warn):
 
 ## Entry Points
 
