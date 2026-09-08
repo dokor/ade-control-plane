@@ -1,4 +1,4 @@
-ARG ADE_VERSION=0.11.0
+ARG ADE_VERSION=0.12.0
 
 FROM node:22-bookworm-slim AS workspace
 
