@@ -90,20 +90,28 @@ test("joins live issue details with durable queue intent while keeping stale wor
       listIssues: async () => [
         { number: 31, title: "First in the queue", state: "open", url: "https://github.com/dokor/argos/issues/31", updatedAt: NOW, excerpt: "A concise, safe description." },
         { number: 32, title: "Held stale work", state: "open", url: "https://github.com/dokor/argos/issues/32", updatedAt: NOW },
+        { number: 33, title: "Unknown work", state: "open", url: "https://github.com/dokor/argos/issues/33", updatedAt: NOW },
+        { number: 34, title: "No milestone", state: "open", url: "https://github.com/dokor/argos/issues/34", updatedAt: NOW },
       ],
       getIssue: async () => null,
     },
   }, [
-    { id: "work-31", projectId: "11111111-1111-4111-8111-111111111111", repositoryGithubId: "123", contractVersion: "ade.github-work/v1", issueNumber: 31, issueUrl: "https://github.com/dokor/argos/issues/31", state: "ready", priority: 10, dependsOn: [], retryPolicy: "safe", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: 14, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T11:00:00.000Z", present: true },
+    { id: "work-31", projectId: "11111111-1111-4111-8111-111111111111", repositoryGithubId: "123", contractVersion: "ade.github-work/v1", issueNumber: 31, issueUrl: "https://github.com/dokor/argos/issues/31", state: "ready", priority: 10, dependsOn: [], retryPolicy: "safe", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: 14, milestone: "Release 2", sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T11:00:00.000Z", present: true },
     { id: "work-32", projectId: "11111111-1111-4111-8111-111111111111", repositoryGithubId: "123", contractVersion: "ade.github-work/v1", issueNumber: 32, issueUrl: "https://github.com/dokor/argos/issues/32", state: "ready", priority: 100, dependsOn: [], retryPolicy: "safe", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T09:00:00.000Z", present: true },
+    { id: "work-34", projectId: "11111111-1111-4111-8111-111111111111", repositoryGithubId: "123", contractVersion: "ade.github-work/v1", issueNumber: 34, issueUrl: "https://github.com/dokor/argos/issues/34", state: "ready", priority: 5, dependsOn: [], retryPolicy: "safe", humanDecisionRef: null, executionRef: null, branchName: null, pullRequestNumber: null, milestone: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T11:00:00.000Z", present: true },
   ], [
     { projectId: "11111111-1111-4111-8111-111111111111", issueNumber: 31, runWhenAvailable: true, queuePosition: 1, updatedAt: NOW, updatedBy: "operator" },
     { projectId: "11111111-1111-4111-8111-111111111111", issueNumber: 32, runWhenAvailable: false, queuePosition: null, updatedAt: NOW, updatedBy: "operator" },
+    { projectId: "11111111-1111-4111-8111-111111111111", issueNumber: 34, runWhenAvailable: false, queuePosition: null, updatedAt: NOW, updatedBy: "operator" },
   ], NOW);
 
-  assert.deepEqual(result.map(({ number }) => number), [31, 32]);
+  assert.deepEqual(result.map(({ number }) => number), [31, 32, 34, 33]);
   assert.equal(result[0]?.description, "A concise, safe description.");
   assert.equal(result[0]?.pullRequestUrl, "https://github.com/dokor/argos/pull/14");
+  assert.equal(result[0]?.milestone, "Release 2");
   assert.equal(result[1]?.projectionState, "stale");
   assert.equal(result[1]?.runWhenAvailable, false);
+  assert.equal(result[2]?.milestone, null);
+  assert.equal(result[2]?.projectionState, "current");
+  assert.equal(result[3]?.projectionState, "unknown");
 });

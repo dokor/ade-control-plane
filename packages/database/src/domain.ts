@@ -119,6 +119,8 @@ export interface AdeDeliveryWorkflowRecord {
   branchName: string | null;
   headSha: string | null;
   pullRequestNumber: number | null;
+  /** GitHub milestone title captured by reconciliation; null confirms none. */
+  milestone?: string | null;
   pullRequestUrl: string | null;
   retryClassification: string | null;
   reconciliationRequired: boolean;

@@ -31,6 +31,7 @@ function issue(overrides: Record<string, unknown> = {}): Record<string, unknown>
     number: 42,
     html_url: "https://github.com/dokor/alpha/issues/42",
     updated_at: "2026-08-28T09:59:00.000Z",
+    milestone: { title: "Release 2" },
     body: [
       "Human context can stay outside the machine contract.",
       "<!-- ade.github-work/v1 {\"state\":\"ready\",\"priority\":80,\"dependsOn\":[7],\"retryPolicy\":\"reconcile-first\",\"humanDecisionRef\":null,\"executionRef\":null,\"branchName\":null,\"pullRequestNumber\":null} -->",
@@ -67,10 +68,15 @@ test("normalizes only the strict versioned issue metadata", () => {
     executionRef: null,
     branchName: null,
     pullRequestNumber: null,
+    milestone: "Release 2",
     sourceUpdatedAt: "2026-08-28T09:59:00.000Z",
     observedAt: "2026-08-28T10:00:00.000Z",
     expiresAt: "2026-08-28T10:05:00.000Z",
   });
+});
+
+test("records a confirmed absence of GitHub milestone", () => {
+  assert.equal(normalizeGithubWorkItem(issue({ milestone: null }), profile(), observedAt)?.milestone, null);
 });
 
 test("makes GitHub work freshness explicit", () => {

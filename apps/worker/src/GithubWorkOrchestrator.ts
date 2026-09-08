@@ -576,6 +576,7 @@ function toItemInput(projectId: string, item: GithubWorkItem) {
     issueNumber: item.issueNumber, issueUrl: item.issueUrl, state: item.state, priority: item.priority,
     dependsOn: item.dependsOn, retryPolicy: item.retryPolicy, humanDecisionRef: item.humanDecisionRef,
     executionRef: item.executionRef, branchName: item.branchName, pullRequestNumber: item.pullRequestNumber,
+    milestone: item.milestone ?? null,
     sourceUpdatedAt: item.sourceUpdatedAt, observedAt: item.observedAt, expiresAt: item.expiresAt };
 }
 

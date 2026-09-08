@@ -78,6 +78,7 @@ export interface AdeDeliveryWorkflowTransitionInput {
   branchName?: string | null;
   headSha?: string | null;
   pullRequestNumber?: number | null;
+  milestone?: string | null;
   pullRequestUrl?: string | null;
   retryClassification?: string | null;
   reconciliationRequired?: boolean;

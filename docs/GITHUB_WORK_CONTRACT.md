@@ -69,6 +69,7 @@ The adapter produces `GithubWorkItem` with the validated fields above plus:
 
 - repository numeric ID/owner/name;
 - issue number and HTTPS URL;
+- GitHub milestone title, or `null` when its absence was observed;
 - GitHub `updated_at` as `sourceUpdatedAt`;
 - control-plane `observedAt` and a bounded `expiresAt` freshness deadline.
 

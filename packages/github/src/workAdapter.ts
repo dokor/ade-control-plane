@@ -50,6 +50,8 @@ export interface GithubWorkItem {
   executionRef: string | null;
   branchName: string | null;
   pullRequestNumber: number | null;
+  /** GitHub milestone title observed during the same reconciliation as work state. */
+  milestone?: string | null;
   sourceUpdatedAt: string;
   observedAt: string;
   expiresAt: string;
@@ -182,6 +184,7 @@ export function normalizeGithubWorkItem(
   const body = issue.body;
   const url = issue.html_url;
   const sourceUpdatedAt = issue.updated_at;
+  const milestone = normalizeMilestoneTitle(issue.milestone);
   if (!validIssueNumber(number) || typeof body !== "string" ||
       Buffer.byteLength(body, "utf8") > MAX_ISSUE_BODY_BYTES ||
       typeof url !== "string" || !isSafeHttpsUrl(url) ||
@@ -205,10 +208,18 @@ export function normalizeGithubWorkItem(
     executionRef: metadata.executionRef,
     branchName: metadata.branchName,
     pullRequestNumber: metadata.pullRequestNumber,
+    milestone,
     sourceUpdatedAt,
     observedAt: observedAtIso,
     expiresAt: new Date(observedAt.getTime() + safeFreshnessMs).toISOString(),
   };
+}
+
+function normalizeMilestoneTitle(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (!isRecord(value) || typeof value.title !== "string") return null;
+  const title = value.title.trim();
+  return title.length > 0 && title.length <= 500 ? title : null;
 }
 
 /** Freshness is explicit so callers never silently schedule a stale GitHub read. */
