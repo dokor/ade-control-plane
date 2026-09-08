@@ -170,6 +170,17 @@ test("does not acquire or retry a lease for unchanged waiting work", async () =>
   assert.equal(executions.length, 0);
 });
 
+test("does not acquire a lease while an explicit dependency is incomplete", async () => {
+  const { orchestrator, dispatches, executions } = harness([
+    { ...work("alpha", 2, "ready", 90), dependsOn: [1] },
+  ]);
+
+  const result = await orchestrator.runCycle();
+  assert.equal(result.outcome, "idle");
+  assert.equal(dispatches.length, 0);
+  assert.equal(executions.length, 0);
+});
+
 test("passes only the exact normalized issue and declared skills to the agent", async () => {
   const { orchestrator, dispatches } = harness([work("alpha", 9, "ready", 80)]);
   await orchestrator.runCycle();
