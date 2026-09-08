@@ -16,7 +16,7 @@ async function fixture() {
     sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: LATER, ...overrides });
   const reconcile = (...items: GithubWorkItemInput[]) => context.store.githubWork.reconcile({ profile, items });
   const work = (await reconcile(item(1), item(2)))[0]!;
-  const remove = (workId = work.id) => context.store.githubWork.remove({ projectId: project.id, issueNumber: 1, workId, actorRef: "operator:test", occurredAt: NOW });
+  const remove = (workId = work.id, discardUnconfirmed = false) => context.store.githubWork.remove({ projectId: project.id, issueNumber: 1, workId, actorRef: "operator:test", occurredAt: NOW, discardUnconfirmed });
   const schedule = (issueNumber = 1, expectedGithubWorkId?: string): ScheduleExecutionWithLeaseInput => ({
     ...(expectedGithubWorkId ? { expectedGithubWorkId } : {}),
     execution: { projectId: project.id, capability: "github-work.codex", workRef: `github:issue:${issueNumber}`, requestedAt: NOW },
@@ -84,6 +84,18 @@ for (const status of ["leased", "running", "unknown"] as const) test(`rejects ${
     assert.equal(await c.remove(), "active");
     assert.ok(await c.store.executions.getById(scheduled.execution.id));
     assert.equal(await c.store.githubWork.getRemoval(c.project.id, 1), null);
+  } finally { await c.close(); }
+});
+
+test("an explicit operator discard removes an unknown outcome only after its lease is released", { skip: !enabled }, async () => {
+  const c = await fixture();
+  try {
+    const scheduled = await c.store.executions.scheduleWithLease(c.schedule()); assert.ok(scheduled);
+    await c.store.executions.complete({ executionId: scheduled.execution.id, status: "unknown", finishedAt: LATER, releaseReason: "timeout" });
+    assert.equal(await c.remove(), "active");
+    assert.equal(await c.remove(c.work.id, true), "removed");
+    const audits = await c.store.auditEvents.listForProject(c.project.id, 100);
+    assert.ok(audits.some((entry) => entry.action === "github-work.discarded-unconfirmed"));
   } finally { await c.close(); }
 });
 
