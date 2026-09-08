@@ -151,3 +151,29 @@ test("selects only fresh GitHub work with explicit completed dependencies", () =
   ], "2026-08-27T10:00:00.000Z");
   assert.equal(stale.availability, "stale");
 });
+
+test("skips waiting work and selects the next eligible issue in the same project", () => {
+  const selection = selectGithubWork([
+    { issueNumber: 1, state: "waiting-human", priority: 100, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+    { issueNumber: 2, state: "ready", priority: 90, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+  ], "2026-08-27T10:00:00.000Z");
+
+  assert.equal(selection.availability, "ready");
+  assert.equal(selection.item?.issueNumber, 2);
+});
+
+test("keeps missing dependencies visible as waiting and reconsiders work once they complete", () => {
+  const dependent = { issueNumber: 2, state: "ready" as const, priority: 90, dependsOn: [1], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" };
+  const waiting = selectGithubWork([dependent], "2026-08-27T10:00:00.000Z");
+
+  assert.equal(waiting.availability, "waiting_dependency");
+  assert.equal(waiting.item?.issueNumber, 2);
+  assert.match(waiting.reason, /#1/);
+
+  const resumed = selectGithubWork([
+    { ...dependent, issueNumber: 1, state: "completed", priority: 100, dependsOn: [] },
+    dependent,
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(resumed.availability, "ready");
+  assert.equal(resumed.item?.issueNumber, 2);
+});

@@ -53,6 +53,11 @@ The JSON object has exactly these fields:
 | `branchName` | safe Git ref or `null` | resulting work branch |
 | `pullRequestNumber` | positive integer or `null` | associated GitHub PR |
 
+An item remains durably `ready` while one of its `dependsOn` issues is not
+explicitly `completed`. The scheduler derives and exposes `waiting-dependency`
+from those persisted references, does not acquire a lease for it, and considers
+it again after reconciliation records the dependency as completed.
+
 Unknown fields, duplicate markers, malformed values, self-dependencies,
 non-HTTPS issue links and oversized bodies are rejected from the normalized
 queue. Missing/invalid metadata makes an issue ineligible rather than guessing

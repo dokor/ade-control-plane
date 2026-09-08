@@ -48,7 +48,7 @@ export type RunnerState = "online" | "draining" | "offline" | "disabled";
 export type WorkCost = "short" | "long";
 export type MemoryClass = "small" | "medium" | "large";
 /** Legacy name retained while GitHub work becomes the scheduling source. */
-export type AdeAvailability = "ready" | "unknown" | "stale" | "waiting_human" | "reconciling" | "blocked" | "completed" | "failed";
+export type AdeAvailability = "ready" | "unknown" | "stale" | "waiting_human" | "waiting_dependency" | "reconciling" | "blocked" | "completed" | "failed";
 export type SchedulerQuotaState = "normal" | "throttled" | "draining" | "blocked" | "unknown";
 
 export interface SchedulerRunner {
@@ -190,7 +190,7 @@ export const DEFAULT_SCHEDULER_POLICY: SchedulerPolicy = {
 
 export type ExclusionCode =
   | "global-paused" | "global-safe-mode" | "project-paused" | "project-disabled"
-  | "ade-not-ready" | "no-runnable-work" | "waiting-human" | "reconciling"
+  | "ade-not-ready" | "no-runnable-work" | "waiting-human" | "waiting-dependency" | "reconciling"
   | "reconcile-first"
   | "work-blocked" | "work-completed" | "work-failed"
   | "security-blocked" | "quota-blocked" | "quota-unknown" | "quota-throttled"
@@ -306,6 +306,7 @@ function candidateExclusion(candidate: SchedulerCandidate, quota: SchedulerQuota
   if (candidate.project.controlState === "disabled") return "project-disabled";
   if (candidate.securityBlocked) return "security-blocked";
   if (candidate.adeAvailability === "waiting_human") return "waiting-human";
+  if (candidate.adeAvailability === "waiting_dependency") return "waiting-dependency";
   if (candidate.adeAvailability === "reconciling") return "reconciling";
   if (candidate.requiresReconciliation) return "reconcile-first";
   if (candidate.adeAvailability === "blocked") return "work-blocked";
@@ -366,9 +367,9 @@ export interface GithubWorkSelection {
 
 /**
  * Selects only explicit, fresh GitHub contract data. Dependencies must be
- * present and explicitly completed; prose, labels and issue order are never
- * consulted. A waiting-human item cannot make another project's ready item
- * ineligible because selection is per project.
+ * present and explicitly completed; prose and labels are never consulted. A
+ * waiting item or an unresolved dependency cannot make a lower-ranked ready
+ * item in the same or another project ineligible.
  */
 export function selectGithubWork(
   items: readonly GithubWorkSchedulingItem[],
@@ -394,5 +395,21 @@ export function selectGithubWork(
   if (failed) return { availability: "failed", item: failed, reason: `GitHub issue #${failed.issueNumber} is marked failed.` };
   const blocked = current.find(({ state }) => state === "blocked");
   if (blocked) return { availability: "blocked", item: blocked, reason: `GitHub issue #${blocked.issueNumber} is blocked by its explicit contract.` };
+  const waitingDependency = current
+    .filter((item) => item.state === "ready")
+    .map((item) => ({
+      item,
+      dependencies: item.dependsOn.filter((dependency) => byIssue.get(dependency)?.state !== "completed"),
+    }))
+    .filter(({ dependencies }) => dependencies.length > 0)
+    .toSorted((left, right) => right.item.priority - left.item.priority || left.item.issueNumber - right.item.issueNumber)[0];
+  if (waitingDependency) {
+    const dependencyRefs = waitingDependency.dependencies.map((dependency) => `#${dependency}`).join(", ");
+    return {
+      availability: "waiting_dependency",
+      item: waitingDependency.item,
+      reason: `GitHub issue #${waitingDependency.item.issueNumber} is waiting for dependency ${dependencyRefs} to complete.`,
+    };
+  }
   return { availability: "completed", item: null, reason: "All active GitHub work items are completed." };
 }

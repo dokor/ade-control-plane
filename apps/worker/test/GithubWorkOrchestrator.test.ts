@@ -145,6 +145,42 @@ test("continues another project when one GitHub issue waits for a human", async 
   assert.equal(dispatches[0]?.work.issueNumber, 3);
 });
 
+test("continues the next issue in one project when the first issue waits for a human", async () => {
+  const { orchestrator, dispatches, executions } = harness([
+    work("alpha", 1, "waiting-human", 100),
+    work("alpha", 2, "ready", 90),
+  ]);
+
+  const result = await orchestrator.runCycle();
+  assert.equal(result.outcome, "dispatched", JSON.stringify(result));
+  assert.equal(dispatches[0]?.work.issueNumber, 2);
+  assert.equal(executions.filter(({ workRef }) => workRef === "github:issue:1").length, 0);
+});
+
+test("does not acquire or retry a lease for unchanged waiting work", async () => {
+  const { orchestrator, dispatches, executions } = harness([
+    work("alpha", 1, "waiting-human", 100),
+  ]);
+
+  const first = await orchestrator.runCycle();
+  const second = await orchestrator.runCycle();
+  assert.equal(first.outcome, "idle");
+  assert.equal(second.outcome, "idle");
+  assert.equal(dispatches.length, 0);
+  assert.equal(executions.length, 0);
+});
+
+test("does not acquire a lease while an explicit dependency is incomplete", async () => {
+  const { orchestrator, dispatches, executions } = harness([
+    { ...work("alpha", 2, "ready", 90), dependsOn: [1] },
+  ]);
+
+  const result = await orchestrator.runCycle();
+  assert.equal(result.outcome, "idle");
+  assert.equal(dispatches.length, 0);
+  assert.equal(executions.length, 0);
+});
+
 test("passes only the exact normalized issue and declared skills to the agent", async () => {
   const { orchestrator, dispatches } = harness([work("alpha", 9, "ready", 80)]);
   await orchestrator.runCycle();
