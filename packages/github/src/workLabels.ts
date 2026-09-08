@@ -25,6 +25,7 @@ export function labelsForGithubWorkState(
     case "waiting-human": return pullRequestNumber === null ? ["waiting-human"] : ["waiting-human", "pr-ready"];
     case "blocked":
     case "failed": return ["blocked"];
+    case "cancelled": return [];
     case "completed": return ["backlog-refined"];
   }
 }

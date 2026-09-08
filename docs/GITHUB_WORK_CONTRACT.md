@@ -44,7 +44,7 @@ The JSON object has exactly these fields:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `state` | enum | `ready`, `running`, `waiting-human`, `blocked`, `completed`, `failed` |
+| `state` | enum | `ready`, `running`, `waiting-human`, `blocked`, `completed`, `failed`, `cancelled` |
 | `priority` | integer 0–100 | explicit scheduler priority |
 | `dependsOn` | unique issue numbers | explicit dependencies; never inferred from text or labels |
 | `retryPolicy` | enum | `safe`, `reconcile-first`, `never` |
@@ -99,6 +99,11 @@ The worker treats every code-agent run as long work for quota-draining safety.
 It uses a deterministic `github-work:<project-id>:<issue-number>` lease before
 starting Codex. A restart leaves an active lease visible for reconciliation;
 it never starts a second execution for the same issue implicitly.
+
+An operator cancellation transitions the correlated marker to `cancelled` and
+removes all ADE-owned workflow labels, including `in-progress`. This state is
+terminal and scheduler-ineligible. A deliberate operator retry must update the
+marker to `ready`; reconciliation alone never turns cancelled work runnable.
 
 When an item changes to `waiting-human`, the worker may update one
 project-scoped bot comment on that issue. The notification is a pointer to the

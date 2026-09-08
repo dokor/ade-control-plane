@@ -307,11 +307,13 @@ export async function buildGithubWorkDetail(
     });
   }
   events.sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
-  const currentStage = workflow?.reconciliationRequired || execution?.status === "unknown"
+  const currentStage = execution?.status === "cancelled" || work.state === "cancelled"
+    ? "cancelled"
+    : workflow?.reconciliationRequired || execution?.status === "unknown"
     ? "reconciling"
     : workflow?.stage ?? work.state;
   const activeExecution = execution !== null && ["queued", "leased", "dispatched", "running"].includes(execution.status) &&
-    !["waiting-human", "completed", "failed", "blocked"].includes(currentStage);
+    !["waiting-human", "completed", "failed", "blocked", "cancelled"].includes(currentStage);
   const progressState = !activeExecution
     ? "inactive"
     : !lease || Date.parse(lease.expiresAt) <= Date.parse(now)
@@ -390,7 +392,7 @@ function githubWorkStageLabel(stage: string): string {
     admitted: "Admitted", planning: "Planning", enriching: "Enriching", "ready-for-dev": "Ready for development",
     implementing: "Developing", validating: "Validating", reviewing: "Reviewing", correcting: "Correcting",
     publishing: "Publishing", "waiting-human": "Waiting for human", completed: "Completed", reconciling: "Reconciling",
-    ready: "Ready for development", running: "Developing", blocked: "Blocked", failed: "Failed",
+    ready: "Ready for development", running: "Developing", blocked: "Blocked", failed: "Failed", cancelled: "Cancelled",
   };
   return labels[stage] ?? "Reconciling";
 }
@@ -408,6 +410,7 @@ function summaryView(value: Record<string, unknown> | null | undefined): string 
 function safeLabel(value: string): string { return value.replace(/[^a-z0-9._ -]/giu, " ").slice(0, 120); }
 
 function nextActionFor(stage: string, decision: AdeDecisionRecord | null, execution: ExecutionRecord | null): string {
+  if (stage === "cancelled" || execution?.status === "cancelled") return "This work was stopped. An operator must explicitly retry it before it can run again.";
   if (decision?.status === "open") return "Resolve the ADE decision using one of the allowed options.";
   if (stage === "reconciling" || execution?.status === "unknown") return "Reconcile the external execution before retrying.";
   if (stage === "waiting-human") return "Review the blocking reason and choose the ADE-provided action.";
@@ -440,6 +443,7 @@ export function githubWorkStage(
   state: GithubWorkItemRecord["state"],
   executionStatus: ExecutionRecord["status"] | null,
 ): string {
+  if (executionStatus === "cancelled" || state === "cancelled") return "Cancelled";
   if (executionStatus === "queued" || executionStatus === "leased" || executionStatus === "dispatched") return "Preparing issue";
   if (executionStatus === "running" || state === "running") return "Developing";
   if (state === "ready") return "Ready for development";

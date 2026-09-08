@@ -8,6 +8,7 @@ test("projects only ADE-owned labels from the durable workflow state", () => {
   assert.deepEqual(labelsForGithubWorkState("running", null), ["in-progress"]);
   assert.deepEqual(labelsForGithubWorkState("waiting-human", 42), ["waiting-human", "pr-ready"]);
   assert.deepEqual(labelsForGithubWorkState("blocked", null), ["blocked"]);
+  assert.deepEqual(labelsForGithubWorkState("cancelled", null), []);
 });
 
 test("does not claim scheduler-ready work is ADE ready-for-dev", () => {
@@ -21,4 +22,5 @@ test("preserves repository labels and removes stale ADE labels idempotently", ()
   );
   assert.deepEqual(first, ["bug", "pr-ready", "security", "waiting-human"]);
   assert.deepEqual(mergeAdeWorkflowLabels(first, ["waiting-human", "pr-ready"]), first);
+  assert.deepEqual(mergeAdeWorkflowLabels(["bug", "in-progress"], []), ["bug"]);
 });
