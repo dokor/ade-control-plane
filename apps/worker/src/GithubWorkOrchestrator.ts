@@ -121,6 +121,7 @@ export class GithubWorkOrchestrator {
     const candidates = await this.options.persistence.executions.listReconciliationCandidates(this.now().toISOString());
     for (const candidate of candidates) {
       if (!candidate.execution.workRef?.startsWith("github:issue:")) continue;
+      if (candidate.execution.status === "unknown") continue;
       await this.options.persistence.executions.complete({
         executionId: candidate.execution.id,
         status: "unknown",
