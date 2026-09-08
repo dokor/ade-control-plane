@@ -240,7 +240,8 @@ export type GithubWorkItemState =
   | "waiting-human"
   | "blocked"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type GithubWorkRetryPolicy = "safe" | "reconcile-first" | "never";
 

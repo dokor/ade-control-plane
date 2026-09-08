@@ -150,6 +150,12 @@ test("selects only fresh GitHub work with explicit completed dependencies", () =
     { issueNumber: 1, state: "ready", priority: 90, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T09:59:59.000Z" },
   ], "2026-08-27T10:00:00.000Z");
   assert.equal(stale.availability, "stale");
+
+  const cancelled = selectGithubWork([
+    { issueNumber: 5, state: "cancelled", priority: 100, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" },
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(cancelled.availability, "blocked");
+  assert.match(cancelled.reason, /explicit operator retry/);
 });
 
 test("skips waiting work and selects the next eligible issue in the same project", () => {

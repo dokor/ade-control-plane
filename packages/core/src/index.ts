@@ -350,7 +350,7 @@ function nextWakeUp(input: ScheduleInput): string | undefined {
 /** Structural input so the core package does not depend on a GitHub client or DB. */
 export interface GithubWorkSchedulingItem {
   issueNumber: number;
-  state: "ready" | "running" | "waiting-human" | "blocked" | "completed" | "failed";
+  state: "ready" | "running" | "waiting-human" | "blocked" | "completed" | "failed" | "cancelled";
   priority: number;
   dependsOn: readonly number[];
   sourceUpdatedAt: string;
@@ -393,6 +393,8 @@ export function selectGithubWork(
   if (running) return { availability: "reconciling", item: running, reason: `GitHub issue #${running.issueNumber} is running and awaits reconciliation.` };
   const failed = current.find(({ state }) => state === "failed");
   if (failed) return { availability: "failed", item: failed, reason: `GitHub issue #${failed.issueNumber} is marked failed.` };
+  const cancelled = current.find(({ state }) => state === "cancelled");
+  if (cancelled) return { availability: "blocked", item: cancelled, reason: `GitHub issue #${cancelled.issueNumber} was cancelled and requires an explicit operator retry.` };
   const blocked = current.find(({ state }) => state === "blocked");
   if (blocked) return { availability: "blocked", item: blocked, reason: `GitHub issue #${blocked.issueNumber} is blocked by its explicit contract.` };
   const waitingDependency = current

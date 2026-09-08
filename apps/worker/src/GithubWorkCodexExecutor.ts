@@ -341,6 +341,9 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, ...AdeDeliveryRuntime.provenanceSummary(review.provenance) } };
     } catch (error) {
       if (request.signal?.aborted || isAbortError(error)) {
+        await this.cancelLifecycle(request, branchName).catch(() => {
+          console.warn("GitHub cancellation lifecycle reconciliation deferred; the durable execution remains cancelled.");
+        });
         return { status: "cancelled", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), ...(branchName ? { resultSummary: { branchName } } : {}) };
       }
       const failure = classifyFailure(error);
@@ -398,6 +401,41 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
     const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
     await this.options.github.updateIssueBody(repository, request.work.issueNumber, upsertGithubWorkMetadata(body, metadata));
     await this.options.github.syncAdeWorkflowLabels(repository, request.work.issueNumber, labelsForGithubWorkState(metadata.state, metadata.pullRequestNumber));
+  }
+
+  /**
+   * Cancellation cleanup intentionally does not use the aborted execution
+   * signal. It only owns the marker correlated to this execution (or the
+   * still-ready marker this execution just claimed), so a late cleanup cannot
+   * overwrite an explicit operator retry or a newer execution.
+   */
+  private async cancelLifecycle(request: GithubWorkDispatchRequest, branchName: string | null): Promise<void> {
+    const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
+    const issue = await this.options.github.getIssueDetails(repository, request.work.issueNumber);
+    if (!issue) return;
+    const current = readGithubWorkMetadata(issue.body);
+    if (!current || !["ready", "running", "cancelled"].includes(current.state)) return;
+    if (current.executionRef !== null && current.executionRef !== request.executionId) return;
+
+    const cancelled = {
+      ...current,
+      state: "cancelled" as const,
+      executionRef: request.executionId,
+      branchName: branchName ?? current.branchName,
+      humanDecisionRef: null,
+    };
+    if (current.state !== "cancelled" || current.executionRef !== request.executionId || cancelled.branchName !== current.branchName) {
+      await this.options.github.updateIssueBody(
+        repository,
+        request.work.issueNumber,
+        upsertGithubWorkMetadata(issue.body, cancelled),
+      );
+    }
+    await this.options.github.syncAdeWorkflowLabels(
+      repository,
+      request.work.issueNumber,
+      labelsForGithubWorkState("cancelled", cancelled.pullRequestNumber),
+    );
   }
 }
 

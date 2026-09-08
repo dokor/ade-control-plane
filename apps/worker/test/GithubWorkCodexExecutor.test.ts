@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { ProjectRecord } from "@ade-control-plane/database";
+import { readGithubWorkMetadata, upsertGithubWorkMetadata, DEFAULT_GITHUB_WORK_METADATA } from "@ade-control-plane/github";
 
 import { buildGithubWorkPrompt, GithubWorkCodexExecutor, parseImplementationHandoff } from "../src/GithubWorkCodexExecutor.js";
 import type { GithubWorkDispatchRequest } from "../src/GithubWorkOrchestrator.js";
@@ -50,6 +51,34 @@ const request: GithubWorkDispatchRequest = {
   },
   skillPaths: [],
 };
+
+test("cancellation transitions its correlated GitHub marker and removes in-progress idempotently", async () => {
+  let body = upsertGithubWorkMetadata("Issue", {
+    ...DEFAULT_GITHUB_WORK_METADATA, state: "running", executionRef: request.executionId, branchName: "ade/issue-139",
+  });
+  let labels = ["bug", "in-progress"];
+  let bodyUpdates = 0;
+  const github = {
+    getIssueDetails: async () => ({ number: 139, title: "Issue", body, labels, state: "open" as const, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt }),
+    updateIssueBody: async (_repository: unknown, _number: number, nextBody: string) => {
+      body = nextBody; bodyUpdates += 1;
+      return { number: 139, title: "Issue", body, labels, state: "open" as const, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt };
+    },
+    syncAdeWorkflowLabels: async (_repository: unknown, _number: number, desired: readonly string[]) => {
+      labels = [...labels.filter((label) => label !== "in-progress"), ...desired];
+      return { number: 139, title: "Issue", body, labels, state: "open" as const, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt };
+    },
+    createPullRequest: async () => { throw new Error("No PR after cancellation"); },
+  };
+  const executor = new GithubWorkCodexExecutor({ projectRoot: ".", commands: { run: async () => { throw new Error("No command after cancellation"); } }, github });
+  const cancelledRequest = { ...request, signal: AbortSignal.abort() };
+
+  assert.equal((await executor.execute(cancelledRequest)).status, "cancelled");
+  assert.equal(readGithubWorkMetadata(body)?.state, "cancelled");
+  assert.equal(labels.includes("in-progress"), false);
+  assert.equal((await executor.execute(cancelledRequest)).status, "cancelled");
+  assert.equal(bodyUpdates, 1);
+});
 
 test("GitHub executor guards its isolated checkout and releases it on failure", async () => {
   let released = false;

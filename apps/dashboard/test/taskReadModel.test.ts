@@ -121,6 +121,23 @@ test("shows a persisted GitHub work execution in the Task runway", async () => {
   assert.equal(dashboard.githubWork[0]?.executionStatus, "running");
 });
 
+test("shows confirmed GitHub-work cancellation as stopped, not active", async () => {
+  const work: GithubWorkItemRecord = {
+    id: "cancelled-work", projectId: project().id, repositoryGithubId: "argos", contractVersion: "ade.github-work/v1",
+    issueNumber: 137, issueUrl: "https://github.com/dokor/argos/issues/137", state: "cancelled", priority: 50,
+    dependsOn: [], retryPolicy: "reconcile-first", humanDecisionRef: null, executionRef: "cancelled-execution",
+    branchName: "ade/issue-137", pullRequestNumber: null, sourceUpdatedAt: NOW, observedAt: NOW, expiresAt: "2026-08-27T11:00:00.000Z", present: true,
+  };
+  const execution: ExecutionRecord = {
+    id: "cancelled-execution", projectId: project().id, runnerId: "runner-1", adeExecutionRef: null, workRef: "github:issue:137",
+    capability: "github-work.codex", status: "cancelled", attempt: 1, requestedAt: NOW, startedAt: NOW, finishedAt: NOW,
+    resultSummary: null, errorCode: null, errorSummary: null, createdAt: NOW, updatedAt: NOW, cancelRequested: true,
+  };
+  const dashboard = await buildTaskDashboard(createMemoryPersistence(createMemoryState({ projects: [project()], githubWorkItems: [work], executions: [execution] })));
+  assert.equal(dashboard.activeGithubWork, null);
+  assert.equal(dashboard.githubWork[0]?.stage, "Cancelled");
+});
+
 test("uses the GitHub issue title for task list items when available", async () => {
   const issueTask = task({
     source: { type: "github-issue", issueNumber: 23 },

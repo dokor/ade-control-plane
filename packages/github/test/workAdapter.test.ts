@@ -80,6 +80,14 @@ test("makes GitHub work freshness explicit", () => {
   assert.equal(isGithubWorkItemFresh(item, "2026-08-28T10:05:00.000Z"), false);
 });
 
+test("normalizes the durable cancelled state", () => {
+  const cancelled = normalizeGithubWorkItem(issue({
+    body: "<!-- ade.github-work/v1 {\"state\":\"cancelled\",\"priority\":80,\"dependsOn\":[],\"retryPolicy\":\"reconcile-first\",\"humanDecisionRef\":null,\"executionRef\":\"execution-1\",\"branchName\":\"ade/issue-42\",\"pullRequestNumber\":null} -->",
+  }), profile(), observedAt);
+  assert.equal(cancelled?.state, "cancelled");
+  assert.equal(cancelled?.executionRef, "execution-1");
+});
+
 test("refuses free text, duplicate markers, unsupported fields and self-dependencies", () => {
   assert.equal(normalizeGithubWorkItem(issue({ body: "ready high priority" }), profile(), observedAt), null);
   assert.equal(

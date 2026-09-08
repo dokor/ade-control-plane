@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "mode": "normal",
   "budget": 12000,
-  "estimatedTokens": 99,
+  "estimatedTokens": 117,
   "estimateMethod": "heuristic-chars-per-token",
   "estimateIsIndicative": true,
   "overBudget": false,
@@ -10,12 +10,18 @@
     {
       "kind": "context",
       "ref": "context:compact",
-      "estimatedTokens": 99,
+      "estimatedTokens": 108,
       "reason": "compact project context"
+    },
+    {
+      "kind": "rules",
+      "ref": "rules:applicable",
+      "estimatedTokens": 9,
+      "reason": "applicable project rules"
     }
   ],
   "excluded": [],
   "reductionsApplied": [],
-  "cacheKey": "sha256:99653c639d53665708beb177012993f726d736346837b4545e95a60d1d8ac745",
+  "cacheKey": "sha256:0aee728c202f57aa45979b38e35ed36f9bdfb87546ecafbda953861eb6607af2",
   "cacheHit": false
 }

@@ -18,7 +18,8 @@ export type GithubWorkState =
   | "waiting-human"
   | "blocked"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type GithubWorkRetryPolicy = "safe" | "reconcile-first" | "never";
 
@@ -376,7 +377,7 @@ function validPriority(value: unknown): value is number {
 }
 
 function isGithubWorkState(value: unknown): value is GithubWorkState {
-  return typeof value === "string" && ["ready", "running", "waiting-human", "blocked", "completed", "failed"].includes(value);
+  return typeof value === "string" && ["ready", "running", "waiting-human", "blocked", "completed", "failed", "cancelled"].includes(value);
 }
 
 function isRetryPolicy(value: unknown): value is GithubWorkRetryPolicy {

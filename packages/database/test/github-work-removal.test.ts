@@ -25,6 +25,17 @@ async function fixture() {
   return { ...context, project, item, reconcile, work, remove, schedule };
 }
 
+test("persists the terminal GitHub-work cancellation state", { skip: !enabled }, async () => {
+  const c = await fixture();
+  try {
+    const [cancelled] = await c.reconcile(c.item(1, {
+      state: "cancelled", executionRef: "cancelled-execution", sourceUpdatedAt: LATER,
+    }));
+    assert.equal(cancelled?.state, "cancelled");
+    assert.equal(cancelled?.executionRef, "cancelled-execution");
+  } finally { await c.close(); }
+});
+
 test("terminal cleanup cascades only correlated records, survives reconciliation/restart, and permits explicit readmission", { skip: !enabled }, async () => {
   const c = await fixture();
   try {
