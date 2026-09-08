@@ -74,11 +74,23 @@ jobs:
     environment:
       name: production
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
       - name: Require reviewed host bootstrap
         env:
           READY: ${{ vars.ADE_PREBUILT_DEPLOY_READY }}
         run: |
-          test "$READY" = true || { echo 'Install the reviewed v2 deploy wrapper and configure GHCR pull access, then set ADE_PREBUILT_DEPLOY_READY=true. No automatic local fallback.' >&2; exit 1; }
+          set -Eeuo pipefail
+          test "$READY" = true || { echo 'Install the reviewed production deploy bootstrap and configure GHCR pull access, then set ADE_PREBUILT_DEPLOY_READY=true. No automatic local fallback.' >&2; exit 1; }
+          test -r /usr/local/sbin/ade-control-plane-deploy || { echo 'Production deploy bootstrap is missing or unreadable.' >&2; exit 1; }
+          expected="$(sha256sum deploy/bin/deploy-host | awk '{print $1}')"
+          actual="$(sha256sum /usr/local/sbin/ade-control-plane-deploy | awk '{print $1}')"
+          test "$actual" = "$expected" || {
+            echo 'Production deploy bootstrap is stale. An authorized host administrator must install deploy/bin/deploy-host at /usr/local/sbin/ade-control-plane-deploy before retrying.' >&2
+            exit 1
+          }
       - name: Pull and deploy validated immutable images
         env:
           DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
