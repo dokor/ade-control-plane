@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-const entrypoint = new URL("../bin/worker-entrypoint", import.meta.url);
+const entrypoint = fileURLToPath(new URL("../bin/worker-entrypoint", import.meta.url));
 
 async function executable(path, content) {
   await writeFile(path, content, "utf8");
@@ -15,10 +16,8 @@ async function executable(path, content) {
 async function fakeRuntime({ curlScript, fakeSleep = false }) {
   const root = await mkdtemp(join(tmpdir(), "ade-worker-entrypoint-"));
   const bin = join(root, "bin");
-  await executable(join(root, "mkdir-bin"), `#!/usr/bin/env bash\nmkdir -p ${JSON.stringify(bin)}\n`);
-  spawnSync(join(root, "mkdir-bin"), { stdio: "inherit" });
-
-  await executable(join(bin, "codex"), `#!/usr/bin/env bash\ntrap 'exit 0' TERM INT\nwhile :; do /bin/sleep 1; done\n`);
+  await mkdir(bin);
+  await executable(join(bin, "codex"), "#!/usr/bin/env bash\ntrap 'exit 0' TERM INT\nwhile :; do /bin/sleep 1; done\n");
   await executable(join(bin, "curl"), curlScript);
   if (fakeSleep) await executable(join(bin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
   return { root, bin };
