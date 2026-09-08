@@ -15,6 +15,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ proj
     const body = await readJsonObject(request);
     const result = await removeGithubWork((await getPersistence()).githubWork, identity, {
       projectId, issueNumber: Number(issueNumber), workId: body.workId, confirmed: body.confirmed,
+      discardUnconfirmed: body.discardUnconfirmed,
     });
     return { body: result };
   });
