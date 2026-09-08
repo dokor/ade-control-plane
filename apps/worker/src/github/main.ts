@@ -22,8 +22,12 @@ import { ClaudeCodeAgentExecutor, CodexAgentExecutor } from "../AgentExecutor.js
 import { WorkerWakeCoordinator } from "../WorkerWakeCoordinator.js";
 import { UnifiedProductionWorker } from "../UnifiedProductionWorker.js";
 
+let workerPhase = "loading-runtime";
+
 async function main(): Promise<void> {
+  workerPhase = "loading-runtime";
   const config = await loadV0WorkerRuntime();
+  workerPhase = "opening-database";
   const store = new PostgresControlPlaneStore({
     applicationName: "ade-control-plane-github-work-worker",
     connectionString: await readDatabaseUrlFromEnvironment(),
@@ -38,7 +42,9 @@ async function main(): Promise<void> {
   process.on("SIGINT", requestStop);
 
   try {
+    workerPhase = "migrating-database";
     await store.migrate();
+    workerPhase = "initializing-runtime";
     const tokens = new GithubAppTokenProvider({ credentials: config.github });
     const github = new HttpGithubClient({ tokens, installationId: config.github.installationId });
     const commands: GithubAppGitRunner = new GithubAppGitRunner({ commands: new NodeCommandRunner(), projects: store.projects,
@@ -112,16 +118,20 @@ async function main(): Promise<void> {
       stageTimeoutMs: config.githubStageTimeoutMs,
       workflowTimeoutMs: config.githubWorkflowTimeoutMs,
     });
+    workerPhase = "registering-runner";
     const runner = await ensureLocalRunner(store, config.agentProvider);
+    workerPhase = "reconciling-executions";
     await orchestrator.reconcileExecutions();
     const workerStartedAt = new Date().toISOString();
     await recordWorkerAudit(store, "worker.started", { workerStartedAt, reconcileIntervalMs: config.fullReconcileIntervalMs }).catch(() => undefined);
+    workerPhase = "subscribing-wakeups";
     stopWakeups = await store.wakeups?.listen((event) => wake.wake(event));
     heartbeatTimer = setInterval(() => {
       void store.runners.recordHeartbeat(runner.id, new Date().toISOString()).catch(() => undefined);
     }, config.heartbeatIntervalMs);
     heartbeatTimer.unref?.();
     wake.wake({ reason: "startup", fullReconcile: true });
+    workerPhase = "provisioning-projects";
     await provisionRegisteredProjects({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }).catch(() => undefined);
     const provisioningTimer = setInterval(() => {
       void provisionRegisteredProjects({ persistence: store, commands, projectRoot: config.projectRoot, gitEnvironment: config.gitEnvironment }).catch(() => undefined);
@@ -131,12 +141,15 @@ async function main(): Promise<void> {
       wake, manual, github: orchestrator, ...(quota ? { quota } : {}),
       fullReconcileIntervalMs: config.fullReconcileIntervalMs,
     });
+    workerPhase = "recovering-interrupted-task";
     await manual.recoverInterruptedTask();
+    workerPhase = "reclaiming-workspaces";
     await workspaces.reclaimAbandoned(async (owner) => {
       const record = owner.kind === "task" ? await store.v0Tasks.getById(owner.executionId) : await store.executions.getById(owner.executionId);
       return Boolean(record && record.projectId === owner.projectId && record.finishedAt
         && ["SUCCESS", "FAILED", "CANCELLED", "succeeded", "failed", "cancelled"].includes(record.status));
     });
+    workerPhase = "running";
     while (!stop.signal.aborted) {
       const event = await wake.wait(unified.nextWaitTimeoutMs(config.fullReconcileIntervalMs), stop.signal);
       if (stop.signal.aborted || event.reason === "shutdown") break;
@@ -227,7 +240,16 @@ function createQuotaCoordinator(store: PostgresControlPlaneStore, config: V0Work
   });
 }
 
-void main().catch(() => {
-  console.error("GitHub work worker stopped unexpectedly.");
+function logFatalWorkerError(error: unknown): void {
+  if (error instanceof Error) {
+    console.error(`GitHub work worker stopped unexpectedly during ${workerPhase}: ${error.name}: ${error.message}`);
+    if (error.stack) console.error(error.stack);
+    return;
+  }
+  console.error(`GitHub work worker stopped unexpectedly during ${workerPhase}: ${String(error)}`);
+}
+
+void main().catch((error: unknown) => {
+  logFatalWorkerError(error);
   process.exitCode = 1;
 });
