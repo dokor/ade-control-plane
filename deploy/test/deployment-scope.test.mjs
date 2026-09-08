@@ -49,12 +49,14 @@ test("prebuilt deployment keeps migration ordering, digest checks and manual-onl
   assert.match(deploy, /org\.ade\.source-key/);
   assert.match(deploy, /--local/);
   assert.ok(deploy.indexOf('if "$local_build"') < deploy.indexOf('build "${services[@]}"'));
+  assert.match(deploy, /run --rm --no-deps --pull never worker node_modules\/\.bin\/tsx apps\/worker\/src\/v0\/migrate\.ts/);
+  assert.doesNotMatch(deploy, /"\$\{compose\[@\]\}" run[^\n]*--no-build/);
   assert.ok(deploy.indexOf("database migration failed") < deploy.indexOf('up -d --no-build --no-deps'));
   assert.match(workflow, /cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /--local/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /GITHUB_REF" = refs\/heads\/main/);
-  assert.match(workflow, /ade-control-plane-deploy "\$DEPLOY_SHA"\n/);
+  assert.match(workflow, /ade-control-plane-deploy "\$DEPLOY_SHA"/);
   assert.match(build, /ubuntu-24.04-arm/);
   assert.doesNotMatch(build, /setup-qemu/);
   assert.match(build, /cache-to: type=gha/);
