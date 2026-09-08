@@ -41,8 +41,9 @@ test("scope, migration detection and content keys track actual runtime inputs co
   }
 });
 
-test("prebuilt deployment keeps migration ordering, digest checks and manual-only fallback", async () => {
+test("prebuilt deployment keeps migration ordering, immutable runtime and stable host bootstrap", async () => {
   const deploy = await readFile(new URL("../bin/deploy", import.meta.url), "utf8");
+  const host = await readFile(new URL("../bin/deploy-host", import.meta.url), "utf8");
   const workflow = await readFile(new URL("../../.github/workflows/deploy.yml", import.meta.url), "utf8");
   const build = await readFile(new URL("../../.github/workflows/build-image.yml", import.meta.url), "utf8");
   assert.match(deploy, /@sha256:/);
@@ -52,10 +53,19 @@ test("prebuilt deployment keeps migration ordering, digest checks and manual-onl
   assert.match(deploy, /run --rm --no-deps --pull never worker node_modules\/\.bin\/tsx apps\/worker\/src\/v0\/migrate\.ts/);
   assert.doesNotMatch(deploy, /"\$\{compose\[@\]\}" run[^\n]*--no-build/);
   assert.ok(deploy.indexOf("database migration failed") < deploy.indexOf('up -d --no-build --no-deps'));
+
+  assert.match(host, /git fetch --quiet --no-tags origin main/);
+  assert.match(host, /git merge-base --is-ancestor "\$requested_sha" refs\/remotes\/origin\/main/);
+  assert.match(host, /git checkout --detach --force "\$requested_sha"/);
+  assert.match(host, /exec bash "\$APP_DIR\/deploy\/bin\/deploy" "\$@"/);
+  assert.doesNotMatch(host, /docker compose/);
+
   assert.match(workflow, /cancel-in-progress: false/);
   assert.doesNotMatch(workflow, /--local/);
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /GITHUB_REF" = refs\/heads\/main/);
+  assert.match(workflow, /sha256sum deploy\/bin\/deploy-host/);
+  assert.match(workflow, /sha256sum \/usr\/local\/sbin\/ade-control-plane-deploy/);
   assert.match(workflow, /ade-control-plane-deploy "\$DEPLOY_SHA"/);
   assert.match(build, /ubuntu-24.04-arm/);
   assert.doesNotMatch(build, /setup-qemu/);
