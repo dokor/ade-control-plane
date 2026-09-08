@@ -11,6 +11,7 @@ import type {
   GithubDeliveryRecord,
   GithubDeliveryStatus,
   GithubWorkItemRecord,
+  GithubIssueQueuePreferenceRecord,
   GithubWorkItemState,
   GithubWorkProfileReason,
   GithubWorkProfileRecord,
@@ -324,6 +325,20 @@ export interface GithubWorkRepository {
   getProfile(projectId: string): Promise<GithubWorkProfileRecord | null>;
   listForProject(projectId: string): Promise<readonly GithubWorkItemRecord[]>;
   listForProjects(projectIds: readonly string[]): Promise<readonly GithubWorkItemRecord[]>;
+  listQueuePreferences(projectId: string): Promise<readonly GithubIssueQueuePreferenceRecord[]>;
+  setQueuePreference(input: {
+    projectId: string;
+    issueNumber: number;
+    runWhenAvailable: boolean;
+    actorRef: string;
+    occurredAt: string;
+  }): Promise<GithubIssueQueuePreferenceRecord>;
+  reorderQueue(input: {
+    projectId: string;
+    issueNumbers: readonly number[];
+    actorRef: string;
+    occurredAt: string;
+  }): Promise<readonly GithubIssueQueuePreferenceRecord[]>;
   reconcile(input: GithubWorkReconciliationInput): Promise<readonly GithubWorkItemRecord[]>;
   recordAdeReadiness(input: {
     projectId: string;

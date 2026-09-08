@@ -41,6 +41,7 @@ function harness(
     runners: { list: async () => [{ id: "runner", name: "local", kind: "test", state: "online", architecture: "x64", capabilities: { codex: true }, labels: ["local"], lastHeartbeatAt: NOW, createdAt: NOW, updatedAt: NOW }] },
     providerQuotaSnapshots: { getLatest: async () => null },
     githubWork: {
+      listQueuePreferences: async () => [],
       getProfile: async (projectId: string) => profiles.find((entry) => entry.projectId === projectId) ?? null,
       listForProject: async (projectId: string) => persisted.filter((entry) => entry.projectId === projectId),
       listForProjects: async (projectIds: readonly string[]) => persisted.filter((entry) => projectIds.includes(entry.projectId)),

@@ -1,4 +1,4 @@
-import type { ProjectRecord } from "@ade-control-plane/database";
+import type { GithubIssueQueuePreferenceRecord, GithubWorkItemRecord, ProjectRecord } from "@ade-control-plane/database";
 import type {
   GithubIssueReader,
   GithubWorkReader,
@@ -16,6 +16,17 @@ export interface TaskGithubIssue {
   /** Present only when a separate ADE work projection marked the issue ready. */
   adeState: "ready" | null;
   priority: number | null;
+  description?: string;
+}
+
+export interface ProjectGithubIssueQueueItem extends TaskGithubIssue {
+  runWhenAvailable: boolean;
+  queuePosition: number | null;
+  workState: GithubWorkItemRecord["state"] | null;
+  pullRequestNumber: number | null;
+  pullRequestUrl: string | null;
+  /** A stale ADE work projection is never made actionable from this view. */
+  projectionState: "current" | "stale";
 }
 
 /**
@@ -44,6 +55,7 @@ export async function listGithubIssues(
       updatedAt: issue.updatedAt,
       adeState: null,
       priority: null,
+      ...(issue.excerpt ? { description: sanitizeText(issue.excerpt, 360) } : {}),
     }))
     .sort((left, right) =>
       Date.parse(right.updatedAt) - Date.parse(left.updatedAt) || left.number - right.number,
@@ -85,9 +97,57 @@ export async function listReadyGithubIssues(
         updatedAt: issue.updatedAt,
         adeState: "ready" as const,
         priority: item.priority,
+        ...(issue.excerpt ? { description: sanitizeText(issue.excerpt, 360) } : {}),
       }];
     })
     .sort((left, right) => right.priority - left.priority || left.number - right.number);
+}
+
+/**
+ * Joins live, bounded GitHub display metadata with the strict ADE work
+ * projection and the independent operator-owned queue preference. Reconciliation
+ * never writes the preference, and a stale projection remains visible but inert.
+ */
+export async function listProjectGithubIssueQueue(
+  project: ProjectRecord,
+  readers: { issueReader: GithubIssueReader | undefined },
+  workItems: readonly GithubWorkItemRecord[],
+  preferences: readonly GithubIssueQueuePreferenceRecord[],
+  now = new Date().toISOString(),
+): Promise<readonly ProjectGithubIssueQueueItem[]> {
+  const issues = await listGithubIssues(project, readers);
+  const workByIssue = new Map(workItems.filter(({ present }) => present).map((item) => [item.issueNumber, item]));
+  const preferenceByIssue = new Map(preferences.map((preference) => [preference.issueNumber, preference]));
+  const nowMs = Date.parse(now);
+  const entries = issues.map((issue) => {
+    const work = workByIssue.get(issue.number) ?? null;
+    const preference = preferenceByIssue.get(issue.number) ?? null;
+    const stale = work !== null && (!Number.isFinite(Date.parse(work.expiresAt)) || Date.parse(work.expiresAt) <= nowMs);
+    const runWhenAvailable = preference?.runWhenAvailable ?? work?.state === "ready";
+    const pullRequestNumber = work?.pullRequestNumber ?? null;
+    return {
+      ...issue,
+      priority: work?.priority ?? issue.priority,
+      ...(issue.description ? {} : { description: "No description provided." }),
+      runWhenAvailable,
+      queuePosition: preference?.queuePosition ?? null,
+      workState: work?.state ?? null,
+      pullRequestNumber,
+      pullRequestUrl: pullRequestNumber === null ? null : pullRequestUrl(project, pullRequestNumber),
+      projectionState: stale ? "stale" as const : "current" as const,
+    };
+  });
+  return entries.toSorted((left, right) => {
+    const leftRank = left.runWhenAvailable ? left.queuePosition ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+    const rightRank = right.runWhenAvailable ? right.queuePosition ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+    return Number(left.runWhenAvailable) === Number(right.runWhenAvailable)
+      ? leftRank - rightRank || (right.priority ?? 0) - (left.priority ?? 0) || left.number - right.number
+      : left.runWhenAvailable ? -1 : 1;
+  });
+}
+
+function pullRequestUrl(project: ProjectRecord, pullRequestNumber: number): string {
+  return `https://github.com/${encodeURIComponent(project.repositoryOwner)}/${encodeURIComponent(project.repositoryName)}/pull/${pullRequestNumber}`;
 }
 
 function repositoryRef(project: ProjectRecord) {

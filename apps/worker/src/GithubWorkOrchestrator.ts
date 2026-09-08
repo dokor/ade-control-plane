@@ -11,6 +11,7 @@ import type {
   ControlPlanePersistence,
   ExecutionRecord,
   GithubWorkItemRecord,
+  GithubIssueQueuePreferenceRecord,
   GithubWorkProfileRecord,
   ProjectRecord,
   RunnerRecord,
@@ -149,9 +150,10 @@ export class GithubWorkOrchestrator {
     const [settings, projects, runners, active] = await Promise.all([
       store.settings.get(), store.projects.list(), store.runners.list(), store.executions.listActive(),
     ]);
-    const [items, profiles, histories, quota] = await Promise.all([
+    const [items, profiles, preferences, histories, quota] = await Promise.all([
       store.githubWork.listForProjects(projects.map(({ id }) => id)),
       Promise.all(projects.map((project) => store.githubWork.getProfile(project.id))),
+      Promise.all(projects.map((project) => store.githubWork.listQueuePreferences(project.id))),
       Promise.all(projects.map((project) => store.executions.listByProjectId(project.id, 100))),
       store.providerQuotaSnapshots.getLatest("openai", "codex-account-main"),
     ]);
@@ -159,6 +161,9 @@ export class GithubWorkOrchestrator {
     const profilesByProject = new Map(
       profiles.filter((profile): profile is GithubWorkProfileRecord => profile !== null)
         .map((profile) => [profile.projectId, profile]),
+    );
+    const preferencesByProject = new Map<string, readonly GithubIssueQueuePreferenceRecord[]>(
+      projects.map((project, index) => [project.id, preferences[index] ?? []]),
     );
     const activeByProject = new Set(active.map(({ projectId }) => projectId));
     const historyByProject = new Map(projects.map((project, index) => [project.id, histories[index] ?? []]));
@@ -177,7 +182,12 @@ export class GithubWorkOrchestrator {
       }
     }
     const selections = new Map(projects.map((project) => {
-      const selection = selectProjectWork(profilesByProject.get(project.id) ?? null, itemsByProject.get(project.id) ?? [], now);
+      const selection = selectProjectWork(
+        profilesByProject.get(project.id) ?? null,
+        itemsByProject.get(project.id) ?? [],
+        preferencesByProject.get(project.id) ?? [],
+        now,
+      );
       const resume = resolvedDecisions.get(project.id);
       return [project.id, resume && selection.item
         ? { availability: "ready" as const, item: selection.item, reason: "An ADE human decision was resolved; the workflow can resume." }
@@ -471,9 +481,20 @@ export class GithubWorkOrchestrator {
   }
 }
 
-function selectProjectWork(profile: GithubWorkProfileRecord | null, items: readonly GithubWorkItemRecord[], now: string): GithubWorkSelection {
+function selectProjectWork(
+  profile: GithubWorkProfileRecord | null,
+  items: readonly GithubWorkItemRecord[],
+  preferences: readonly GithubIssueQueuePreferenceRecord[],
+  now: string,
+): GithubWorkSelection {
   if (!profile || !profile.compatible || (profile.adeStatus !== undefined && profile.adeStatus !== "compatible")) return { availability: "unknown", item: null, reason: "ADE project is not compatible." };
-  return selectGithubWork(items, now);
+  const preferenceByIssue = new Map(preferences.map((preference) => [preference.issueNumber, preference]));
+  return selectGithubWork(items.map((item) => {
+    const preference = preferenceByIssue.get(item.issueNumber);
+    return preference
+      ? { ...item, runWhenAvailable: preference.runWhenAvailable, queuePosition: preference.queuePosition }
+      : item;
+  }), now);
 }
 
 function toCandidate(project: ProjectRecord, selection: GithubWorkSelection, hasActiveLease: boolean, history: readonly ExecutionRecord[], resumeEligible = false): SchedulerCandidate {

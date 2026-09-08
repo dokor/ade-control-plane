@@ -5,6 +5,7 @@ import { ControlButton } from "../../../components/ControlButton.js";
 import { PriorityForm } from "../../../components/PriorityForm.js";
 import { ProjectDeleteButton } from "../../../components/ProjectDeleteButton.js";
 import { ProjectSetupAssistant } from "../../../components/ProjectSetupAssistant.js";
+import { ProjectIssueQueue } from "../../../components/ProjectIssueQueue.js";
 import { Shell } from "../../../components/Shell.js";
 import { StatusBadge } from "../../../components/StatusBadge.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
@@ -15,6 +16,7 @@ import { inspectProjectSetup } from "../../../lib/projectSetup.js";
 import { buildProjectDetail, type TimelineQuery } from "../../../lib/readModel.js";
 import { retryabilityExplanation } from "../../../lib/retry.js";
 import { projectRefreshPolicy } from "../../../lib/projectRefreshPolicy.js";
+import { loadProjectIssueQueue } from "../../../lib/projectIssueQueue.js";
 
 export const dynamic = "force-dynamic";
 
@@ -42,13 +44,20 @@ export default async function ProjectPage({
 
   if (!detail || !projectRecord) notFound();
 
-  const setupReadiness = await inspectProjectSetup(
-    projectRecord,
-    await loadGithubRuntime(),
-    undefined,
-    await persistence.githubWork.getProfile(projectRecord.id),
-    config.adeRuntimeVersion,
-  );
+  const [githubRuntime, profile] = await Promise.all([
+    loadGithubRuntime(),
+    persistence.githubWork.getProfile(projectRecord.id),
+  ]);
+  const [setupReadiness, issueQueue] = await Promise.all([
+    inspectProjectSetup(
+      projectRecord,
+      githubRuntime,
+      undefined,
+      profile,
+      config.adeRuntimeVersion,
+    ),
+    loadProjectIssueQueue(projectRecord, persistence, githubRuntime).catch(() => null),
+  ]);
 
   const { project, availableActions } = detail;
   const refreshPolicy = projectRefreshPolicy(project, setupReadiness, detail.work);
@@ -68,6 +77,8 @@ export default async function ProjectPage({
       </p>
 
       <ProjectSetupAssistant project={project} work={detail.work} readiness={setupReadiness} refreshIntervalMs={refreshPolicy.intervalMs} />
+
+      {issueQueue ? <ProjectIssueQueue projectId={project.id} initialItems={issueQueue} /> : null}
 
       {detail.openDecisions.length > 0 ? (
         <section>

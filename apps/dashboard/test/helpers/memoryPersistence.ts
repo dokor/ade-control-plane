@@ -18,6 +18,7 @@ import type {
   GithubDeliveryReceiptInput,
   GithubDeliveryRecord,
   GithubWorkItemRecord,
+  GithubIssueQueuePreferenceRecord,
   GithubWorkProfileRecord,
   GithubSubjectType,
   ProjectControlState,
@@ -47,6 +48,7 @@ export interface MemoryState {
   deliveries: GithubDeliveryRecord[];
   githubWorkProfiles: GithubWorkProfileRecord[];
   githubWorkItems: GithubWorkItemRecord[];
+  githubIssueQueuePreferences: GithubIssueQueuePreferenceRecord[];
   botComments: GithubBotCommentRecord[];
   decisions: AdeDecisionRecord[];
   v0Tasks: V0TaskRecord[];
@@ -76,6 +78,7 @@ export function createMemoryState(overrides: Partial<MemoryState> = {}): MemoryS
     deliveries: [],
     githubWorkProfiles: [],
     githubWorkItems: [],
+    githubIssueQueuePreferences: [],
     botComments: [],
     decisions: [],
     v0Tasks: [],
@@ -262,6 +265,37 @@ export function createMemoryPersistence(
       },
       async listForProjects(projectIds) {
         return state.githubWorkItems.filter((item) => projectIds.includes(item.projectId));
+      },
+      async listQueuePreferences(projectId) {
+        return state.githubIssueQueuePreferences
+          .filter((preference) => preference.projectId === projectId)
+          .toSorted((left, right) => (left.queuePosition ?? Number.MAX_SAFE_INTEGER) - (right.queuePosition ?? Number.MAX_SAFE_INTEGER) || left.issueNumber - right.issueNumber);
+      },
+      async setQueuePreference(input) {
+        const current = state.githubIssueQueuePreferences.find((preference) => preference.projectId === input.projectId && preference.issueNumber === input.issueNumber);
+        const queuePosition = input.runWhenAvailable
+          ? current?.runWhenAvailable && current.queuePosition !== null
+            ? current.queuePosition
+            : Math.max(0, ...state.githubIssueQueuePreferences.filter((preference) => preference.projectId === input.projectId && preference.runWhenAvailable).map((preference) => preference.queuePosition ?? 0)) + 1
+          : null;
+        const preference: GithubIssueQueuePreferenceRecord = { projectId: input.projectId, issueNumber: input.issueNumber, runWhenAvailable: input.runWhenAvailable, queuePosition, updatedAt: input.occurredAt, updatedBy: input.actorRef };
+        const index = state.githubIssueQueuePreferences.findIndex((candidate) => candidate.projectId === input.projectId && candidate.issueNumber === input.issueNumber);
+        if (index >= 0) state.githubIssueQueuePreferences[index] = preference;
+        else state.githubIssueQueuePreferences.push(preference);
+        return preference;
+      },
+      async reorderQueue(input) {
+        const enabled = state.githubIssueQueuePreferences.filter((preference) => preference.projectId === input.projectId && preference.runWhenAvailable);
+        const expected = enabled.map((preference) => preference.issueNumber).toSorted((left, right) => left - right);
+        const actual = [...input.issueNumbers].toSorted((left, right) => left - right);
+        if (expected.length !== actual.length || expected.some((issueNumber, index) => issueNumber !== actual[index])) throw new Error("Queue order must include every enabled issue exactly once.");
+        state.githubIssueQueuePreferences = state.githubIssueQueuePreferences.map((preference) => {
+          const index = input.issueNumbers.indexOf(preference.issueNumber);
+          return preference.projectId === input.projectId && index >= 0
+            ? { ...preference, queuePosition: index + 1, updatedAt: input.occurredAt, updatedBy: input.actorRef }
+            : preference;
+        });
+        return state.githubIssueQueuePreferences.filter((preference) => preference.projectId === input.projectId);
       },
       async reconcile(input) {
         const previous = state.githubWorkProfiles.find((entry) => entry.projectId === input.profile.projectId);

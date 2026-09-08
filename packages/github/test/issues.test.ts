@@ -38,7 +38,7 @@ test("normalizes bounded issue metadata and excludes pull requests", () => {
   }, repository), null);
 });
 
-test("lists issue summaries without retaining bodies", async () => {
+test("lists a redacted bounded issue excerpt without retaining the body", async () => {
   const requests: string[] = [];
   const adapter = new HttpGithubIssueAdapter({
     tokens: { getToken: async () => "test-token" },
@@ -64,6 +64,7 @@ test("lists issue summaries without retaining bodies", async () => {
     state: "open",
     url: "https://github.com/dokor/argos/issues/23",
     updatedAt: "2026-08-31T20:00:00.000Z",
+    excerpt: "must not be returned",
   });
   assert.match(requests[0] ?? "", /issues\?state=all/);
 });

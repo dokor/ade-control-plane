@@ -162,6 +162,21 @@ test("skips waiting work and selects the next eligible issue in the same project
   assert.equal(selection.item?.issueNumber, 2);
 });
 
+test("honours an explicit queue order without bypassing dependencies or a held issue", () => {
+  const selection = selectGithubWork([
+    { issueNumber: 11, state: "ready", priority: 100, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z", runWhenAvailable: true, queuePosition: 2 },
+    { issueNumber: 12, state: "ready", priority: 1, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z", runWhenAvailable: true, queuePosition: 1 },
+    { issueNumber: 13, state: "ready", priority: 200, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z", runWhenAvailable: false },
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(selection.availability, "ready");
+  assert.equal(selection.item?.issueNumber, 12);
+
+  const held = selectGithubWork([
+    { issueNumber: 13, state: "ready", priority: 200, dependsOn: [], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z", runWhenAvailable: false },
+  ], "2026-08-27T10:00:00.000Z");
+  assert.equal(held.availability, "held");
+});
+
 test("keeps missing dependencies visible as waiting and reconsiders work once they complete", () => {
   const dependent = { issueNumber: 2, state: "ready" as const, priority: 90, dependsOn: [1], present: true, sourceUpdatedAt: "2026-08-27T10:00:00.000Z", observedAt: "2026-08-27T10:00:00.000Z", expiresAt: "2026-08-27T11:00:00.000Z" };
   const waiting = selectGithubWork([dependent], "2026-08-27T10:00:00.000Z");

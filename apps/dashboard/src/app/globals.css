@@ -429,6 +429,53 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
   text-transform: uppercase;
 }
 
+.issue-queue { margin-top: 18px; padding: clamp(16px, 3vw, 25px); }
+.issue-queue-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 17px; }
+.issue-queue-heading h2 { margin: 0; color: var(--text); font-size: clamp(19px, 3vw, 26px); letter-spacing: -.02em; text-transform: none; }
+.issue-queue-heading .muted { max-width: 680px; margin: 7px 0 0; }
+.issue-queue-count { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 999px; padding: 5px 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); font-size: 12px; font-weight: 750; white-space: nowrap; }
+.issue-queue-recommendation { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 13px; padding: 12px; border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.issue-queue-recommendation p { margin: 3px 0 0; }
+.issue-queue-proposal { margin: 0 0 13px; padding: 13px; border: 1px solid color-mix(in srgb, var(--ok) 32%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--ok) 6%, var(--surface)); font-size: 13px; }
+.issue-queue-proposal p { margin: 0; }
+.issue-queue-proposal ol, .issue-queue-proposal ul { display: grid; gap: 5px; margin: 10px 0; padding-left: 23px; }
+.issue-queue-proposal details { margin: 10px 0; color: var(--muted); }
+.issue-queue-proposal summary { cursor: pointer; font-weight: 700; }
+.issue-queue-table { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; }
+.issue-queue-row { display: grid; grid-template-columns: 76px 154px minmax(230px, 1fr) minmax(72px, auto) minmax(92px, auto); gap: 12px; align-items: center; min-width: 0; padding: 13px; border-bottom: 1px solid var(--border); background: var(--surface); transition: background .15s ease, opacity .15s ease; }
+.issue-queue-row:last-child { border-bottom: 0; }
+.issue-queue-row.enabled { border-left: 3px solid var(--accent); padding-left: 10px; }
+.issue-queue-row.held { opacity: .72; }
+.issue-queue-row.stale { background: color-mix(in srgb, var(--warn) 8%, var(--surface)); }
+.issue-queue-row[draggable="true"] { cursor: grab; }
+.issue-queue-row[draggable="true"]:active { cursor: grabbing; }
+.issue-queue-order { display: flex; align-items: center; gap: 8px; font-weight: 800; }
+.issue-queue-order > span { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--accent); }
+.issue-queue-move { display: grid; gap: 2px; }
+.issue-queue-move button { min-width: 22px; min-height: 18px; padding: 0 4px; border-radius: 5px; font-size: 12px; line-height: 1; }
+.issue-queue-toggle { display: flex; gap: 7px; align-items: flex-start; color: var(--text); font-size: 12px; font-weight: 700; line-height: 1.25; }
+.issue-queue-toggle input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.issue-queue-issue { min-width: 0; }
+.issue-queue-issue a { margin-right: 7px; font-size: 12px; font-weight: 800; }
+.issue-queue-issue strong { overflow-wrap: anywhere; }
+.issue-queue-issue p { display: -webkit-box; overflow: hidden; margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.issue-queue-pr { font-size: 12px; white-space: nowrap; }
+.issue-queue-state { justify-self: end; }
+.badge.ready { --badge-color: var(--ok); }
+.badge.running { --badge-color: var(--accent); }
+.badge.waiting-human, .badge.blocked { --badge-color: var(--warn); }
+.badge.failed, .badge.stale { --badge-color: var(--danger); }
+.badge.completed { --badge-color: var(--muted); }
+
+@media (max-width: 760px) {
+  .issue-queue-row { grid-template-columns: 1fr auto; grid-template-areas: "order state" "toggle toggle" "issue issue" "pr pr"; gap: 10px; }
+  .issue-queue-order { grid-area: order; }
+  .issue-queue-toggle { grid-area: toggle; }
+  .issue-queue-issue { grid-area: issue; }
+  .issue-queue-pr { grid-area: pr; }
+  .issue-queue-state { grid-area: state; }
+}
+
 .task-hero h2, .task-detail-hero h2 {
   max-width: 740px;
   margin: 0;
