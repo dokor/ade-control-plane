@@ -18,7 +18,7 @@ stop_app_server() {
 trap 'stop_app_server; exit 143' TERM INT
 
 for _ in $(seq 1 "$ready_timeout_seconds"); do
-  if curl -fsS "$ready_url" >/dev/null; then
+  if curl -fsS "$ready_url" >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "$app_server_pid" 2>/dev/null; then
@@ -54,6 +54,9 @@ if wait "$worker_pid"; then
   worker_status=0
 else
   worker_status="$?"
+fi
+if [[ "$worker_status" -ne 0 ]]; then
+  printf 'ade-control-plane worker: worker process exited with status %s\n' "$worker_status" >&2
 fi
 stop_app_server
 exit "$worker_status"
