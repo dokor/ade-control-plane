@@ -10,6 +10,17 @@ import { matchesGithubRemote, ProjectCheckoutError, resolveProjectCheckout } fro
 import { ProjectProvisioningError } from "./v0/ProjectProvisioner.js";
 import type { ExecutionWorkspaces, ExecutionWorkspace } from "./v0/ExecutionWorkspaces.js";
 
+type DeliveryProgressActivity =
+  | "checkout-prepared"
+  | "ade-lifecycle"
+  | "issue-enrichment"
+  | "ade-context"
+  | "provider-executing"
+  | "provider-completed"
+  | "review-gates"
+  | "publishing-branch"
+  | "creating-pull-request";
+
 export interface GithubWorkCodexExecutorOptions {
   workspaces?: Pick<ExecutionWorkspaces, "prepare">;
   github: GithubPullRequestClient & GithubIssueLifecycleClient;
@@ -158,8 +169,17 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         });
         checkpointStage = stage;
       };
+      const progress = async (activity: DeliveryProgressActivity, reason: string): Promise<void> => {
+        if (!workflows || !workflow || !checkpointStage) return;
+        await workflows.transition({
+          workflowId: workflow.id, expectedStage: checkpointStage, stage: checkpointStage,
+          attempt: workflow.attempt, reason, idempotencyKey: `${request.executionId}:activity:${activity}:${workflow.attempt}`,
+          occurredAt: new Date().toISOString(), details: { activity },
+        });
+      };
       await checkpoint("planning", "Preparing the ADE issue lifecycle plan.");
       const checkout = await checkoutForExecution();
+      await progress("checkout-prepared", "Registered checkout prepared for the workflow.");
       branchName = request.work.branchName ?? `ade/issue-${request.work.issueNumber}`;
       const remote = await this.git(checkout.root, ["remote", "get-url", "origin"], request.signal);
       if (!matchesGithubRemote(remote.stdout, request.project.repositoryOwner, request.project.repositoryName)) {
@@ -187,10 +207,12 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         throw new GithubWorkExecutionError("GITHUB_ISSUE_STALE", "The GitHub issue changed after it was scheduled; reconcile it before retrying.");
       }
       const observedGithubLabels = await observeGithubLabels(this.options.github, repository);
+      await progress("ade-lifecycle", "ADE is evaluating the issue lifecycle and delivery policy.");
       let plan = await this.deliveryRuntime.resolveDeliveryPlan({ cwd: checkout.root, issue, ...(observedGithubLabels ? { observedGithubLabels } : {}), ...(request.signal ? { signal: request.signal } : {}) });
       let lifecycle = await this.planIssueLifecycle(checkout.root, issue, observedGithubLabels, request.signal);
       if (lifecycle.action === "enrich") {
         await checkpoint("enriching", "ADE requested issue enrichment before development.");
+        await progress("issue-enrichment", "Provider is enriching the GitHub issue before development.");
         if (!lifecycle.enrichmentPrompt) throw new GithubWorkExecutionError("ADE_ISSUE_PLAN_INVALID", "ADE did not provide a safe enrichment instruction.");
         const enrichment = await this.agentExecutor.execute({ cwd: checkout.root, prompt: lifecycle.enrichmentPrompt, ...(request.signal ? { signal: request.signal } : {}) });
         if (enrichment.exitCode !== 0) throw new GithubWorkExecutionError("ISSUE_ENRICHMENT_FAILED", "ADE issue enrichment failed.");
@@ -240,12 +262,14 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         prompt: `Implement GitHub issue #${request.work.issueNumber}.`,
         issueNumber: request.work.issueNumber,
       };
+      await progress("ade-context", "ADE is preparing the delivery context for provider execution.");
       const prepared = await this.deliveryRuntime.prepare({
         cwd: checkout.root,
         work,
         ...(request.signal ? { signal: request.signal } : {}),
         contextProfile: this.options.adeContextProfile ?? plan.implementationProfile,
       });
+      await progress("provider-executing", "Codex is implementing the approved issue handoff.");
       const agentResult = await this.agentExecutor.execute({
         cwd: checkout.root,
         prompt: buildGithubWorkPrompt(request, lifecycle.implementationHandoff),
@@ -256,12 +280,14 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         throw new GithubWorkExecutionError("AGENT_EXECUTION_FAILED", `${this.agentExecutor.provider} execution failed.`);
       }
       await checkpoint("validating", "Provider execution completed; validating its repository changes.");
+      await progress("provider-completed", "Codex completed; validating the generated repository changes.");
       throwIfAborted(request.signal);
       const finalStatus = await this.git(checkout.root, ["status", "--porcelain=v1", "--untracked-files=all"], request.signal);
       if (!finalStatus.stdout.trim()) {
         throw new GithubWorkExecutionError("NO_CHANGES", "Codex completed without producing repository changes.");
       }
       await checkpoint("reviewing", "Deterministic validation passed; running ADE review gates.");
+      await progress("review-gates", "ADE deterministic validation and profile reviews are running.");
       const review = await this.deliveryRuntime.runPostAgentGates({
         cwd: checkout.root,
         work,
@@ -277,6 +303,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       await checkpoint("publishing", "ADE validation and review gates passed; publishing the reviewed change.", {
         provenance: AdeDeliveryRuntime.provenanceSummary(review.provenance),
       });
+      await progress("publishing-branch", "Committing and pushing the reviewed branch.");
       await this.mustRun("git commit", {
         executable: "git",
         args: ["-c", "user.name=ADE Control Plane", "-c", "user.email=ade-control-plane@localhost", "-c", "core.hooksPath=/dev/null", "commit", "-m", `feat: implement GitHub issue #${request.work.issueNumber}`],
@@ -286,6 +313,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
       const headSha = (await this.git(checkout.root, ["rev-parse", "HEAD"], request.signal)).stdout.trim();
       await checkpoint("publishing", "Branch pushed; reconciling pull request creation.", { branchName, headSha: /^[0-9a-f]{40,64}$/iu.test(headSha) ? headSha : null });
       throwIfAborted(request.signal);
+      await progress("creating-pull-request", "Creating or reconciling the GitHub pull request.");
       const pullRequest = await this.options.github.findPullRequest?.(
         { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName }, branchName, checkout.baseBranch,
       ) ?? await this.options.github.createPullRequest(
