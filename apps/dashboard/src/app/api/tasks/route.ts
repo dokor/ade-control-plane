@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<NextResponse> {
   return handleDashboardApi(request, "read", async () => {
-    const tasks = (await (await getPersistence()).v0Tasks.list(100)).map(sanitizeTaskRecord);
+    const archived = new URL(request.url).searchParams.get("archived") === "1";
+    const tasks = (await (await getPersistence()).v0Tasks.list(100, { archived })).map(sanitizeTaskRecord);
     return { body: { tasks } };
   });
 }

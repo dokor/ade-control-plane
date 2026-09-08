@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ActiveTaskConflictError } from "@ade-control-plane/database";
+import { ActiveTaskConflictError, TaskNotTerminalError } from "@ade-control-plane/database";
 
 import type {
   AdeDecisionInput,
@@ -117,6 +117,8 @@ export function createMemoryPersistence(
           pullRequestUrl: null,
           errorCode: null,
           errorSummary: null,
+          archivedAt: null,
+          archivedBy: null,
           createdAt: input.createdAt,
           startedAt: null,
           finishedAt: null,
@@ -128,8 +130,10 @@ export function createMemoryPersistence(
       async getById(taskId) {
         return state.v0Tasks.find(({ id }) => id === taskId) ?? null;
       },
-      async list(limit) {
-        return state.v0Tasks.slice(0, limit);
+      async list(limit, options) {
+        return state.v0Tasks
+          .filter((task) => options?.archived === true ? Boolean(task.archivedAt) : !task.archivedAt)
+          .slice(0, limit);
       },
       async claimPending(startedAt) {
         const task = state.v0Tasks.find(({ status }) => status === "PENDING");
@@ -170,6 +174,18 @@ export function createMemoryPersistence(
         task.workflow = input.workflow;
         task.updatedAt = input.workflow.updatedAt;
         return task;
+      },
+      async archive(input) {
+        const task = state.v0Tasks.find(({ id }) => id === input.taskId);
+        if (!task) throw new Error("Task not found.");
+        if (task.archivedAt) return { task, alreadyArchived: true };
+        if (!['SUCCESS', 'FAILED', 'CANCELLED'].includes(task.status)) {
+          throw new TaskNotTerminalError(input.taskId);
+        }
+        task.archivedAt = input.archivedAt;
+        task.archivedBy = input.archivedBy;
+        task.updatedAt = input.archivedAt;
+        return { task, alreadyArchived: false };
       },
       async appendLog(input) {
         const log: V0TaskLogRecord = {

@@ -36,6 +36,9 @@ export type {
   RunnerRepository,
   ScheduleExecutionWithLeaseInput,
   V0TaskCreateInput,
+  V0TaskArchiveInput,
+  V0TaskArchiveResult,
+  V0TaskListOptions,
   V0TaskLogInput,
   V0TaskRepository,
   V0TaskTransitionInput,
@@ -104,6 +107,7 @@ export {
   ExecutionCompletionConflictError,
   LeaseConflictError,
   ActiveTaskConflictError,
+  TaskNotTerminalError,
 } from "./errors.js";
 export {
   type PostgresConnectionConfig,

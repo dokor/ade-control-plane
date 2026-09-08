@@ -5,6 +5,7 @@ import { Shell } from "../../../components/Shell.js";
 import { ExecutionFailureDetails } from "../../../components/ExecutionFailureDetails.js";
 import { TaskCancelButton } from "../../../components/TaskCancelButton.js";
 import { TaskPrRetryButton } from "../../../components/TaskPrRetryButton.js";
+import { TaskArchiveButton } from "../../../components/TaskArchiveButton.js";
 import { requireAuthenticatedContext } from "../../../lib/auth.js";
 import { formatDuration, formatInstant } from "../../../lib/format.js";
 import { loadGithubRuntime } from "../../../lib/githubRuntime.js";
@@ -34,7 +35,7 @@ export default async function TaskDetailPage({
       actorRef={session.actorRef}
       refreshIntervalMs={config.refreshIntervalMs}
     >
-      <p className="task-back"><Link href="/tasks">&lt;- Task runway</Link></p>
+      <p className="task-back"><Link href={task.archivedAt ? "/tasks?archived=1" : "/tasks"}>&lt;- Task runway</Link></p>
 
       <section className="task-detail-hero">
         <div>
@@ -44,6 +45,7 @@ export default async function TaskDetailPage({
         </div>
         <div className="task-detail-state">
           <span className={`badge ${task.status.toLowerCase()}`}>{task.status}</span>
+          {task.archivedAt ? <span className="badge badge-neutral">ARCHIVED</span> : null}
           {task.workflow ? <span className={`badge ${task.workflow.state}`}>{workflowStateLabel(task.workflow.state)}</span> : null}
           {active ? (
             <TaskCancelButton
@@ -51,7 +53,8 @@ export default async function TaskDetailPage({
               status={task.status as "PENDING" | "RUNNING"}
             />
           ) : null}
-          {task.status === "FAILED" && task.errorCode === "GITHUB_PR_CREATE_FAILED" ? <TaskPrRetryButton taskId={task.id} /> : null}
+          {!task.archivedAt && task.status === "FAILED" && task.errorCode === "GITHUB_PR_CREATE_FAILED" ? <TaskPrRetryButton taskId={task.id} /> : null}
+          {!active && !task.archivedAt ? <TaskArchiveButton taskId={task.id} /> : null}
           {pullRequestUrl ? (
             <a className="button primary" href={pullRequestUrl} target="_blank" rel="noreferrer noopener">
               Open PR #{task.pullRequestNumber}
@@ -70,6 +73,7 @@ export default async function TaskDetailPage({
         <div><dt>Duration</dt><dd>{formatDuration(task.startedAt, task.finishedAt)}</dd></div>
         <div><dt>Current stage</dt><dd>{task.workflow ? workflowStateLabel(task.workflow.state) : "not recorded"}</dd></div>
         <div><dt>Branch</dt><dd>{task.branchName ?? "not created yet"}</dd></div>
+        {task.archivedAt ? <div><dt>Archived</dt><dd>{formatInstant(task.archivedAt)} by {task.archivedBy ?? "unknown operator"}</dd></div> : null}
       </dl>
 
       <section className={`task-outcome ${detail.summary.status}`} aria-live="polite">
