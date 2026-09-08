@@ -70,6 +70,7 @@ export type {
   GithubDeliveryRecord,
   GithubDeliveryStatus,
   GithubWorkItemRecord,
+  GithubIssueQueuePreferenceRecord,
   GithubWorkItemState,
   GithubWorkProfileReason,
   GithubWorkProfileRecord,

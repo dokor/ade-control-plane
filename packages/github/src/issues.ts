@@ -2,6 +2,7 @@ import type { GithubRepositoryRef } from "./domain.js";
 import type { InstallationTokenProvider } from "./client.js";
 
 const MAX_ISSUE_TITLE_LENGTH = 500;
+const MAX_ISSUE_EXCERPT_LENGTH = 360;
 const DEFAULT_MAX_PAGES = 10;
 
 export interface GithubIssueSummary {
@@ -10,6 +11,8 @@ export interface GithubIssueSummary {
   state: "open" | "closed";
   url: string;
   updatedAt: string;
+  /** A bounded, redacted display excerpt; raw issue bodies are never retained. */
+  excerpt?: string;
 }
 
 export interface GithubIssueReader {
@@ -46,8 +49,8 @@ export interface HttpGithubIssueAdapterOptions {
  * Read-only GitHub issue metadata for human-facing surfaces.
  *
  * This is intentionally separate from GithubWorkReader: work metadata remains
- * a strict machine contract, while the Dashboard may display a bounded title.
- * Issue bodies, comments and labels never leave this adapter.
+ * a strict machine contract, while the Dashboard may display bounded metadata.
+ * Only a redacted one-line excerpt is derived from an issue body at this boundary.
  */
 export class HttpGithubIssueAdapter implements GithubIssueReader {
   private readonly baseUrl: string;
@@ -142,13 +145,29 @@ export function normalizeGithubIssueSummary(
     typeof updatedAt !== "string" ||
     Number.isNaN(Date.parse(updatedAt))
   ) return null;
+  const excerpt = typeof value.body === "string" ? issueExcerpt(value.body) : "";
   return {
     number,
     title,
     state,
     url,
     updatedAt: new Date(updatedAt).toISOString(),
+    ...(excerpt ? { excerpt } : {}),
   };
+}
+
+function issueExcerpt(value: string): string {
+  const normalized = value
+    .replace(/```[\s\S]*?```/gu, "")
+    .replace(/[`*_>#\[\]()]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .replace(/\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{10,}\b/gu, "[redacted-token]")
+    .replace(/\b(?:Bearer|Basic)\s+[^\s"']+/giu, "[redacted-auth]")
+    .replace(/\b(?:password|secret|token|authorization|api[_-]?key)\b\s*[:=]\s*\S+/giu, "[redacted-secret]")
+    .trim();
+  return normalized.length > MAX_ISSUE_EXCERPT_LENGTH
+    ? `${normalized.slice(0, MAX_ISSUE_EXCERPT_LENGTH - 1)}…`
+    : normalized;
 }
 
 function isGithubIssueUrl(value: string, repository: GithubRepositoryRef): boolean {

@@ -529,6 +529,17 @@ function mapGithubWorkItem(row: TimestampRow): GithubWorkItemRecord {
   };
 }
 
+function mapGithubIssueQueuePreference(row: TimestampRow): import("../domain.js").GithubIssueQueuePreferenceRecord {
+  return {
+    projectId: String(row.project_id),
+    issueNumber: Number(row.issue_number),
+    runWhenAvailable: Boolean(row.run_when_available),
+    queuePosition: row.queue_position === null ? null : Number(row.queue_position),
+    updatedAt: toIsoString(row.updated_at) ?? "",
+    updatedBy: String(row.updated_by),
+  };
+}
+
 function mapAdeDecision(row: TimestampRow): AdeDecisionRecord {
   return {
     id: String(row.id),
@@ -775,6 +786,82 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
       [[...projectIds]],
     );
     return result.rows.map(mapGithubWorkItem);
+  }
+
+  public async listQueuePreferences(projectId: string): Promise<readonly import("../domain.js").GithubIssueQueuePreferenceRecord[]> {
+    const result = await this.pool.query<TimestampRow>(
+      "SELECT * FROM github_issue_queue_preferences WHERE project_id = $1 ORDER BY queue_position NULLS LAST, issue_number ASC",
+      [projectId],
+    );
+    return result.rows.map(mapGithubIssueQueuePreference);
+  }
+
+  public async setQueuePreference(input: Parameters<GithubWorkRepository["setQueuePreference"]>[0]): Promise<import("../domain.js").GithubIssueQueuePreferenceRecord> {
+    if (!Number.isSafeInteger(input.issueNumber) || input.issueNumber < 1) throw new Error("GitHub issue number must be positive.");
+    return withTransaction(this.pool, async (client) => {
+      await lockGithubWorkProject(client, input.projectId);
+      const existing = await queryOptional(client,
+        "SELECT * FROM github_issue_queue_preferences WHERE project_id = $1 AND issue_number = $2 FOR UPDATE",
+        [input.projectId, input.issueNumber],
+      );
+      const maximum = await client.query<{ maximum: string | null }>(
+        "SELECT MAX(queue_position)::text AS maximum FROM github_issue_queue_preferences WHERE project_id = $1 AND run_when_available = true",
+        [input.projectId],
+      );
+      const queuePosition = input.runWhenAvailable
+        ? (existing?.queue_position === null || existing?.run_when_available !== true ? Number(maximum.rows[0]?.maximum ?? 0) + 1 : Number(existing.queue_position))
+        : null;
+      const result = await client.query<TimestampRow>(
+        `INSERT INTO github_issue_queue_preferences (project_id, issue_number, run_when_available, queue_position, updated_at, updated_by)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (project_id, issue_number) DO UPDATE SET
+           run_when_available = EXCLUDED.run_when_available, queue_position = EXCLUDED.queue_position,
+           updated_at = EXCLUDED.updated_at, updated_by = EXCLUDED.updated_by
+         RETURNING *`,
+        [input.projectId, input.issueNumber, input.runWhenAvailable, queuePosition, input.occurredAt, input.actorRef],
+      );
+      await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", severity: "info", actorType: "human", actorRef: input.actorRef,
+        projectId: input.projectId, action: "github-work.queue-preference", result: input.runWhenAvailable ? "enabled" : "held",
+        metadata: { issueNumber: input.issueNumber, queuePosition } });
+      return mapGithubIssueQueuePreference(expectOne(result.rows, "Failed to save GitHub issue queue preference."));
+    });
+  }
+
+  public async reorderQueue(input: Parameters<GithubWorkRepository["reorderQueue"]>[0]): Promise<readonly import("../domain.js").GithubIssueQueuePreferenceRecord[]> {
+    const unique = [...new Set(input.issueNumbers)];
+    if (unique.length !== input.issueNumbers.length || unique.some((issueNumber) => !Number.isSafeInteger(issueNumber) || issueNumber < 1)) {
+      throw new Error("Queue order must contain unique positive GitHub issue numbers.");
+    }
+    return withTransaction(this.pool, async (client) => {
+      await lockGithubWorkProject(client, input.projectId);
+      const known = await client.query<TimestampRow>(
+        "SELECT * FROM github_issue_queue_preferences WHERE project_id = $1 AND run_when_available = true FOR UPDATE",
+        [input.projectId],
+      );
+      const knownNumbers = known.rows.map((row) => Number(row.issue_number)).toSorted((left, right) => left - right);
+      if (knownNumbers.length !== unique.length || knownNumbers.some((value, index) => value !== [...unique].toSorted((left, right) => left - right)[index])) {
+        throw new Error("Queue order must include every enabled issue exactly once.");
+      }
+      // Move all rows out of the unique index range first so a simple swap
+      // (1 <-> 2) cannot violate the enabled-position uniqueness constraint.
+      await client.query(
+        "UPDATE github_issue_queue_preferences SET queue_position = queue_position + 1000000 WHERE project_id = $1 AND run_when_available = true",
+        [input.projectId],
+      );
+      for (const [index, issueNumber] of unique.entries()) {
+        await client.query(
+          "UPDATE github_issue_queue_preferences SET queue_position = $3, updated_at = $4, updated_by = $5 WHERE project_id = $1 AND issue_number = $2",
+          [input.projectId, issueNumber, index + 1, input.occurredAt, input.actorRef],
+        );
+      }
+      await insertAuditEvent(client, { occurredAt: input.occurredAt, category: "github-work", severity: "info", actorType: "human", actorRef: input.actorRef,
+        projectId: input.projectId, action: "github-work.queue-reordered", result: "applied", metadata: { issueNumbers: unique } });
+      const result = await client.query<TimestampRow>(
+        "SELECT * FROM github_issue_queue_preferences WHERE project_id = $1 ORDER BY queue_position NULLS LAST, issue_number ASC",
+        [input.projectId],
+      );
+      return result.rows.map(mapGithubIssueQueuePreference);
+    });
   }
 
   public async reconcile(input: GithubWorkReconciliationInput): Promise<readonly GithubWorkItemRecord[]> {

@@ -48,7 +48,7 @@ export type RunnerState = "online" | "draining" | "offline" | "disabled";
 export type WorkCost = "short" | "long";
 export type MemoryClass = "small" | "medium" | "large";
 /** Legacy name retained while GitHub work becomes the scheduling source. */
-export type AdeAvailability = "ready" | "unknown" | "stale" | "waiting_human" | "waiting_dependency" | "reconciling" | "blocked" | "completed" | "failed";
+export type AdeAvailability = "ready" | "unknown" | "stale" | "waiting_human" | "waiting_dependency" | "reconciling" | "blocked" | "held" | "completed" | "failed";
 export type SchedulerQuotaState = "normal" | "throttled" | "draining" | "blocked" | "unknown";
 
 export interface SchedulerRunner {
@@ -192,7 +192,7 @@ export type ExclusionCode =
   | "global-paused" | "global-safe-mode" | "project-paused" | "project-disabled"
   | "ade-not-ready" | "no-runnable-work" | "waiting-human" | "waiting-dependency" | "reconciling"
   | "reconcile-first"
-  | "work-blocked" | "work-completed" | "work-failed"
+  | "work-blocked" | "queue-held" | "work-completed" | "work-failed"
   | "security-blocked" | "quota-blocked" | "quota-unknown" | "quota-throttled"
   | "quota-draining" | "lease-active" | "no-compatible-runner";
 
@@ -310,6 +310,7 @@ function candidateExclusion(candidate: SchedulerCandidate, quota: SchedulerQuota
   if (candidate.adeAvailability === "reconciling") return "reconciling";
   if (candidate.requiresReconciliation) return "reconcile-first";
   if (candidate.adeAvailability === "blocked") return "work-blocked";
+  if (candidate.adeAvailability === "held") return "queue-held";
   if (candidate.adeAvailability === "completed") return "work-completed";
   if (candidate.adeAvailability === "failed") return "work-failed";
   if (candidate.adeAvailability !== "ready") return "ade-not-ready";
@@ -357,6 +358,10 @@ export interface GithubWorkSchedulingItem {
   observedAt: string;
   expiresAt: string;
   present: boolean;
+  /** Explicit operator preference. Undefined preserves legacy auto-scheduling. */
+  runWhenAvailable?: boolean;
+  /** Lower values run first after all ADE safety gates have passed. */
+  queuePosition?: number | null;
 }
 
 export interface GithubWorkSelection {
@@ -382,9 +387,9 @@ export function selectGithubWork(
     return { availability: "stale", item: null, reason: "GitHub work projection is stale and must be reconciled." };
   }
   const byIssue = new Map(current.map((item) => [item.issueNumber, item]));
-  const ready = current.filter((item) => item.state === "ready" && item.dependsOn.every((dependency) => byIssue.get(dependency)?.state === "completed"));
+  const ready = current.filter((item) => item.state === "ready" && item.runWhenAvailable !== false && item.dependsOn.every((dependency) => byIssue.get(dependency)?.state === "completed"));
   if (ready.length > 0) {
-    const item = [...ready].sort((left, right) => right.priority - left.priority || left.issueNumber - right.issueNumber)[0]!;
+    const item = [...ready].sort((left, right) => queueRank(left) - queueRank(right) || right.priority - left.priority || left.issueNumber - right.issueNumber)[0]!;
     return { availability: "ready", item, reason: `GitHub issue #${item.issueNumber} is ready with explicit dependencies satisfied.` };
   }
   const waiting = current.find(({ state }) => state === "waiting-human");
@@ -398,7 +403,7 @@ export function selectGithubWork(
   const blocked = current.find(({ state }) => state === "blocked");
   if (blocked) return { availability: "blocked", item: blocked, reason: `GitHub issue #${blocked.issueNumber} is blocked by its explicit contract.` };
   const waitingDependency = current
-    .filter((item) => item.state === "ready")
+    .filter((item) => item.state === "ready" && item.runWhenAvailable !== false)
     .map((item) => ({
       item,
       dependencies: item.dependsOn.filter((dependency) => byIssue.get(dependency)?.state !== "completed"),
@@ -413,5 +418,13 @@ export function selectGithubWork(
       reason: `GitHub issue #${waitingDependency.item.issueNumber} is waiting for dependency ${dependencyRefs} to complete.`,
     };
   }
+  const held = current.find((item) => item.state === "ready" && item.runWhenAvailable === false);
+  if (held) return { availability: "held", item: held, reason: "All ready GitHub work is held in the project queue by an operator." };
   return { availability: "completed", item: null, reason: "All active GitHub work items are completed." };
+}
+
+function queueRank(item: GithubWorkSchedulingItem): number {
+  return item.queuePosition !== undefined && item.queuePosition !== null
+    ? item.queuePosition
+    : Number.MAX_SAFE_INTEGER;
 }

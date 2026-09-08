@@ -306,6 +306,20 @@ export interface GithubWorkItemRecord {
   present: boolean;
 }
 
+/**
+ * Operator-owned scheduling preference. This deliberately lives apart from
+ * the GitHub-derived work projection so reconciliation cannot overwrite it.
+ */
+export interface GithubIssueQueuePreferenceRecord {
+  projectId: string;
+  issueNumber: number;
+  runWhenAvailable: boolean;
+  /** One-based among enabled issues; null while the issue is held. */
+  queuePosition: number | null;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export type GithubSubjectType = "issue" | "pull_request";
 
 export type BotCommentPurpose = "status" | "waiting-human" | "failure";

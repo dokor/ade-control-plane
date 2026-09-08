@@ -146,6 +146,23 @@ execution safeguards: task creation still verifies that the issue has a valid
 ADE work contract in the `ready` state. Issue loading failures are shown inline
 and can be retried from the composer without reloading the page.
 
+### Project issue queue
+
+Each project page also exposes every open GitHub issue in a responsive work
+queue. The queue displays the issue link, a bounded redacted description, an
+associated PR when known, the ADE work state, and the local **Run when worker
+available** preference. Enabled issues have a durable explicit order that can
+be changed by drag-and-drop or keyboard buttons. That order is only a
+preference: ADE readiness/dependencies, stale-projection protection, project
+state, quota and worker gates remain authoritative.
+
+The **Propose an order** action provides an explainable, guarded recommendation
+from the live GitHub set and the validated ADE projection. It lists why an item
+is included or excluded; it changes nothing until **Apply this order** is
+selected. Applying it uses the same durable queue and scheduler path as manual
+ordering. A stale projection disables queue mutations, while a failed or empty
+recommendation leaves the manually chosen order untouched.
+
 The task history and `/tasks/{id}` detail view are task-centric and diagnostic:
 
 - the list shows the outcome and PR/failure summary without opening every task;

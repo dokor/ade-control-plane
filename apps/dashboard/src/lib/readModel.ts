@@ -18,6 +18,7 @@ import type {
   ExecutionRecord,
   ProjectRecord,
   GithubWorkItemRecord,
+  GithubIssueQueuePreferenceRecord,
   GithubWorkProfileRecord,
   AdeProjectCompatibilityState,
   ProviderQuotaSnapshotRecord,
@@ -276,9 +277,10 @@ export async function buildOverview(
     read("Runners", () => persistence.runners.list(), []),
     read("Executions", () => persistence.executions.listActive(), []),
   ]);
-  const [workItems, profiles, histories, quotaSnapshot, recentAudits] = await Promise.all([
+  const [workItems, profiles, preferences, histories, quotaSnapshot, recentAudits] = await Promise.all([
     read("GitHub work", () => persistence.githubWork.listForProjects(projects.map(({ id }) => id)), []),
     Promise.all(projects.map((project) => read("Project readiness", () => persistence.githubWork.getProfile(project.id), null))),
+    Promise.all(projects.map((project) => read("Issue queue", () => persistence.githubWork.listQueuePreferences(project.id), []))),
     Promise.all(projects.map((project) => read("Executions", () => persistence.executions.listByProjectId(project.id, 100), []))),
     read("Provider quota", () => persistence.providerQuotaSnapshots.getLatest(input.quotaProvider, input.quotaAccountRef), null),
     read("Worker health", () => persistence.auditEvents.listRecent(100), []),
@@ -301,9 +303,12 @@ export async function buildOverview(
     items.push(item);
     workByProject.set(item.projectId, items);
   }
+  const preferencesByProject = new Map<string, readonly GithubIssueQueuePreferenceRecord[]>(
+    projects.map((project, index) => [project.id, preferences[index] ?? []]),
+  );
   const selectionByProject = new Map(projects.map((project) => [
     project.id,
-    selectProjectGithubWork(profileByProject.get(project.id) ?? null, workByProject.get(project.id) ?? [], now),
+    selectProjectGithubWork(profileByProject.get(project.id) ?? null, workByProject.get(project.id) ?? [], preferencesByProject.get(project.id) ?? [], now),
   ]));
   const activeByProject = new Map(
     activeExecutions.map((execution) => [execution.projectId, execution]),
@@ -473,7 +478,7 @@ export async function buildProjectDetail(
   const overview = await buildOverview(input);
   const view =
     overview.projects.find(({ id }) => id === project.id) ??
-    toProjectView(project, null, selectProjectGithubWork(null, [], now), null, null, now, input.adeRuntimeVersion);
+    toProjectView(project, null, selectProjectGithubWork(null, [], [], now), null, null, now, input.adeRuntimeVersion);
   const timelineQuery = normalizeTimelineQuery(input.timeline);
   const hasTimelineFilters = Boolean(timelineQuery.category || timelineQuery.severity || timelineQuery.outcome || timelineQuery.origin || timelineQuery.from || timelineQuery.to);
   const timelineFetchLimit = hasTimelineFilters ? 5_000 : Math.min((timelineQuery.page + 1) * TIMELINE_PAGE_SIZE + 1, 5_000);
@@ -645,6 +650,7 @@ function toSchedulerCandidate(
 function selectProjectGithubWork(
   profile: GithubWorkProfileRecord | null,
   items: readonly GithubWorkItemRecord[],
+  preferences: readonly GithubIssueQueuePreferenceRecord[],
   now: string,
 ): GithubWorkSelection {
   if (!profile || !profile.compatible) {
@@ -652,7 +658,13 @@ function selectProjectGithubWork(
       ? `GitHub work profile is ${profile.reason}.`
       : "GitHub work profile has not been reconciled yet." };
   }
-  return selectGithubWork(items, now);
+  const preferenceByIssue = new Map(preferences.map((preference) => [preference.issueNumber, preference]));
+  return selectGithubWork(items.map((item) => {
+    const preference = preferenceByIssue.get(item.issueNumber);
+    return preference
+      ? { ...item, runWhenAvailable: preference.runWhenAvailable, queuePosition: preference.queuePosition }
+      : item;
+  }), now);
 }
 
 const EXCLUSION_STATUS: Readonly<Record<ExclusionCode, ProjectStatus>> = {
@@ -667,6 +679,7 @@ const EXCLUSION_STATUS: Readonly<Record<ExclusionCode, ProjectStatus>> = {
   reconciling: "reconciling",
   "reconcile-first": "reconciling",
   "work-blocked": "reconciling",
+  "queue-held": "unknown",
   "work-completed": "completed",
   "work-failed": "failed",
   "security-blocked": "failed",
@@ -690,6 +703,7 @@ const EXCLUSION_REASON: Readonly<Record<ExclusionCode, string>> = {
   reconciling: "The previous outcome is ambiguous and is being reconciled.",
   "reconcile-first": "This GitHub issue revision has already been attempted and must be reconciled before another run.",
   "work-blocked": "GitHub work is explicitly blocked.",
+  "queue-held": "All ready GitHub work is held in the project queue.",
   "work-completed": "All GitHub work is completed.",
   "work-failed": "GitHub work is explicitly marked failed.",
   "security-blocked": "The project is blocked for security reasons.",
