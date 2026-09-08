@@ -133,7 +133,10 @@ else
   done
 fi
 if [[ "$migration_changed" == true ]]; then
-  "${compose[@]}" run --rm --no-deps --no-build worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts >/dev/null || die "database migration failed"
+  # `docker compose run` has no --no-build option. The image was already pulled
+  # and source-key verified above; --pull never makes a missing immutable image
+  # fail instead of fetching a different runtime during the migration step.
+  "${compose[@]}" run --rm --no-deps --pull never worker node_modules/.bin/tsx apps/worker/src/v0/migrate.ts >/dev/null || die "database migration failed"
 fi
 "${compose[@]}" up -d --no-build --no-deps "${services[@]}" || die "application containers could not start"
 for service in "${services[@]}"; do wait_healthy "$service"; done
