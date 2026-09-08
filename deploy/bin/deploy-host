@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly APP_DIR="/srv/apps/ade-control-plane"
+
+die() {
+  printf 'ade-control-plane host deploy: %s\n' "$1" >&2
+  exit 1
+}
+
+[[ "$(id -u)" -eq 0 ]] || die "must run as root"
+[[ "$#" -eq 3 || ( "$#" -eq 4 && "$4" == "--rollback" ) || ( "$#" -eq 2 && "$2" == "--local" ) ]] || die "usage: deploy <SHA> <dashboard@digest> <worker@digest> [--rollback] | deploy <SHA> --local"
+
+readonly requested_sha="$1"
+[[ "$requested_sha" =~ ^[0-9a-fA-F]{40}$ ]] || die "commit SHA is invalid"
+[[ -d "$APP_DIR/.git" ]] || die "deployment checkout is incomplete"
+
+cd "$APP_DIR"
+[[ -z "$(git status --porcelain)" ]] || die "deployment checkout is dirty"
+
+readonly remote_url="$(git remote get-url origin 2>/dev/null || true)"
+case "$remote_url" in
+  git@github.com:dokor/ade-control-plane.git|https://github.com/dokor/ade-control-plane.git|ssh://git@github.com/dokor/ade-control-plane.git) ;;
+  *) die "origin is not the allow-listed GitHub repository" ;;
+esac
+
+# The installed bootstrap is intentionally small and stable. It only admits a
+# revision that belongs to the reviewed main history, selects that exact tree,
+# then delegates to the versioned deployment implementation from that revision.
+git fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main || die "could not refresh origin/main"
+git cat-file -e "${requested_sha}^{commit}" 2>/dev/null || die "requested commit is not present in origin/main history"
+git merge-base --is-ancestor "$requested_sha" refs/remotes/origin/main || die "requested commit is not in origin/main history"
+git checkout --detach --force "$requested_sha" >/dev/null || die "could not select requested commit"
+
+[[ -f "$APP_DIR/deploy/bin/deploy" ]] || die "versioned deployment implementation is missing"
+bash -n "$APP_DIR/deploy/bin/deploy" || die "versioned deployment implementation is invalid"
+exec bash "$APP_DIR/deploy/bin/deploy" "$@"

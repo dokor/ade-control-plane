@@ -41,7 +41,7 @@ jobs:
           done
           SECRETS_DIR="$secrets_dir" DASHBOARD_PUBLIC_URL=https://ade.example.test DASHBOARD_PUBLIC_HOST=ade.example.test GITHUB_APP_ID=1 GITHUB_APP_INSTALLATION_ID=1 SECRETS_GID="$(id -g)" docker compose config --quiet
           ! grep -R --fixed-strings -- /var/run/docker.sock compose.yaml deploy/Dockerfile
-          bash -n deploy/bin/deploy deploy/bin/deployment-scope deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/validate-release-gate deploy/bin/worker-entrypoint deploy/bin/git-ssh
+          bash -n deploy/bin/deploy deploy/bin/deploy-host deploy/bin/deployment-scope deploy/bin/qualify-h24 deploy/bin/qualify-github-work deploy/bin/validate-release-gate deploy/bin/worker-entrypoint deploy/bin/git-ssh
           if deploy/bin/validate-release-gate docs/release-gate-evidence.template.json; then exit 1; fi
           node --test deploy/test/*.test.mjs
   typecheck:
