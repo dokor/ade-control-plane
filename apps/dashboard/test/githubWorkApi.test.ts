@@ -45,6 +45,10 @@ test("GitHub workflow API projection excludes raw project and issue content", ()
     events: [],
     firstFailure: null,
     stageLabel: "Waiting for human",
+    stageStartedAt: null,
+    progressState: "inactive",
+    currentProgress: null,
+    recentProgress: [],
     nextAction: "Review the pull request.",
   });
 

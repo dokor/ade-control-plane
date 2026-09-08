@@ -108,6 +108,7 @@ export default async function TasksPage({
               <dl className="task-meta">
                 <div><dt>Repository</dt><dd>{dashboard.activeGithubWork.repository}</dd></div>
                 <div><dt>Execution</dt><dd>{dashboard.activeGithubWork.executionStatus ?? "reconciling"}</dd></div>
+                <div><dt>Current activity</dt><dd>{dashboard.activeGithubWork.progressSummary ?? "Waiting for the worker to record its first safe activity."}</dd></div>
               </dl>
               <div className="actions">
                 <Link className="button task-open" href={dashboard.activeGithubWork.detailHref}>Open workflow</Link>
@@ -150,7 +151,7 @@ export default async function TasksPage({
                 <div className="task-history-main">
                   <span className="badge badge-neutral task-history-project">{work.projectName}</span>
                   <h3>GitHub issue #{work.issueNumber}</h3>
-                  <p>{work.executionStatus ? `Execution ${work.executionStatus}` : "Awaiting worker reconciliation"}</p>
+                  <p>{work.progressSummary ?? (work.executionStatus ? `Execution ${work.executionStatus}` : "Awaiting worker reconciliation")}</p>
                   {work.executionError ? <p className="task-history-result failed">{work.executionError}</p> : null}
                 </div>
                 <div className="task-history-action"><Link href={work.detailHref}>Details -&gt;</Link></div>

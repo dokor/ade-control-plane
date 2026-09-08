@@ -49,6 +49,8 @@ export interface GithubWorkListItem {
   executionId: string | null;
   cancelRequested: boolean;
   executionError: string | null;
+  progressSummary: string | null;
+  progressObservedAt: string | null;
   pullRequestNumber: number | null;
   detailHref: string;
 }
@@ -68,7 +70,17 @@ export interface GithubWorkDetailModel {
   events: readonly GithubWorkEvent[];
   firstFailure: GithubWorkEvent | null;
   stageLabel: string;
+  stageStartedAt: string | null;
+  progressState: "live" | "stale" | "inactive";
+  currentProgress: GithubWorkProgressView | null;
+  recentProgress: readonly GithubWorkProgressView[];
   nextAction: string;
+}
+
+export interface GithubWorkProgressView {
+  activity: string;
+  label: string;
+  occurredAt: string;
 }
 
 export interface GithubWorkStageView {
@@ -169,9 +181,16 @@ export async function buildTaskDashboard(
   const items = await Promise.all(tasks.map((task) =>
     taskListItem(task, projectById.get(task.projectId), issueReader),
   ));
-  const githubWork = workItems
+  const githubWork = (await Promise.all(workItems
     .filter(({ present }) => present)
-    .map((work) => githubWorkListItem(work, projectById.get(work.projectId), executions))
+    .map(async (work) => githubWorkListItem(
+      work,
+      projectById.get(work.projectId),
+      executions,
+      work.executionRef && persistence.deliveryWorkflows
+        ? await persistence.deliveryWorkflows.getByExecutionId(work.executionRef)
+        : null,
+    ))))
     .sort((left, right) => githubWorkRank(left) - githubWorkRank(right) || right.issueNumber - left.issueNumber);
   const activeGithubWork = githubWork.find(({ executionStatus, state }) =>
     executionStatus === "queued" || executionStatus === "leased" || executionStatus === "dispatched" || executionStatus === "running" || state === "running",
@@ -197,6 +216,7 @@ function githubWorkListItem(
   work: GithubWorkItemRecord,
   project: ProjectRecord | undefined,
   executions: readonly ExecutionRecord[],
+  workflow: AdeDeliveryWorkflowRecord | null,
 ): GithubWorkListItem {
   const execution = work.executionRef
     ? executions.find(({ id }) => id === work.executionRef)
@@ -214,6 +234,8 @@ function githubWorkListItem(
     executionId: execution?.id ?? null,
     cancelRequested: execution?.cancelRequested === true,
     executionError: execution?.errorSummary ? sanitizeText(execution.errorSummary) : null,
+    progressSummary: workflow ? sanitizeText(workflow.transitionReason, 180) : null,
+    progressObservedAt: workflow?.updatedAt ?? null,
     pullRequestNumber: work.pullRequestNumber,
     detailHref: `/tasks/github/${work.projectId}/${work.issueNumber}`,
   };
@@ -223,6 +245,7 @@ export async function buildGithubWorkDetail(
   persistence: TaskPersistence,
   projectId: string,
   issueNumber: number,
+  now = new Date().toISOString(),
 ): Promise<GithubWorkDetailModel | null> {
   const project = await persistence.projects.getById(projectId);
   if (!project) return null;
@@ -246,6 +269,10 @@ export async function buildGithubWorkDetail(
   const lease = execution ? await persistence.executionLeases.getActiveByLeaseKey(`github-work:${projectId}:${issueNumber}`) : null;
   const audits = await persistence.auditEvents.listForProject(projectId, 100);
   const stageViews = transitions.map(toGithubWorkStageView);
+  const progressEvents = transitions
+    .map(toGithubWorkProgressView)
+    .filter((event): event is GithubWorkProgressView => event !== null)
+    .slice(-8);
   const events: GithubWorkEvent[] = stageViews.map((stage) => ({
     id: `stage:${stage.occurredAt}:${stage.stage}`,
     occurredAt: stage.occurredAt,
@@ -278,6 +305,20 @@ export async function buildGithubWorkDetail(
   const currentStage = workflow?.reconciliationRequired || execution?.status === "unknown"
     ? "reconciling"
     : workflow?.stage ?? work.state;
+  const activeExecution = execution !== null && ["queued", "leased", "dispatched", "running"].includes(execution.status) &&
+    !["waiting-human", "completed", "failed", "blocked"].includes(currentStage);
+  const progressState = !activeExecution
+    ? "inactive"
+    : !lease || Date.parse(lease.expiresAt) <= Date.parse(now)
+      ? "stale"
+      : "live";
+  const stageTransition = [...transitions]
+    .reverse()
+    .find((transition) => transition.stage === currentStage && toGithubWorkProgressView(transition) === null)
+    ?? null;
+  const fallbackProgress = stageTransition
+    ? { activity: "stage-checkpoint", label: sanitizeText(stageTransition.reason, 200), occurredAt: stageTransition.occurredAt }
+    : null;
   return {
     project,
     work,
@@ -293,9 +334,31 @@ export async function buildGithubWorkDetail(
     events,
     firstFailure: events.find((event) => event.status === "failed") ?? null,
     stageLabel: githubWorkStageLabel(currentStage),
+    stageStartedAt: stageTransition?.occurredAt ?? null,
+    progressState,
+    currentProgress: progressState === "live" ? progressEvents.at(-1) ?? fallbackProgress : null,
+    recentProgress: progressEvents,
     nextAction: nextActionFor(currentStage, decisionRecord, execution),
   };
 }
+
+function toGithubWorkProgressView(transition: AdeDeliveryStageTransitionRecord): GithubWorkProgressView | null {
+  const activity = typeof transition.details?.activity === "string" ? transition.details.activity : null;
+  if (!activity || !PROGRESS_ACTIVITY_LABELS[activity]) return null;
+  return { activity, label: PROGRESS_ACTIVITY_LABELS[activity], occurredAt: transition.occurredAt };
+}
+
+const PROGRESS_ACTIVITY_LABELS: Readonly<Record<string, string>> = {
+  "checkout-prepared": "Preparing the registered checkout",
+  "ade-lifecycle": "Evaluating ADE lifecycle and delivery policy",
+  "issue-enrichment": "Enriching the GitHub issue",
+  "ade-context": "Preparing ADE delivery context",
+  "provider-executing": "Codex is implementing the approved handoff",
+  "provider-completed": "Validating Codex repository changes",
+  "review-gates": "Running deterministic validation and profile reviews",
+  "publishing-branch": "Committing and pushing the reviewed branch",
+  "creating-pull-request": "Creating or reconciling the pull request",
+};
 
 function toGithubDecisionView(decision: AdeDecisionRecord): GithubDecisionView {
   return {
@@ -345,6 +408,18 @@ function nextActionFor(stage: string, decision: AdeDecisionRecord | null, execut
   if (stage === "waiting-human") return "Review the blocking reason and choose the ADE-provided action.";
   if (stage === "completed") return "Review and merge the pull request when satisfied.";
   if (execution?.cancelRequested) return "Cancellation requested; wait for the worker to confirm the stop.";
+  const actions: Readonly<Record<string, string>> = {
+    admitted: "The worker is admitting the GitHub issue into the durable workflow.",
+    planning: "ADE is preparing the lifecycle plan and registered checkout.",
+    enriching: "The provider is enriching the issue before development.",
+    "ready-for-dev": "ADE is verifying the approved implementation handoff.",
+    implementing: "Codex is modifying the isolated task branch.",
+    validating: "The worker is checking the changes produced by Codex.",
+    reviewing: "ADE deterministic validation and profile reviews are running.",
+    correcting: "The worker is applying bounded review corrections.",
+    publishing: "The reviewed branch is being committed, pushed and turned into a pull request.",
+  };
+  if (actions[stage]) return actions[stage];
   return "Wait for the worker to advance the durable workflow.";
 }
 

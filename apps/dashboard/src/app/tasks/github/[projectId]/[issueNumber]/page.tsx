@@ -55,6 +55,8 @@ export default async function GithubWorkDetailPage({
         <div><dt>Head SHA</dt><dd>{workflow?.headSha?.slice(0, 12) ?? "not pushed"}</dd></div>
         <div><dt>Heartbeat</dt><dd>{detail.heartbeatAt ? formatInstant(detail.heartbeatAt) : "not active"}</dd></div>
         <div><dt>Deadline</dt><dd>{detail.deadlineAt ? formatInstant(detail.deadlineAt) : "not active"}</dd></div>
+        <div><dt>Stage started</dt><dd>{detail.stageStartedAt ? formatInstant(detail.stageStartedAt) : "not recorded"}</dd></div>
+        <div><dt>Live progress</dt><dd>{detail.progressState === "live" ? "current" : detail.progressState === "stale" ? "stale; reconciliation required" : "not active"}</dd></div>
         <div><dt>Retry classification</dt><dd>{workflow?.retryClassification ?? work.retryPolicy}</dd></div>
         <div><dt>Reconciliation</dt><dd>{workflow?.reconciliationRequired || execution?.status === "unknown" ? "required" : "not required"}</dd></div>
         <div><dt>Cancellation</dt><dd>{execution?.cancelRequested ? "requested" : execution?.status === "cancelled" ? "confirmed" : "not requested"}</dd></div>
@@ -65,10 +67,21 @@ export default async function GithubWorkDetailPage({
           <p className="task-kicker">Current action</p>
           <h2>{stageLabel}</h2>
           <p>{detail.nextAction}</p>
+          {detail.currentProgress ? <p><strong>Latest activity:</strong> {detail.currentProgress.label} · {formatInstant(detail.currentProgress.occurredAt)}</p> : null}
+          {detail.progressState === "stale" ? <p className="task-outcome-failure">The execution is active but no live lease is current; reconcile it before retrying.</p> : null}
           {detail.firstFailure ? <p className="task-outcome-failure">First failure: {detail.firstFailure.title} — {detail.firstFailure.detail}</p> : null}
         </div>
         <div className="task-outcome-stats"><strong>{detail.transitions.length}</strong><span>durable stages recorded</span></div>
       </section>
+
+      {detail.recentProgress.length > 0 ? (
+        <section className="task-log-section">
+          <div className="task-history-heading"><div><p className="task-kicker">Safe live activity</p><h2>Recent worker checkpoints</h2></div><span>{detail.recentProgress.length} shown</span></div>
+          <ol className="task-execution-timeline">
+            {detail.recentProgress.map((progress) => <li key={`${progress.activity}:${progress.occurredAt}`} className="task-execution-event running"><span className="task-execution-marker" aria-hidden="true" /><div className="task-execution-content"><div className="task-execution-heading"><span className="task-event-kind task">progress</span><strong>{progress.label}</strong><span className="task-event-status running">recorded</span></div><time dateTime={progress.occurredAt}>{formatInstant(progress.occurredAt)}</time></div></li>)}
+          </ol>
+        </section>
+      ) : null}
 
       {detail.decision?.status === "open" ? (
         <section className="task-log-section">

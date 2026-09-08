@@ -22,6 +22,10 @@ export function toGithubWorkApiView(detail: GithubWorkDetailModel) {
     state: work.state,
     stage: workflow?.stage ?? work.state,
     stageLabel: detail.stageLabel,
+    stageStartedAt: detail.stageStartedAt,
+    progressState: detail.progressState,
+    currentProgress: detail.currentProgress,
+    recentProgress: detail.recentProgress,
     nextAction: detail.nextAction,
     execution: execution
       ? {
