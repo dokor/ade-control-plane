@@ -76,8 +76,9 @@ stored.
 
 Deterministic validation has three layers: ADE validates the configuration,
 the `development/service-size` rule checks maintainability hotspots in this
-repository's executor and orchestrator files, and the existing `typecheck` and
-`test` tools remain configured for applicable code changes. A service-size
+repository's executor and orchestrator files, and the worker invokes `ade
+review --staged --run-tools --json` so the configured `typecheck` and `test`
+tools are blocking before a branch is pushed or a PR is created. A service-size
 warning is review evidence, not an automatic architectural failure; type or
 test failures remain blocking.
 

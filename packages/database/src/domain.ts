@@ -301,6 +301,8 @@ export interface GithubWorkItemRecord {
   executionRef: string | null;
   branchName: string | null;
   pullRequestNumber: number | null;
+  /** GitHub milestone title captured by reconciliation; null confirms none. */
+  milestone?: string | null;
   sourceUpdatedAt: string;
   observedAt: string;
   expiresAt: string;

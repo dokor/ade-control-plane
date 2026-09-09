@@ -270,7 +270,7 @@ export class AdeDeliveryRuntime {
         executable: "git",
         args: ["-c", "core.hooksPath=/dev/null", "add", "--all"],
       });
-      await this.runAde(input, ["review", "--staged", "--json"], "ADE deterministic staged review", "ADE_DETERMINISTIC_REVIEW_FAILED");
+      await this.runAde(input, ["review", "--staged", "--run-tools", "--json"], "ADE deterministic staged review", "ADE_DETERMINISTIC_REVIEW_FAILED");
 
       const pass = await this.runProfileReviews(input, selectedProfiles, attempt, findings, usage, instructionsByProfile);
       if (pass) {
