@@ -20,7 +20,7 @@ export function recommendIssueQueue(
   items: readonly ProjectGithubIssueQueueItem[],
 ): IssueQueueRecommendation {
   const explanations = items.map((item) => {
-    if (item.projectionState === "stale") return { issueNumber: item.number, included: false, reason: "ADE work projection is stale; reconcile before considering this issue." };
+    if (item.projectionState !== "current") return { issueNumber: item.number, included: false, reason: `ADE work projection is ${item.projectionState}; reconcile before considering this issue.` };
     if (item.workState !== "ready") {
       return {
         issueNumber: item.number,

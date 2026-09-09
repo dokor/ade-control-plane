@@ -25,8 +25,9 @@ export interface ProjectGithubIssueQueueItem extends TaskGithubIssue {
   workState: GithubWorkItemRecord["state"] | null;
   pullRequestNumber: number | null;
   pullRequestUrl: string | null;
+  milestone: string | null;
   /** A stale ADE work projection is never made actionable from this view. */
-  projectionState: "current" | "stale";
+  projectionState: "current" | "stale" | "unknown";
 }
 
 /**
@@ -134,7 +135,8 @@ export async function listProjectGithubIssueQueue(
       workState: work?.state ?? null,
       pullRequestNumber,
       pullRequestUrl: pullRequestNumber === null ? null : pullRequestUrl(project, pullRequestNumber),
-      projectionState: stale ? "stale" as const : "current" as const,
+      milestone: work?.milestone ?? null,
+      projectionState: work === null ? "unknown" as const : stale ? "stale" as const : "current" as const,
     };
   });
   return entries.toSorted((left, right) => {

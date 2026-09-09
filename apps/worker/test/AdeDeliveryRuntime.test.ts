@@ -121,6 +121,17 @@ test("does not publish after a deterministic ADE review failure", async () => {
   );
 });
 
+test("runs the repository's ADE-configured tools as a blocking deterministic gate", async () => {
+  const commands = new FakeCommands();
+  const runtime = new AdeDeliveryRuntime({ commands, expectedVersion: "0.7.0" });
+  const prepared = await runtime.prepare({ cwd: "C:/checkout", work: work("Implement the API") });
+  await runtime.runPostAgentGates({ cwd: "C:/checkout", work: work("Implement the API"), agentExecutor: new FakeAgent(), prepared, plan: deliveryPlan(["backend"]) });
+
+  assert.ok(commands.adeArgs.some((args) =>
+    JSON.stringify(args) === JSON.stringify(["review", "--staged", "--run-tools", "--json"]),
+  ));
+});
+
 test("retries blocking profile findings with a bounded correction loop", async () => {
   const commands = new FakeCommands();
   const agent = new SequenceAgent([

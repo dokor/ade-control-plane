@@ -108,20 +108,25 @@ export function ProjectIssueQueue({ projectId, initialItems }: { projectId: stri
     <div className="issue-queue-table" role="list" aria-label="GitHub issue queue">
       {items.map((item) => {
         const position = item.runWhenAvailable ? enabled.findIndex(({ number }) => number === item.number) : -1;
-        const blocked = item.projectionState === "stale" || !item.runWhenAvailable || item.workState === "running" || item.workState === "completed";
-        return <article key={item.number} className={`issue-queue-row ${item.runWhenAvailable ? "enabled" : "held"} ${item.projectionState === "stale" ? "stale" : ""}`} role="listitem"
+        const blocked = item.projectionState !== "current" || !item.runWhenAvailable || item.workState === "running" || item.workState === "completed";
+        return <article key={item.number} className={`issue-queue-row ${item.runWhenAvailable ? "enabled" : "held"} ${item.projectionState !== "current" ? "stale" : ""}`} role="listitem"
           draggable={item.runWhenAvailable && !stale && !reordering}
           onDragStart={() => setDraggedIssue(item.number)} onDragEnd={() => setDraggedIssue(null)}
           onDragOver={(event) => { if (item.runWhenAvailable && draggedIssue !== null) event.preventDefault(); }} onDrop={() => drop(item.number)}>
           <div className="issue-queue-order"><span aria-label={item.runWhenAvailable ? `Position ${position + 1}` : "Not queued"}>{item.runWhenAvailable ? position + 1 : "—"}</span>
             <div className="issue-queue-move"><button type="button" onClick={() => move(item.number, -1)} disabled={blocked || position === 0 || reordering} aria-label={`Move issue ${item.number} up`}>↑</button><button type="button" onClick={() => move(item.number, 1)} disabled={blocked || position === enabled.length - 1 || reordering} aria-label={`Move issue ${item.number} down`}>↓</button></div></div>
-          <label className="issue-queue-toggle"><input type="checkbox" checked={item.runWhenAvailable} disabled={item.projectionState === "stale" || pendingIssue === item.number} onChange={(event) => void updateIssue(item.number, event.target.checked)} /><span>Run when worker available</span></label>
+          <label className="issue-queue-toggle"><input type="checkbox" checked={item.runWhenAvailable} disabled={item.projectionState !== "current" || pendingIssue === item.number} onChange={(event) => void updateIssue(item.number, event.target.checked)} /><span>Run when worker available</span></label>
           <div className="issue-queue-issue"><a href={item.url} target="_blank" rel="noreferrer noopener">#{item.number}</a><strong>{item.title}</strong><p>{item.description}</p></div>
+          <div className="issue-queue-milestone"><span>Milestone</span><strong>{milestoneDisplay(item)}</strong></div>
           <div className="issue-queue-pr">{item.pullRequestUrl ? <a href={item.pullRequestUrl} target="_blank" rel="noreferrer noopener">PR #{item.pullRequestNumber} ↗</a> : "No PR"}</div>
-          <div className="issue-queue-state"><span className={`badge ${item.projectionState === "stale" ? "stale" : item.workState ?? "neutral"}`}>{item.projectionState === "stale" ? "stale" : item.workState ?? "not queued"}</span></div>
+          <div className="issue-queue-state"><span className={`badge ${item.projectionState !== "current" ? "stale" : item.workState ?? "neutral"}`}>{item.projectionState !== "current" ? item.projectionState : item.workState ?? "not queued"}</span></div>
         </article>;
       })}
       {items.length === 0 ? <p className="muted">No open GitHub issue is available for this project.</p> : null}
     </div>
   </section>;
+}
+
+export function milestoneDisplay(item: Pick<ProjectGithubIssueQueueItem, "milestone" | "projectionState">): string {
+  return item.projectionState === "current" ? item.milestone ?? "—" : item.projectionState;
 }

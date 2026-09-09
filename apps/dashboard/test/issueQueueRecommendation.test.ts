@@ -6,7 +6,7 @@ import { recommendIssueQueue } from "../src/lib/issueQueueRecommendation.js";
 const item = (number: number, overrides: Record<string, unknown> = {}) => ({
   number, title: `Issue ${number}`, state: "open" as const, url: `https://github.com/dokor/argos/issues/${number}`,
   updatedAt: "2026-09-08T10:00:00.000Z", adeState: null, priority: 0, description: "Description",
-  runWhenAvailable: false, queuePosition: null, workState: null, pullRequestNumber: null, pullRequestUrl: null,
+  runWhenAvailable: false, queuePosition: null, workState: null, pullRequestNumber: null, pullRequestUrl: null, milestone: null,
   projectionState: "current" as const, ...overrides,
 });
 

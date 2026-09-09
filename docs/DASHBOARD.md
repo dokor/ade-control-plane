@@ -149,12 +149,15 @@ and can be retried from the composer without reloading the page.
 ### Project issue queue
 
 Each project page also exposes every open GitHub issue in a responsive work
-queue. The queue displays the issue link, a bounded redacted description, an
-associated PR when known, the ADE work state, and the local **Run when worker
-available** preference. Enabled issues have a durable explicit order that can
+queue. The queue displays the issue link, a bounded redacted description, the
+GitHub milestone captured by reconciliation, an associated PR when known, the
+ADE work state, and the local **Run when worker available** preference. Enabled
+issues have a durable explicit order that can
 be changed by drag-and-drop or keyboard buttons. That order is only a
 preference: ADE readiness/dependencies, stale-projection protection, project
-state, quota and worker gates remain authoritative.
+state, quota and worker gates remain authoritative. A current projection shows
+the milestone title or `—` when GitHub confirms none; stale and unknown
+projections show that state instead of a potentially outdated title.
 
 The **Propose an order** action provides an explainable, guarded recommendation
 from the live GitHub set and the validated ADE projection. It lists why an item

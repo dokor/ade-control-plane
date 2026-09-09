@@ -181,7 +181,7 @@ test("runs Codex through stdin then commits, pushes and persists the PR", async 
         ["context", "generate"],
         ["context", "pack", "normal"],
         ["setup", "check", "--json"],
-        ["review", "--staged", "--json"],
+        ["review", "--staged", "--run-tools", "--json"],
       ],
     );
     assert.match(github.createdPullRequests[0]?.input.body ?? "", /@dokor/);

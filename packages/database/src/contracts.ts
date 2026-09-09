@@ -78,6 +78,7 @@ export interface AdeDeliveryWorkflowTransitionInput {
   branchName?: string | null;
   headSha?: string | null;
   pullRequestNumber?: number | null;
+  milestone?: string | null;
   pullRequestUrl?: string | null;
   retryClassification?: string | null;
   reconciliationRequired?: boolean;
@@ -304,6 +305,8 @@ export interface GithubWorkItemInput {
   executionRef?: string | null;
   branchName?: string | null;
   pullRequestNumber?: number | null;
+  /** GitHub milestone title captured during this reconciliation; null confirms none. */
+  milestone?: string | null;
   sourceUpdatedAt: string;
   observedAt: string;
   expiresAt: string;

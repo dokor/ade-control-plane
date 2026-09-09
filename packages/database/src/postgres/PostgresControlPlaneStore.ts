@@ -522,6 +522,7 @@ function mapGithubWorkItem(row: TimestampRow): GithubWorkItemRecord {
     executionRef: row.execution_ref === null ? null : String(row.execution_ref),
     branchName: row.branch_name === null ? null : String(row.branch_name),
     pullRequestNumber: row.pull_request_number === null ? null : Number(row.pull_request_number),
+    milestone: row.milestone === null || row.milestone === undefined ? null : String(row.milestone),
     sourceUpdatedAt: toIsoString(row.source_updated_at) ?? "",
     observedAt: toIsoString(row.observed_at) ?? "",
     expiresAt: toIsoString(row.expires_at) ?? "",
@@ -898,20 +899,21 @@ class PostgresGithubWorkRepository implements GithubWorkRepository {
         if (item.projectId !== profile.projectId) throw new Error("Reconciliation project mismatch.");
         if (await queryOptional(client, "SELECT 1 FROM github_work_removals WHERE project_id = $1 AND issue_number = $2", [item.projectId, item.issueNumber])) continue;
         await client.query(
-          `INSERT INTO github_work_items (id, project_id, repository_github_id, contract_version, issue_number, issue_url, state, priority, depends_on, retry_policy, human_decision_ref, execution_ref, branch_name, pull_request_number, source_updated_at, observed_at, expires_at, present)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, true)
+          `INSERT INTO github_work_items (id, project_id, repository_github_id, contract_version, issue_number, issue_url, state, priority, depends_on, retry_policy, human_decision_ref, execution_ref, branch_name, pull_request_number, milestone, source_updated_at, observed_at, expires_at, present)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13, $14, $15, $16, $17, $18, true)
            ON CONFLICT (project_id, issue_number) DO UPDATE SET
              repository_github_id = EXCLUDED.repository_github_id, contract_version = EXCLUDED.contract_version,
              issue_url = EXCLUDED.issue_url, state = EXCLUDED.state, priority = EXCLUDED.priority,
              depends_on = EXCLUDED.depends_on, retry_policy = EXCLUDED.retry_policy,
              human_decision_ref = EXCLUDED.human_decision_ref, execution_ref = EXCLUDED.execution_ref,
              branch_name = EXCLUDED.branch_name, pull_request_number = EXCLUDED.pull_request_number,
+             milestone = EXCLUDED.milestone,
              source_updated_at = EXCLUDED.source_updated_at, observed_at = EXCLUDED.observed_at,
              expires_at = EXCLUDED.expires_at, present = true`,
           [randomUUID(), item.projectId, item.repositoryGithubId, item.contractVersion, item.issueNumber,
             item.issueUrl, item.state, item.priority, JSON.stringify(item.dependsOn), item.retryPolicy,
             item.humanDecisionRef ?? null, item.executionRef ?? null, item.branchName ?? null,
-            item.pullRequestNumber ?? null, item.sourceUpdatedAt, item.observedAt, item.expiresAt],
+            item.pullRequestNumber ?? null, item.milestone ?? null, item.sourceUpdatedAt, item.observedAt, item.expiresAt],
         );
       }
       const result = await client.query(

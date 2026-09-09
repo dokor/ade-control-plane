@@ -36,7 +36,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const items = await loadProjectIssueQueue(project, persistence, github);
     const item = items.find((candidate) => candidate.number === issueNumber);
     if (!item) throw new ControlError("NOT_FOUND", "The selected GitHub issue is no longer open or accessible.");
-    if (item.projectionState === "stale") throw new ControlError("CONFLICT", "GitHub work projection is stale. Refresh it before changing this issue.");
+    if (item.projectionState !== "current") throw new ControlError("CONFLICT", "GitHub work projection is stale or unknown. Refresh it before changing this issue.");
     if (runWhenAvailable && !github?.client) throw new ControlError("UNAVAILABLE", "GitHub issue admission is not configured.");
     const occurredAt = new Date().toISOString();
     if (runWhenAvailable) {
@@ -67,7 +67,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
     if (!project || project.state !== "enabled") throw new ControlError("NOT_FOUND", "The selected project is not available.");
     const items = await loadProjectIssueQueue(project, persistence, github);
     const enabled = items.filter(({ runWhenAvailable }) => runWhenAvailable);
-    if (enabled.some(({ projectionState }) => projectionState === "stale")) {
+    if (enabled.some(({ projectionState }) => projectionState !== "current")) {
       throw new ControlError("CONFLICT", "GitHub work projection is stale. Refresh it before changing the queue.");
     }
     const enabledNumbers = enabled.map(({ number }) => number).toSorted((left, right) => left - right);

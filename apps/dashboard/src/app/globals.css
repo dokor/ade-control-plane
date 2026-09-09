@@ -442,7 +442,7 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
 .issue-queue-proposal details { margin: 10px 0; color: var(--muted); }
 .issue-queue-proposal summary { cursor: pointer; font-weight: 700; }
 .issue-queue-table { overflow: hidden; border: 1px solid var(--border); border-radius: 12px; }
-.issue-queue-row { display: grid; grid-template-columns: 76px 154px minmax(230px, 1fr) minmax(72px, auto) minmax(92px, auto); gap: 12px; align-items: center; min-width: 0; padding: 13px; border-bottom: 1px solid var(--border); background: var(--surface); transition: background .15s ease, opacity .15s ease; }
+.issue-queue-row { display: grid; grid-template-columns: 76px 154px minmax(230px, 1fr) minmax(100px, auto) minmax(72px, auto) minmax(92px, auto); gap: 12px; align-items: center; min-width: 0; padding: 13px; border-bottom: 1px solid var(--border); background: var(--surface); transition: background .15s ease, opacity .15s ease; }
 .issue-queue-row:last-child { border-bottom: 0; }
 .issue-queue-row.enabled { border-left: 3px solid var(--accent); padding-left: 10px; }
 .issue-queue-row.held { opacity: .72; }
@@ -460,6 +460,9 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
 .issue-queue-issue strong { overflow-wrap: anywhere; }
 .issue-queue-issue p { display: -webkit-box; overflow: hidden; margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .issue-queue-pr { font-size: 12px; white-space: nowrap; }
+.issue-queue-milestone { min-width: 0; font-size: 12px; }
+.issue-queue-milestone span { display: block; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.issue-queue-milestone strong { display: block; overflow-wrap: anywhere; }
 .issue-queue-state { justify-self: end; }
 .badge.ready { --badge-color: var(--ok); }
 .badge.running { --badge-color: var(--accent); }
@@ -468,11 +471,12 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
 .badge.completed { --badge-color: var(--muted); }
 
 @media (max-width: 760px) {
-  .issue-queue-row { grid-template-columns: 1fr auto; grid-template-areas: "order state" "toggle toggle" "issue issue" "pr pr"; gap: 10px; }
+  .issue-queue-row { grid-template-columns: 1fr auto; grid-template-areas: "order state" "toggle toggle" "issue issue" "milestone milestone" "pr pr"; gap: 10px; }
   .issue-queue-order { grid-area: order; }
   .issue-queue-toggle { grid-area: toggle; }
   .issue-queue-issue { grid-area: issue; }
   .issue-queue-pr { grid-area: pr; }
+  .issue-queue-milestone { grid-area: milestone; }
   .issue-queue-state { grid-area: state; }
 }
 
