@@ -550,6 +550,7 @@ export interface ExecutionRepository {
 
 export interface ExecutionLeaseRepository {
   getActiveByLeaseKey(leaseKey: string): Promise<ExecutionLeaseRecord | null>;
+  getByExecutionId(executionId: string): Promise<ExecutionLeaseRecord | null>;
   heartbeat(
     executionId: string,
     ownerId: string,
@@ -598,7 +599,7 @@ export interface ControlCommandRepository {
 
 export interface AuditEventRepository {
   append(input: AuditEventInput): Promise<AuditEventRecord>;
-  listForExecution(executionId: string): Promise<readonly AuditEventRecord[]>;
+  listForExecution(executionId: string, limit?: number): Promise<readonly AuditEventRecord[]>;
   listForProject(projectId: string, limit: number, order?: "asc" | "desc"): Promise<readonly AuditEventRecord[]>;
   listRecent(limit: number): Promise<readonly AuditEventRecord[]>;
 }

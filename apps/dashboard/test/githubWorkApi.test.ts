@@ -44,6 +44,8 @@ test("GitHub workflow API projection excludes raw project and issue content", ()
     reviewSummary: "passed",
     events: [],
     firstFailure: null,
+    lastActivity: null,
+    blockingReason: null,
     stageLabel: "Waiting for human",
     stageStartedAt: null,
     progressState: "inactive",
@@ -56,4 +58,6 @@ test("GitHub workflow API projection excludes raw project and issue content", ()
   assert.equal("body" in view.issue, false);
   assert.equal(view.workflow?.pullRequestUrl, null);
   assert.equal(view.workflow?.branchName, "ade/issue-153");
+  assert.equal(view.lastActivity, null);
+  assert.equal(view.blockingReason, null);
 });

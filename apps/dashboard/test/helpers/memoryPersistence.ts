@@ -576,6 +576,9 @@ export function createMemoryPersistence(
       },
     },
     executionLeases: {
+      async getByExecutionId() {
+        return null;
+      },
       async getActiveByLeaseKey() {
         return null;
       },
@@ -677,8 +680,9 @@ export function createMemoryPersistence(
         state.auditEvents.push(record);
         return record;
       },
-      async listForExecution(executionId) {
-        return state.auditEvents.filter((event) => event.executionId === executionId);
+      async listForExecution(executionId, limit) {
+        const events = state.auditEvents.filter((event) => event.executionId === executionId);
+        return limit === undefined ? events : events.slice(-limit);
       },
       async listForProject(projectId, limit, order = "desc") {
         return state.auditEvents

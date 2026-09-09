@@ -1416,6 +1416,15 @@ class PostgresRunnerRepository implements RunnerRepository {
 class PostgresExecutionLeaseRepository implements ExecutionLeaseRepository {
   public constructor(private readonly pool: Pool) {}
 
+  public async getByExecutionId(executionId: string): Promise<ExecutionLeaseRecord | null> {
+    const row = await queryOptional(
+      this.pool,
+      "SELECT * FROM execution_leases WHERE execution_id = $1",
+      [executionId],
+    );
+    return row ? mapLease(row) : null;
+  }
+
   public async getActiveByLeaseKey(
     leaseKey: string,
   ): Promise<ExecutionLeaseRecord | null> {
@@ -2147,15 +2156,22 @@ class PostgresAuditEventRepository implements AuditEventRepository {
 
   public async listForExecution(
     executionId: string,
+    limit?: number,
   ): Promise<readonly AuditEventRecord[]> {
     const result = await this.pool.query(
-      `
-        SELECT *
-        FROM audit_events
-        WHERE execution_id = $1
-        ORDER BY occurred_at ASC
-      `,
-      [executionId],
+      limit === undefined
+        ? `SELECT * FROM audit_events WHERE execution_id = $1 ORDER BY occurred_at ASC`
+        : `
+            SELECT * FROM (
+              SELECT *
+              FROM audit_events
+              WHERE execution_id = $1
+              ORDER BY occurred_at DESC
+              LIMIT $2
+            ) AS recent_execution_events
+            ORDER BY occurred_at ASC
+          `,
+      limit === undefined ? [executionId] : [executionId, boundedLimit(limit, 5_000)],
     );
     return result.rows.map(mapAuditEvent);
   }

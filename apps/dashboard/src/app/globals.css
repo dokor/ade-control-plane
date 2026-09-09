@@ -679,15 +679,16 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
 .task-execution-event.failed .task-execution-marker { border-color: var(--danger); background: var(--danger); }
 .task-execution-event.cancelled .task-execution-marker { border-color: var(--muted); background: var(--muted); }
 .task-execution-heading { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
-.task-event-kind, .task-event-status { border-radius: 999px; padding: 2px 7px; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.task-event-kind, .task-event-source, .task-event-level { border-radius: 999px; padding: 2px 7px; font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
 .task-event-kind { color: var(--muted); background: color-mix(in srgb, var(--muted) 11%, var(--surface)); }
-.task-event-kind.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--surface)); }
-.task-event-status { margin-left: auto; color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, var(--surface)); }
-.task-event-status.success { color: var(--ok); background: color-mix(in srgb, var(--ok) 11%, var(--surface)); }
-.task-event-status.running, .task-event-status.pending { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
-.task-event-status.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 11%, var(--surface)); }
-.task-event-status.failed { color: var(--danger); background: color-mix(in srgb, var(--danger) 11%, var(--surface)); }
-.task-execution-content > time { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.task-event-source { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, var(--surface)); }
+.task-event-source.source-ade { color: var(--ok); background: color-mix(in srgb, var(--ok) 11%, var(--surface)); }
+.task-event-source.source-provider { color: var(--warn); background: color-mix(in srgb, var(--warn) 11%, var(--surface)); }
+.task-event-level { margin-left: auto; color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, var(--surface)); }
+.task-event-level.warning { color: var(--warn); background: color-mix(in srgb, var(--warn) 11%, var(--surface)); }
+.task-event-level.error { color: var(--danger); background: color-mix(in srgb, var(--danger) 11%, var(--surface)); }
+.task-event-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.task-event-meta span { font-family: ui-monospace, monospace; }
 .task-event-duration { display: inline-block; margin-left: 8px; color: var(--muted); font-size: 11px; }
 .task-execution-content p { margin: 6px 0 0; color: var(--muted); overflow-wrap: anywhere; }
 .task-phase-details { margin-top: 9px; border: 1px solid var(--border); border-radius: 9px; background: color-mix(in srgb, var(--surface) 75%, var(--muted)); }
@@ -725,7 +726,8 @@ form.stack { display: grid; gap: 10px; max-width: 340px; }
   .task-log-line { grid-template-columns: 1fr auto; }
   .task-log-line code { grid-column: 1 / -1; }
   .task-history-action a, .task-open { width: 100%; }
-  .task-event-status { margin-left: 0; }
+  .task-event-level { margin-left: 0; }
+  .task-execution-heading strong { flex-basis: 100%; order: 4; }
 }
 
 @media (min-width: 760px) {
