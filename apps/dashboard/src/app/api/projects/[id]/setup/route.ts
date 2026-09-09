@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { ControlError } from "../../../../../lib/errors.js";
 import { handleDashboardApi, readJsonObject } from "../../../../../lib/dashboardApi.js";
 import { loadGithubRuntime } from "../../../../../lib/githubRuntime.js";
+import { loadDashboardConfig } from "../../../../../lib/config.js";
 import { getPersistence } from "../../../../../lib/persistence.js";
 import { inspectProjectSetup } from "../../../../../lib/projectSetup.js";
 import { prepareProjectActivation } from "../../../../../lib/projectActivation.js";
@@ -35,7 +36,13 @@ export async function POST(
     const persistence = await getPersistence();
     const project = await persistence.projects.getById(id);
     if (!project) throw new ControlError("NOT_FOUND", "Project was not found.");
-    const result = await prepareProjectActivation(persistence, project, await loadGithubRuntime());
+    const [runtime, config] = await Promise.all([loadGithubRuntime(), loadDashboardConfig()]);
+    const result = await prepareProjectActivation(
+      persistence,
+      project,
+      runtime,
+      config.adeRuntimeVersion,
+    );
     await persistence.auditEvents.append({
       occurredAt: new Date().toISOString(),
       category: "project-setup",
