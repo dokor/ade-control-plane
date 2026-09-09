@@ -16,6 +16,10 @@ import { diagnosticFromLog, readExecutionDiagnostic, type ExecutionDiagnosticVie
 
 type TaskPersistence = Pick<ControlPlanePersistence, "projects" | "v0Tasks" | "githubWork" | "executions" | "deliveryWorkflows" | "adeDecisions" | "executionLeases" | "auditEvents">;
 
+const MAX_CORRELATED_EXECUTIONS = 20;
+const MAX_AUDITS_PER_EXECUTION = 100;
+const MAX_STRUCTURED_EVENTS = 200;
+
 export interface TaskProjectOption {
   id: string;
   name: string;
@@ -69,6 +73,8 @@ export interface GithubWorkDetailModel {
   reviewSummary: string | null;
   events: readonly GithubWorkEvent[];
   firstFailure: GithubWorkEvent | null;
+  lastActivity: GithubWorkEvent | null;
+  blockingReason: string | null;
   stageLabel: string;
   stageStartedAt: string | null;
   progressState: "live" | "stale" | "inactive";
@@ -94,10 +100,13 @@ export interface GithubWorkStageView {
 export interface GithubWorkEvent {
   id: string;
   occurredAt: string;
-  kind: "stage" | "audit" | "error";
+  kind: "stage" | "control" | "activity" | "error";
+  source: "Control Plane" | "ADE" | "Provider" | "Git" | "GitHub" | "Validation";
+  level: "info" | "warning" | "error";
+  executionId: string | null;
   title: string;
   detail: string;
-  status: "success" | "running" | "warning" | "failed" | "info";
+  status: "success" | "running" | "warning" | "failed" | "cancelled" | "info";
 }
 
 export interface GithubDecisionView {
@@ -257,9 +266,13 @@ export async function buildGithubWorkDetail(
   const work = (await persistence.githubWork.listForProject(projectId)).find((item) => item.present && item.issueNumber === issueNumber);
   if (!work) return null;
   const executions = await persistence.executions.listByProjectId(projectId, 100);
-  const execution = work.executionRef
-    ? executions.find(({ id }) => id === work.executionRef) ?? null
-    : executions.find(({ workRef }) => workRef === `github:issue:${issueNumber}`) ?? null;
+  const issueExecutions = executions
+    .filter(({ workRef }) => workRef === `github:issue:${issueNumber}`)
+    .toSorted((left, right) => executionTimestamp(right).localeCompare(executionTimestamp(left)) || right.id.localeCompare(left.id));
+  const workflowExecution = work.executionRef ? executions.find(({ id }) => id === work.executionRef) ?? null : null;
+  const execution = issueExecutions.find(({ status }) => ["queued", "leased", "dispatched", "running"].includes(status))
+    ?? issueExecutions[0]
+    ?? workflowExecution;
   const workflow = work.executionRef && persistence.deliveryWorkflows
     ? await persistence.deliveryWorkflows.getByExecutionId(work.executionRef)
     : null;
@@ -271,42 +284,105 @@ export async function buildGithubWorkDetail(
     : work.humanDecisionRef
       ? await persistence.adeDecisions.getByRef(projectId, work.humanDecisionRef)
       : null;
-  const lease = execution ? await persistence.executionLeases.getActiveByLeaseKey(`github-work:${projectId}:${issueNumber}`) : null;
-  const audits = await persistence.auditEvents.listForProject(projectId, 100);
-  const stageViews = transitions.map(toGithubWorkStageView);
+  const recentExecutions = issueExecutions.slice(0, MAX_CORRELATED_EXECUTIONS);
+  const correlatedExecutions = issueExecutions.length > 0
+    ? workflowExecution && !recentExecutions.some(({ id }) => id === workflowExecution.id)
+      ? [...recentExecutions.slice(0, MAX_CORRELATED_EXECUTIONS - 1), workflowExecution]
+      : recentExecutions
+    : workflowExecution
+      ? [workflowExecution]
+      : [];
+  const [leases, auditGroups] = await Promise.all([
+    Promise.all(correlatedExecutions.map((item) => persistence.executionLeases.getByExecutionId(item.id))),
+    Promise.all(correlatedExecutions.map((item) => persistence.auditEvents.listForExecution(item.id, MAX_AUDITS_PER_EXECUTION))),
+  ]);
+  const lease = execution ? leases.find((item) => item?.executionId === execution.id) ?? null : null;
+  const audits = auditGroups.flat();
+  const cancellationAuditExecutionIds = new Set(audits
+    .filter((audit) => audit.result === "applied" && audit.metadata.commandType === "execution.cancel")
+    .map((audit) => audit.executionId));
+  const stageViews = transitions.filter((transition) => toGithubWorkProgressView(transition) === null).map(toGithubWorkStageView);
   const progressEvents = transitions
     .map(toGithubWorkProgressView)
     .filter((event): event is GithubWorkProgressView => event !== null)
     .slice(-8);
-  const events: GithubWorkEvent[] = stageViews.map((stage) => ({
-    id: `stage:${stage.occurredAt}:${stage.stage}`,
-    occurredAt: stage.occurredAt,
-    kind: "stage",
-    title: stage.label,
-    detail: stage.reason,
-    status: stage.stage === "completed" ? "success" : stage.stage === "waiting-human" ? "warning" : "info",
-  }));
-  for (const audit of audits.filter((entry) => !execution || entry.executionId === execution.id)) {
+  const events: GithubWorkEvent[] = transitions.map((transition) => {
+    const progress = toGithubWorkProgressView(transition);
+    return {
+      id: `transition:${transition.id}`,
+      occurredAt: transition.occurredAt,
+      kind: progress ? "activity" : "stage",
+      source: progress ? sourceForActivity(progress.activity) : "ADE",
+      level: transition.stage === "waiting-human" ? "warning" : "info",
+      executionId: workflow ? executionIdForTransition(transition, workflow.executionId, correlatedExecutions) : null,
+      title: progress?.label ?? githubWorkStageLabel(transition.stage),
+      detail: sanitizeText(transition.reason, 500),
+      status: transition.stage === "completed" ? "success" : transition.stage === "waiting-human" ? "warning" : "info",
+    };
+  });
+  for (const item of correlatedExecutions) {
+    events.push({
+      id: `execution:${item.id}:scheduled`, occurredAt: item.requestedAt, kind: "control", source: "Control Plane", level: "info",
+      executionId: item.id, title: "Execution scheduled", detail: `Attempt ${item.attempt} admitted for GitHub issue #${issueNumber}.`, status: "info",
+    });
+    if (item.startedAt) events.push({
+      id: `execution:${item.id}:started`, occurredAt: item.startedAt, kind: "control", source: "Control Plane", level: "info",
+      executionId: item.id, title: "Execution started", detail: "The dispatcher marked this execution in progress.", status: "running",
+    });
+    if (item.cancelRequested && !cancellationAuditExecutionIds.has(item.id)) events.push({
+      id: `execution:${item.id}:cancel-requested`, occurredAt: item.updatedAt, kind: "control", source: "Control Plane", level: "warning",
+      executionId: item.id, title: "Cancellation requested", detail: "Waiting for the owning worker to confirm termination.", status: "warning",
+    });
+    if (item.finishedAt && !item.errorCode) events.push({
+      id: `execution:${item.id}:finished`, occurredAt: item.finishedAt, kind: "control", source: "Control Plane", level: item.status === "cancelled" ? "warning" : "info",
+      executionId: item.id, title: executionStatusLabel(item.status), detail: "The durable execution reached a terminal state.",
+      status: item.status === "succeeded" ? "success" : item.status === "cancelled" ? "cancelled" : "warning",
+    });
+  }
+  for (const item of leases.filter((entry) => entry !== null)) {
+    events.push({
+      id: `lease:${item.id}:acquired`, occurredAt: item.acquiredAt, kind: "control", source: "Control Plane", level: "info",
+      executionId: item.executionId, title: "Execution lease acquired", detail: "Exclusive ownership was persisted for this GitHub work item.", status: "info",
+    });
+    if (item.heartbeatAt !== item.acquiredAt && item.releasedAt === null) events.push({
+      id: `lease:${item.id}:heartbeat`, occurredAt: item.heartbeatAt, kind: "control", source: "Control Plane", level: "info",
+      executionId: item.executionId, title: "Lease heartbeat observed", detail: "The execution lease is still being renewed.", status: "running",
+    });
+    if (item.releasedAt) events.push({
+      id: `lease:${item.id}:released`, occurredAt: item.releasedAt, kind: "control", source: "Control Plane", level: "info",
+      executionId: item.executionId, title: "Execution lease released", detail: sanitizeText(item.releaseReason ?? "Execution ownership released.", 200), status: "info",
+    });
+  }
+  for (const audit of audits.filter(({ action }) => action !== "command.authorized")) {
+    const level = auditLevel(audit.severity, audit.result);
     events.push({
       id: `audit:${audit.id}`,
       occurredAt: audit.occurredAt,
-      kind: audit.result === "failed" || audit.result === "unknown" ? "error" : "audit",
-      title: safeLabel(audit.action),
-      detail: sanitizeText(audit.reason ?? audit.result ?? "Workflow event.", 500),
+      kind: level === "error" ? "error" : "control",
+      source: auditSource(audit.action, audit.category),
+      level,
+      executionId: audit.executionId,
+      title: auditTitle(audit.action, audit.result, audit.metadata.commandType),
+      detail: sanitizeText(audit.reason ?? auditDetail(audit.result, audit.metadata.commandType), 500),
       status: audit.result === "failed" ? "failed" : audit.result === "unknown" ? "warning" : "info",
     });
   }
-  if (execution?.errorCode) {
+  for (const item of correlatedExecutions.filter((entry) => entry.errorCode)) {
     events.push({
-      id: `execution-error:${execution.id}`,
-      occurredAt: execution.finishedAt ?? execution.updatedAt,
+      id: `execution-error:${item.id}`,
+      occurredAt: item.finishedAt ?? item.updatedAt,
       kind: "error",
-      title: execution.errorCode,
-      detail: sanitizeText(execution.errorSummary ?? "Execution failed.", 500),
-      status: "failed",
+      source: errorSource(item.errorCode ?? ""),
+      level: "error",
+      executionId: item.id,
+      title: safeLabel(item.errorCode ?? "EXECUTION_FAILED"),
+      detail: sanitizeText(item.errorSummary ?? "Execution failed.", 500),
+      status: item.status === "unknown" ? "warning" : "failed",
     });
   }
-  events.sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+  const orderedEvents = [...new Map(events.map((event) => [event.id, event])).values()]
+    .toSorted((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt) || eventOrder(left) - eventOrder(right) || left.id.localeCompare(right.id))
+    .slice(-MAX_STRUCTURED_EVENTS);
   const currentStage = execution?.status === "cancelled" || work.state === "cancelled"
     ? "cancelled"
     : workflow?.reconciliationRequired || execution?.status === "unknown"
@@ -338,8 +414,10 @@ export async function buildGithubWorkDetail(
     provenance: provenanceView(workflow?.provenance),
     validationSummary: summaryView(workflow?.validationSummary),
     reviewSummary: summaryView(workflow?.reviewSummary),
-    events,
-    firstFailure: events.find((event) => event.status === "failed") ?? null,
+    events: orderedEvents,
+    firstFailure: orderedEvents.find((event) => event.level === "error") ?? null,
+    lastActivity: orderedEvents.at(-1) ?? null,
+    blockingReason: blockingReasonFor(currentStage, progressState, decisionRecord, orderedEvents),
     stageLabel: githubWorkStageLabel(currentStage),
     stageStartedAt: stageTransition?.occurredAt ?? null,
     progressState,
@@ -356,6 +434,7 @@ function toGithubWorkProgressView(transition: AdeDeliveryStageTransitionRecord):
 }
 
 const PROGRESS_ACTIVITY_LABELS: Readonly<Record<string, string>> = {
+  "dispatcher-starting": "Starting the admitted delivery workflow",
   "checkout-prepared": "Preparing the registered checkout",
   "ade-lifecycle": "Evaluating ADE lifecycle and delivery policy",
   "issue-enrichment": "Enriching the GitHub issue",
@@ -366,6 +445,92 @@ const PROGRESS_ACTIVITY_LABELS: Readonly<Record<string, string>> = {
   "publishing-branch": "Committing and pushing the reviewed branch",
   "creating-pull-request": "Creating or reconciling the pull request",
 };
+
+function sourceForActivity(activity: string): GithubWorkEvent["source"] {
+  if (activity === "dispatcher-starting") return "Control Plane";
+  if (activity === "checkout-prepared" || activity === "publishing-branch") return "Git";
+  if (activity === "creating-pull-request") return "GitHub";
+  if (activity.startsWith("provider-")) return "Provider";
+  if (activity === "review-gates") return "Validation";
+  return "ADE";
+}
+
+function auditSource(action: string, category: string): GithubWorkEvent["source"] {
+  const value = `${category}.${action}`.toLowerCase();
+  if (value.includes("provider") || value.includes("agent")) return "Provider";
+  if (value.includes("validation") || value.includes("review")) return "Validation";
+  if (value.includes("ade")) return "ADE";
+  if (value.includes("pull-request") || value.includes("github-api") || value.includes("github-issue")) return "GitHub";
+  if (value.includes("checkout") || value.includes("commit") || value.includes("push") || value.includes("git-command")) return "Git";
+  return "Control Plane";
+}
+
+function errorSource(code: string): GithubWorkEvent["source"] {
+  if (/^GITHUB_(WORK|WORKFLOW|LEASE|STAGE)_/u.test(code)) return "Control Plane";
+  if (/^(GIT|CHECKOUT|REMOTE|PUSH|COMMIT)_/u.test(code)) return "Git";
+  if (/^GITHUB_/u.test(code)) return "GitHub";
+  if (/^(AGENT|PROVIDER|CODEX|CLAUDE)_/u.test(code)) return "Provider";
+  if (/^(ADE|ISSUE_ENRICHMENT)_/u.test(code)) return "ADE";
+  return "Control Plane";
+}
+
+function auditLevel(severity: string, result: string | null): GithubWorkEvent["level"] {
+  if (severity === "error" || result === "failed" || result === "unknown") return "error";
+  if (severity === "warning" || result === "deferred" || result === "rejected") return "warning";
+  return "info";
+}
+
+function auditTitle(action: string, result: string | null, commandType: unknown): string {
+  if (commandType === "execution.cancel") {
+    return result === "applied" ? "Cancellation requested" : "Cancellation request failed";
+  }
+  return safeLabel(action);
+}
+
+function auditDetail(result: string | null, commandType: unknown): string {
+  if (typeof commandType === "string") return `Control command ${safeLabel(commandType)} was ${safeLabel(result ?? "recorded")}.`;
+  return result ?? "Workflow event.";
+}
+
+function executionTimestamp(execution: ExecutionRecord): string {
+  return execution.finishedAt ?? execution.startedAt ?? execution.requestedAt;
+}
+
+function executionStatusLabel(status: ExecutionRecord["status"]): string {
+  if (status === "succeeded") return "Execution succeeded";
+  if (status === "cancelled") return "Execution cancelled";
+  if (status === "unknown") return "Execution requires reconciliation";
+  return "Execution finished";
+}
+
+function eventOrder(event: GithubWorkEvent): number {
+  const order: Readonly<Record<GithubWorkEvent["kind"], number>> = { control: 0, stage: 1, activity: 2, error: 3 };
+  return order[event.kind];
+}
+
+function executionIdForTransition(
+  transition: AdeDeliveryStageTransitionRecord,
+  fallbackExecutionId: string,
+  executions: readonly ExecutionRecord[],
+): string {
+  return executions.find(({ id }) => transition.idempotencyKey.startsWith(`${id}:`))?.id ?? fallbackExecutionId;
+}
+
+function blockingReasonFor(
+  stage: string,
+  progressState: GithubWorkDetailModel["progressState"],
+  decision: AdeDecisionRecord | null,
+  events: readonly GithubWorkEvent[],
+): string | null {
+  if (progressState === "stale") return "The active execution has no current lease and requires reconciliation.";
+  if (decision?.status === "open") return sanitizeText(decision.prompt, 500);
+  if (["blocked", "failed", "reconciling"].includes(stage)) {
+    return [...events].reverse().find((event) => event.level === "error")?.detail
+      ?? "The workflow cannot advance until its recorded failure is reconciled.";
+  }
+  if (stage === "waiting-human") return "The ADE workflow is waiting for an explicit human action.";
+  return null;
+}
 
 function toGithubDecisionView(decision: AdeDecisionRecord): GithubDecisionView {
   return {

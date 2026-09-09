@@ -27,6 +27,13 @@ export default async function GithubWorkDetailPage({
   const stageLabel = work.state === "ready" && !workflow ? "Queued for ADE" : detail.stageLabel;
   const pullRequestUrl = safePullRequestUrl(workflow?.pullRequestUrl ?? null);
   const openDecision = detail.decision?.status === "open" ? detail.decision.options : [];
+  const outcomeTone = detail.blockingReason
+    ? detail.progressState === "stale" || detail.firstFailure ? "failed" : "warning"
+    : stageLabel === "Completed"
+      ? "success"
+      : stageLabel === "Cancelled"
+        ? "cancelled"
+        : "running";
 
   return (
     <Shell title={`Issue #${issueNumber} workflow`} actorRef={session.actorRef} refreshIntervalMs={config.refreshIntervalMs}>
@@ -62,26 +69,17 @@ export default async function GithubWorkDetailPage({
         <div><dt>Cancellation</dt><dd>{execution?.cancelRequested ? "requested" : execution?.status === "cancelled" ? "confirmed" : "not requested"}</dd></div>
       </dl>
 
-      <section className={`task-outcome ${detail.firstFailure ? "failed" : "running"}`} aria-live="polite">
+      <section className={`task-outcome ${outcomeTone}`} aria-live="polite">
         <div>
           <p className="task-kicker">Current action</p>
           <h2>{stageLabel}</h2>
           <p>{detail.nextAction}</p>
-          {detail.currentProgress ? <p><strong>Latest activity:</strong> {detail.currentProgress.label} · {formatInstant(detail.currentProgress.occurredAt)}</p> : null}
-          {detail.progressState === "stale" ? <p className="task-outcome-failure">The execution is active but no live lease is current; reconcile it before retrying.</p> : null}
+          {detail.lastActivity ? <p><strong>Last activity:</strong> {detail.lastActivity.title} · {detail.lastActivity.source} · {formatInstant(detail.lastActivity.occurredAt)}</p> : null}
+          {detail.blockingReason ? <p className="task-outcome-failure">Blocking reason: {detail.blockingReason}</p> : null}
           {detail.firstFailure ? <p className="task-outcome-failure">First failure: {detail.firstFailure.title} — {detail.firstFailure.detail}</p> : null}
         </div>
-        <div className="task-outcome-stats"><strong>{detail.transitions.length}</strong><span>durable stages recorded</span></div>
+        <div className="task-outcome-stats"><strong>{detail.events.length}</strong><span>structured events shown</span></div>
       </section>
-
-      {detail.recentProgress.length > 0 ? (
-        <section className="task-log-section">
-          <div className="task-history-heading"><div><p className="task-kicker">Safe live activity</p><h2>Recent worker checkpoints</h2></div><span>{detail.recentProgress.length} shown</span></div>
-          <ol className="task-execution-timeline">
-            {detail.recentProgress.map((progress) => <li key={`${progress.activity}:${progress.occurredAt}`} className="task-execution-event running"><span className="task-execution-marker" aria-hidden="true" /><div className="task-execution-content"><div className="task-execution-heading"><span className="task-event-kind task">progress</span><strong>{progress.label}</strong><span className="task-event-status running">recorded</span></div><time dateTime={progress.occurredAt}>{formatInstant(progress.occurredAt)}</time></div></li>)}
-          </ol>
-        </section>
-      ) : null}
 
       {detail.decision?.status === "open" ? (
         <section className="task-log-section">
@@ -110,17 +108,12 @@ export default async function GithubWorkDetailPage({
       ) : null}
 
       <section className="task-log-section">
-        <div className="task-history-heading"><div><p className="task-kicker">Durable evidence</p><h2>Workflow timeline</h2></div><span>{detail.events.length} events</span></div>
+        <div className="task-history-heading"><div><p className="task-kicker">Durable evidence</p><h2>Structured workflow log</h2></div><span>Latest {detail.events.length} events</span></div>
         {detail.events.length === 0 ? <div className="task-history-empty">Waiting for the worker to record the first workflow transition.</div> : (
-          <ol className="task-execution-timeline">
-            {detail.events.map((event) => <li key={event.id} className={`task-execution-event ${event.status}`}><span className="task-execution-marker" aria-hidden="true" /><div className="task-execution-content"><div className="task-execution-heading"><span className={`task-event-kind ${event.kind}`}>{event.kind}</span><strong>{event.title}</strong><span className={`task-event-status ${event.status}`}>{event.status}</span></div><time dateTime={event.occurredAt}>{formatInstant(event.occurredAt)}</time><p>{event.detail}</p></div></li>)}
+          <ol className="task-execution-timeline" aria-label="Structured workflow events">
+            {detail.events.map((event) => <li key={event.id} className={`task-execution-event ${event.status}`}><span className="task-execution-marker" aria-hidden="true" /><div className="task-execution-content"><div className="task-execution-heading"><span className={`task-event-source source-${event.source.toLowerCase().replaceAll(" ", "-")}`}>{event.source}</span><span className="task-event-kind">{event.kind}</span><strong>{event.title}</strong><span className={`task-event-level ${event.level}`}>{event.level}</span></div><div className="task-event-meta"><time dateTime={event.occurredAt}>{formatInstant(event.occurredAt)}</time>{event.executionId ? <span title={event.executionId}>execution {event.executionId.slice(0, 8)}</span> : <span>workflow scope</span>}</div><p>{event.detail}</p></div></li>)}
           </ol>
         )}
-      </section>
-
-      <section className="task-log-section">
-        <div className="task-history-heading"><div><p className="task-kicker">Stage ledger</p><h2>Completed and pending stages</h2></div></div>
-        <div className="task-history">{detail.transitions.map((stage) => <article className="task-history-row" key={`${stage.stage}:${stage.occurredAt}`}><div className="task-history-status"><span className="badge badge-neutral">{stage.label}</span><time>{formatInstant(stage.occurredAt)}</time></div><div className="task-history-main"><h3>Attempt {stage.attempt}</h3><p>{stage.reason}</p></div></article>)}</div>
       </section>
       <details className="panel project-disclosure">
         <summary>Remove this work item</summary>

@@ -281,12 +281,17 @@ if (!testDatabaseUrl) {
       const auditEvents = await context.store.auditEvents.listForExecution(
         scheduled.execution.id,
       );
+      const releasedLease = await context.store.executionLeases.getByExecutionId(
+        scheduled.execution.id,
+      );
 
       assert.equal(first.applied, true);
       assert.equal(first.releasedLease, true);
       assert.equal(second.applied, false);
       assert.equal(second.releasedLease, false);
       assert.equal(auditEvents.length, 1);
+      assert.equal(releasedLease?.releasedAt, finishedAt);
+      assert.equal(releasedLease?.releaseReason, "runner-reported-completion");
     } finally {
       await context.close();
     }

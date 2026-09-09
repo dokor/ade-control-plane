@@ -1,3 +1,4 @@
+import { sanitizeText } from "./sanitize.js";
 import { safePullRequestUrl, type GithubWorkDetailModel } from "./taskReadModel.js";
 
 /**
@@ -33,7 +34,7 @@ export function toGithubWorkApiView(detail: GithubWorkDetailModel) {
           status: execution.status,
           attempt: execution.attempt,
           errorCode: execution.errorCode,
-          errorSummary: execution.errorSummary,
+          errorSummary: execution.errorSummary ? sanitizeText(execution.errorSummary, 500) : null,
           cancelRequested: execution.cancelRequested,
         }
       : null,
@@ -57,5 +58,7 @@ export function toGithubWorkApiView(detail: GithubWorkDetailModel) {
     transitions: detail.transitions,
     events: detail.events,
     firstFailure: detail.firstFailure,
+    lastActivity: detail.lastActivity,
+    blockingReason: detail.blockingReason,
   };
 }

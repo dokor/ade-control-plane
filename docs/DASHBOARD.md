@@ -187,6 +187,15 @@ issue enrichment and waiting for information) is shown separately from the
 terminal task status. Complete bounded stdout/stderr and technical diagnostics
 remain available under the explicit raw-output/technical-details disclosures.
 
+GitHub Work details use one bounded structured workflow log instead of separate
+checkpoint and stage lists. Each entry identifies its timestamp, level, safe
+technical source and correlated execution. The chronology combines durable ADE
+stage transitions with Control Plane admission, lease, cancellation, timeout and
+reconciliation evidence, including failures recorded before an ADE workflow can
+start. The current action calls out the latest activity, first failure and active
+blocking reason without replacing ADE's stage authority or rendering raw process
+output.
+
 ### `/runners`
 
 Show safe runner metadata:

@@ -131,6 +131,7 @@ function harness(
       listReconciliationCandidates: async () => reconciliationCandidates,
     },
     executionLeases: {
+      getByExecutionId: async () => null,
       heartbeat: async (executionId: string) => { leaseHeartbeats.push(executionId); return {}; },
     },
     auditEvents: { append: async () => ({}) },
