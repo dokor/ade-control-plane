@@ -13,6 +13,7 @@ export async function prepareProjectActivation(
   persistence: ControlPlanePersistence,
   project: ProjectRecord,
   runtime: GithubRuntime | null,
+  expectedAdeRuntimeVersion = "unknown",
 ): Promise<ProjectActivationResult> {
   const result = await prepareProjectSetup(project, runtime);
   if (!result.readiness.ready) {
@@ -23,6 +24,7 @@ export async function prepareProjectActivation(
     runtime,
     new Date().toISOString(),
     await persistence.githubWork.getProfile(project.id),
+    expectedAdeRuntimeVersion,
   );
   if (readiness.ready) return { ...result, readiness, initializationTask: null };
   const initializationTask = await createTask(persistence, {
