@@ -145,7 +145,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           });
           const issue = await this.options.github.getIssueDetails(repository, request.work.issueNumber);
           if (!issue) throw new GithubWorkExecutionError("GITHUB_ISSUE_NOT_FOUND", "The selected GitHub issue is no longer available for PR reconciliation.");
-          await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName: workflow.branchName, pullRequestNumber: pullRequest.number });
+          await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: workflow.executionId, branchName: workflow.branchName, pullRequestNumber: pullRequest.number });
           await workflows?.transition({
             workflowId: workflow.id, expectedStage: "publishing", stage: "waiting-human", attempt: workflow.attempt,
             reason: "Reconciled a pushed branch to its single pull request after restart.", idempotencyKey: `${request.executionId}:waiting-human:${workflow.attempt}`,
@@ -236,7 +236,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           options: ["resume", "wait"],
           observedAt: new Date().toISOString(),
         });
-        await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName, humanDecisionRef: decisionRef });
+        await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: workflow?.executionId ?? request.executionId, branchName, humanDecisionRef: decisionRef });
         await checkpoint("waiting-human", "ADE requires a human decision before continuing.", { humanDecisionRef: decisionRef });
         return { status: "succeeded", provider: this.agentExecutor.provider, resultSummary: { humanDecisionRef: decisionRef, waitingReason: lifecycle.reason.slice(0, 500) } };
       }
@@ -254,7 +254,7 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
         throw new GithubWorkExecutionError("GITHUB_ISSUE_STALE", "The GitHub issue changed while ADE prepared its implementation handoff; reconcile it before retrying.");
       }
       issue = currentIssue;
-      await this.updateLifecycle(issue.body, request, { state: "running", executionRef: request.executionId, branchName });
+      await this.updateLifecycle(issue.body, request, { state: "running", executionRef: workflow?.executionId ?? request.executionId, branchName });
       await checkpoint("implementing", "The worker recorded ownership before provider execution.");
       const work = {
         project: request.project,
@@ -334,14 +334,14 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
           base: checkout.baseBranch,
         },
       );
-      await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: request.executionId, branchName, pullRequestNumber: pullRequest.number });
+      await this.updateLifecycle(issue.body, request, { state: "waiting-human", executionRef: workflow?.executionId ?? request.executionId, branchName, pullRequestNumber: pullRequest.number });
       await checkpoint("waiting-human", "Pull request created; an explicit human review and merge is required.", {
         pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, branchName,
       });
       return { status: "succeeded", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), resultSummary: { branchName, pullRequestNumber: pullRequest.number, pullRequestUrl: pullRequest.url, ...AdeDeliveryRuntime.provenanceSummary(review.provenance) } };
     } catch (error) {
       if (request.signal?.aborted || isAbortError(error)) {
-        await this.cancelLifecycle(request, branchName).catch(() => {
+        await this.cancelLifecycle(request, branchName, request.work.executionRef ?? request.executionId).catch(() => {
           console.warn("GitHub cancellation lifecycle reconciliation deferred; the durable execution remains cancelled.");
         });
         return { status: "cancelled", provider: this.agentExecutor.provider, ...(usage ? { usage } : {}), ...(branchName ? { resultSummary: { branchName } } : {}) };
@@ -409,22 +409,22 @@ export class GithubWorkCodexExecutor implements GithubWorkDispatcher {
    * still-ready marker this execution just claimed), so a late cleanup cannot
    * overwrite an explicit operator retry or a newer execution.
    */
-  private async cancelLifecycle(request: GithubWorkDispatchRequest, branchName: string | null): Promise<void> {
+  private async cancelLifecycle(request: GithubWorkDispatchRequest, branchName: string | null, workflowExecutionRef: string): Promise<void> {
     const repository = { id: request.work.repositoryGithubId, owner: request.project.repositoryOwner, name: request.project.repositoryName };
     const issue = await this.options.github.getIssueDetails(repository, request.work.issueNumber);
     if (!issue) return;
     const current = readGithubWorkMetadata(issue.body);
     if (!current || !["ready", "running", "cancelled"].includes(current.state)) return;
-    if (current.executionRef !== null && current.executionRef !== request.executionId) return;
+    if (current.executionRef !== null && current.executionRef !== workflowExecutionRef) return;
 
     const cancelled = {
       ...current,
       state: "cancelled" as const,
-      executionRef: request.executionId,
+      executionRef: workflowExecutionRef,
       branchName: branchName ?? current.branchName,
       humanDecisionRef: null,
     };
-    if (current.state !== "cancelled" || current.executionRef !== request.executionId || cancelled.branchName !== current.branchName) {
+    if (current.state !== "cancelled" || current.executionRef !== workflowExecutionRef || cancelled.branchName !== current.branchName) {
       await this.options.github.updateIssueBody(
         repository,
         request.work.issueNumber,
