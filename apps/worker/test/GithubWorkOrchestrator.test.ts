@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { ControlPlanePersistence, ExecutionRecord, GithubWorkItemRecord, GithubWorkProfileRecord, ProjectRecord, ReconciliationCandidate } from "@ade-control-plane/database";
+import type { AdeDeliveryWorkflowRecord, ControlPlanePersistence, ExecutionRecord, GithubWorkItemRecord, GithubWorkProfileRecord, ProjectRecord, ReconciliationCandidate } from "@ade-control-plane/database";
 import { GithubWorkAdapterError, type GithubWorkReader } from "@ade-control-plane/github";
 
 import { GithubWorkOrchestrator, type GithubWorkDispatchRequest } from "../src/GithubWorkOrchestrator.js";
@@ -35,6 +35,46 @@ function harness(
   const dispatches: GithubWorkDispatchRequest[] = [];
   const notifications: { kind: "waiting" | "failure"; issueNumber: number }[] = [];
   const leaseHeartbeats: string[] = [];
+  const lifecycleEvents: string[] = [];
+  const workflows = new Map<string, AdeDeliveryWorkflowRecord>();
+  const deliveryWorkflows = {
+    start: async (input: { executionId: string; projectId: string; issueNumber: number; sourceUpdatedAt: string; occurredAt: string; branchName?: string | null }) => {
+      const existing = workflows.get(input.executionId);
+      if (existing) return existing;
+      const workflow: AdeDeliveryWorkflowRecord = {
+        id: `workflow-${input.executionId}`, executionId: input.executionId, projectId: input.projectId,
+        issueNumber: input.issueNumber, sourceUpdatedAt: input.sourceUpdatedAt, stage: "admitted", attempt: 0,
+        adePlan: null, provenance: null, providerExecutionRef: null, validationSummary: null, reviewSummary: null,
+        branchName: input.branchName ?? null, headSha: null, pullRequestNumber: null, pullRequestUrl: null,
+        retryClassification: null, reconciliationRequired: false, humanDecisionRef: null,
+        transitionReason: "delivery admitted", createdAt: input.occurredAt, updatedAt: input.occurredAt,
+      };
+      workflows.set(input.executionId, workflow);
+      lifecycleEvents.push("workflow-admitted");
+      return workflow;
+    },
+    getByExecutionId: async (executionId: string) => workflows.get(executionId) ?? null,
+    transition: async (input: { workflowId: string; stage: AdeDeliveryWorkflowRecord["stage"]; reason: string; occurredAt: string; details?: { activity?: string } | null }) => {
+      const workflow = [...workflows.values()].find(({ id }) => id === input.workflowId);
+      assert.ok(workflow);
+      workflow.stage = input.stage;
+      workflow.transitionReason = input.reason;
+      workflow.updatedAt = input.occurredAt;
+      if (input.details?.activity === "dispatcher-starting") lifecycleEvents.push("dispatcher-starting");
+      return workflow;
+    },
+  };
+  for (const item of items) {
+    if (item.state !== "waiting-human" || !item.executionRef) continue;
+    workflows.set(item.executionRef, {
+      id: `workflow-${item.executionRef}`, executionId: item.executionRef, projectId: item.projectId,
+      issueNumber: item.issueNumber, sourceUpdatedAt: item.sourceUpdatedAt, stage: "waiting-human", attempt: 1,
+      adePlan: null, provenance: null, providerExecutionRef: null, validationSummary: null, reviewSummary: null,
+      branchName: item.branchName, headSha: null, pullRequestNumber: item.pullRequestNumber, pullRequestUrl: null,
+      retryClassification: null, reconciliationRequired: false, humanDecisionRef: item.humanDecisionRef,
+      transitionReason: "waiting for a human decision", createdAt: NOW, updatedAt: NOW,
+    });
+  }
   const persistence = {
     settings: { get: async () => ({ schedulerMode: "running", quotaThrottledPercent: 70, quotaDrainingPercent: 85, quotaBlockedPercent: 95, quotaStaleAfterMs: 300_000, updatedAt: NOW, updatedBy: "test" }) },
     projects: { list: async () => projects },
@@ -63,20 +103,22 @@ function harness(
         ? { id: "decision-1", projectId, decisionRef, prompt: "Continue?", options: [resolvedDecision.option], status: "resolved", resolvedOption: resolvedDecision.option, resolvedBy: "operator:dokor", observedAt: NOW, resolvedAt: NOW }
         : null,
     },
+    deliveryWorkflows,
     executions: {
       getById: async (executionId: string) => executions.find(({ id }) => id === executionId) ?? null,
       listActive: async () => executions.filter((entry) => ["queued", "leased", "dispatched", "running"].includes(entry.status)),
       listByProjectId: async (projectId: string) => executions.filter((entry) => entry.projectId === projectId),
       scheduleWithLease: async (input: { execution: { id: string; projectId: string; runnerId: string; workRef: string; capability: string; requestedAt: string }; lease: { leaseKey: string } }) => {
         if (activeKeys.has(input.lease.leaseKey)) return null;
+        lifecycleEvents.push("lease-acquired");
         activeKeys.add(input.lease.leaseKey);
         leaseByExecution.set(input.execution.id, input.lease.leaseKey);
         const execution: ExecutionRecord = { ...input.execution, adeExecutionRef: null, status: "leased", attempt: 1, startedAt: null, finishedAt: null, resultSummary: null, errorCode: null, errorSummary: null, createdAt: NOW, updatedAt: NOW };
         executions.push(execution);
         return { execution, lease: { id: "lease", executionId: execution.id, projectId: execution.projectId, runnerId: execution.runnerId, ownerId: "test", leaseKey: input.lease.leaseKey, acquiredAt: NOW, heartbeatAt: NOW, expiresAt: LATER, releasedAt: null, releaseReason: null } };
       },
-      markDispatched: async (id: string) => updateExecution(executions, id, "dispatched"),
-      markRunning: async (id: string) => updateExecution(executions, id, "running"),
+      markDispatched: async (id: string) => { lifecycleEvents.push("execution-dispatched"); return updateExecution(executions, id, "dispatched"); },
+      markRunning: async (id: string) => { lifecycleEvents.push("execution-running"); return updateExecution(executions, id, "running"); },
       complete: async (input: { executionId: string; status: ExecutionRecord["status"]; resultSummary?: ExecutionRecord["resultSummary"]; errorCode?: string | null; errorSummary?: string | null }) => {
         const execution = updateExecution(executions, input.executionId, input.status);
         execution.resultSummary = input.resultSummary ?? null;
@@ -118,13 +160,14 @@ function harness(
     ...readerOverrides,
   };
   const orchestrator = new GithubWorkOrchestrator({ persistence, reader, ownerId: "test", allowStartWithoutQuotaSnapshot: true, cancelPollMs: 5, now: () => new Date(NOW), ...orchestratorOptions, dispatcher: { execute: async (request) => {
+    lifecycleEvents.push("dispatcher-executed");
     dispatches.push(request);
     return dispatchOverride ? dispatchOverride(request, executions) : { status: "succeeded" };
   } }, notifier: {
     waitingHuman: async (_project, item) => { notifications.push({ kind: "waiting", issueNumber: item.issueNumber }); },
     failure: async (_project, item) => { notifications.push({ kind: "failure", issueNumber: item.issueNumber }); },
   } });
-  return { orchestrator, dispatches, executions, notifications, profiles, leaseHeartbeats };
+  return { orchestrator, dispatches, executions, notifications, profiles, leaseHeartbeats, lifecycleEvents, deliveryWorkflows, workflows };
 }
 
 function updateExecution(executions: ExecutionRecord[], id: string, status: ExecutionRecord["status"]): ExecutionRecord {
@@ -188,6 +231,51 @@ test("passes only the exact normalized issue and declared skills to the agent", 
   assert.equal(dispatches[0]?.work.issueUrl, "https://github.com/dokor/alpha/issues/9");
   assert.deepEqual(dispatches[0]?.skillPaths, [".agents/skills"]);
   assert.equal(dispatches[0]?.work.state, "ready");
+});
+
+test("persists ADE admission and dispatcher startup before marking an execution running", async () => {
+  const context = harness([work("alpha", 9, "ready", 80)]);
+
+  await context.orchestrator.runCycle();
+
+  assert.deepEqual(context.lifecycleEvents.slice(0, 6), [
+    "lease-acquired",
+    "workflow-admitted",
+    "dispatcher-starting",
+    "execution-dispatched",
+    "execution-running",
+    "dispatcher-executed",
+  ]);
+  assert.equal(context.workflows.size, 1);
+});
+
+test("fails explicitly without dispatching when ADE workflow admission cannot be persisted", async () => {
+  const context = harness([work("alpha", 9, "ready", 80)]);
+  context.deliveryWorkflows.start = async () => { throw new Error("database details must not escape"); };
+
+  await context.orchestrator.runCycle();
+
+  assert.equal(context.dispatches.length, 0);
+  assert.equal(context.executions[0]?.status, "failed");
+  assert.equal(context.executions[0]?.errorCode, "GITHUB_WORKFLOW_START_FAILED");
+  assert.equal(context.executions[0]?.errorSummary, "The ADE delivery workflow could not be persisted before dispatcher startup.");
+  assert.doesNotMatch(context.executions[0]?.errorSummary ?? "", /database details/u);
+});
+
+test("recovers an idempotent workflow admission when the initial response is lost", async () => {
+  const context = harness([work("alpha", 9, "ready", 80)]);
+  const persistWorkflow = context.deliveryWorkflows.start;
+  context.deliveryWorkflows.start = async (input) => {
+    await persistWorkflow(input);
+    throw new Error("connection closed after commit");
+  };
+
+  await context.orchestrator.runCycle();
+
+  assert.equal(context.dispatches.length, 1);
+  assert.equal(context.executions[0]?.status, "succeeded");
+  assert.equal(context.workflows.size, 1);
+  assert.equal(context.lifecycleEvents.filter((event) => event === "workflow-admitted").length, 1);
 });
 
 test("does not dispatch the same GitHub revision twice after completion", async () => {

@@ -71,6 +71,8 @@ export interface GithubWorkOrchestratorOptions {
   heartbeatIntervalMs?: number;
   stageTimeoutMs?: number;
   workflowTimeoutMs?: number;
+  /** Maximum time an in-flight execution may exist without durable ADE workflow evidence. */
+  workflowStartTimeoutMs?: number;
   reconciliationBackoffBaseMs?: number;
   reconciliationBackoffMaxMs?: number;
   now?(): Date;
@@ -93,6 +95,7 @@ export class GithubWorkOrchestrator {
   private readonly heartbeatIntervalMs: number;
   private readonly stageTimeoutMs: number;
   private readonly workflowTimeoutMs: number;
+  private readonly workflowStartTimeoutMs: number;
   private readonly reconciliationBackoffBaseMs: number;
   private readonly reconciliationBackoffMaxMs: number;
   private readonly reconciliationBackoff = new Map<string, { failures: number; retryAt: string }>();
@@ -104,6 +107,7 @@ export class GithubWorkOrchestrator {
     this.heartbeatIntervalMs = positiveDuration(options.heartbeatIntervalMs, Math.max(1_000, Math.floor(this.leaseDurationMs / 3)));
     this.stageTimeoutMs = positiveDuration(options.stageTimeoutMs, 15 * 60 * 1_000);
     this.workflowTimeoutMs = positiveDuration(options.workflowTimeoutMs, 60 * 60 * 1_000);
+    this.workflowStartTimeoutMs = positiveDuration(options.workflowStartTimeoutMs, this.stageTimeoutMs);
     this.reconciliationBackoffBaseMs = positiveDuration(options.reconciliationBackoffBaseMs, 30_000);
     this.reconciliationBackoffMaxMs = Math.max(this.reconciliationBackoffBaseMs, positiveDuration(options.reconciliationBackoffMaxMs, 15 * 60 * 1_000));
   }
@@ -119,10 +123,12 @@ export class GithubWorkOrchestrator {
    * Unknown outcomes are never retried automatically.
    */
   public async reconcileExecutions(): Promise<void> {
+    const missingWorkflowStarts = await this.reconcileMissingWorkflowStarts();
     const candidates = await this.options.persistence.executions.listReconciliationCandidates(this.now().toISOString());
     for (const candidate of candidates) {
       if (!candidate.execution.workRef?.startsWith("github:issue:")) continue;
       if (candidate.execution.status === "unknown") continue;
+      if (missingWorkflowStarts.has(candidate.execution.id)) continue;
       await this.options.persistence.executions.complete({
         executionId: candidate.execution.id,
         status: "unknown",
@@ -140,6 +146,7 @@ export class GithubWorkOrchestrator {
   }
 
   public async runCycle(input: { reconcile?: "full" | "targeted" | "none"; projectId?: string } = {}): Promise<GithubWorkCycleResult> {
+    await this.reconcileMissingWorkflowStarts();
     if (input.reconcile === "targeted" && input.projectId) {
       const project = await this.options.persistence.projects.getById(input.projectId);
       if (project) await this.reconcileProject(project);
@@ -244,10 +251,47 @@ export class GithubWorkOrchestrator {
     });
     if (!scheduled) return { outcome: "idle", reason: "Another worker already owns the GitHub work lease." };
 
-    await store.executions.markDispatched(scheduled.execution.id, now);
-    await store.executions.markRunning(scheduled.execution.id, now);
+    const resumeDecision = resolvedDecisions.get(project.id);
+    let workflowStarted = false;
     try {
-      const resumeDecision = resolvedDecisions.get(project.id);
+      const workflows = store.deliveryWorkflows;
+      if (!workflows) throw new Error("ADE delivery workflow persistence is unavailable.");
+      let workflow;
+      if (resumeDecision) {
+        workflow = work.executionRef ? await workflows.getByExecutionId(work.executionRef) : null;
+        if (!workflow || workflow.projectId !== project.id || workflow.issueNumber !== work.issueNumber) {
+          throw new Error("The resumed execution has no correlated ADE delivery workflow.");
+        }
+      } else {
+        const workflowInput = {
+          executionId: scheduled.execution.id, projectId: project.id, issueNumber: work.issueNumber,
+          sourceUpdatedAt: work.sourceUpdatedAt, occurredAt: now, branchName: work.branchName,
+        };
+        try {
+          workflow = await workflows.start(workflowInput);
+        } catch (error) {
+          // The insert may have committed before its response was lost. Read the
+          // correlation once before classifying the startup as a hard failure.
+          const recovered = await workflows.getByExecutionId(scheduled.execution.id).catch(() => null);
+          if (!recovered || recovered.projectId !== project.id || recovered.issueNumber !== work.issueNumber || recovered.sourceUpdatedAt !== work.sourceUpdatedAt) {
+            throw error;
+          }
+          workflow = recovered;
+        }
+      }
+      workflowStarted = true;
+      await workflows.transition({
+        workflowId: workflow.id,
+        expectedStage: workflow.stage,
+        stage: workflow.stage,
+        attempt: workflow.attempt,
+        reason: "The GitHub dispatcher is starting the admitted ADE delivery workflow.",
+        idempotencyKey: `${scheduled.execution.id}:activity:dispatcher-starting:${workflow.attempt}`,
+        occurredAt: now,
+        details: { activity: "dispatcher-starting" },
+      });
+      await store.executions.markDispatched(scheduled.execution.id, now);
+      await store.executions.markRunning(scheduled.execution.id, now);
       const result = await this.dispatchWithCancellation({
         executionId: scheduled.execution.id,
         project,
@@ -286,15 +330,41 @@ export class GithubWorkOrchestrator {
       const leaseLost = error instanceof GithubLeaseLostError;
       const unknown = timedOut || leaseLost;
       const timeoutCode = timedOut && error.kind === "stage" ? "GITHUB_STAGE_TIMEOUT" : "GITHUB_WORK_TIMEOUT";
+      const workflowStartFailed = !workflowStarted;
+      const errorCode = workflowStartFailed
+        ? "GITHUB_WORKFLOW_START_FAILED"
+        : unknown
+          ? (timedOut ? timeoutCode : "GITHUB_LEASE_LOST")
+          : cancelled
+            ? null
+            : "AGENT_DISPATCH_FAILED";
       await store.executions.complete({
         executionId: scheduled.execution.id, status: unknown ? "unknown" : cancelled ? "cancelled" : "failed", finishedAt: this.now().toISOString(),
-        errorCode: unknown ? (timedOut ? timeoutCode : "GITHUB_LEASE_LOST") : cancelled ? null : "AGENT_DISPATCH_FAILED",
-        errorSummary: unknown ? (timedOut ? "The GitHub-work deadline elapsed before completion was confirmed." : "The execution lease could not be renewed; reconcile before retrying.") : cancelled ? null : "The code-agent dispatch failed.",
-        releaseReason: unknown ? (timedOut ? "github-work-timeout" : "github-work-lease-lost") : cancelled ? "github-work-cancelled" : "github-work-dispatch-failed",
+        errorCode,
+        errorSummary: workflowStartFailed
+          ? "The ADE delivery workflow could not be persisted before dispatcher startup."
+          : unknown
+            ? (timedOut ? "The GitHub-work deadline elapsed before completion was confirmed." : "The execution lease could not be renewed; reconcile before retrying.")
+            : cancelled
+              ? null
+              : "The code-agent dispatch failed.",
+        releaseReason: workflowStartFailed
+          ? "github-workflow-start-failed"
+          : unknown
+            ? (timedOut ? "github-work-timeout" : "github-work-lease-lost")
+            : cancelled
+              ? "github-work-cancelled"
+              : "github-work-dispatch-failed",
         auditEvent: {
           occurredAt: this.now().toISOString(), category: "execution", severity: cancelled ? "info" : "warning", actorType: "system",
           projectId: project.id, runnerId: decision.selected.runnerId,
-          action: unknown ? "github-work.reconciliation-required" : cancelled ? "github-work.cancelled" : "github-work.dispatch-failed",
+          action: workflowStartFailed
+            ? "github-work.workflow-start-failed"
+            : unknown
+              ? "github-work.reconciliation-required"
+              : cancelled
+                ? "github-work.cancelled"
+                : "github-work.dispatch-failed",
           result: unknown ? "unknown" : cancelled ? "cancelled" : "failed", metadata: { issueNumber: selection.item.issueNumber },
         },
       });
@@ -310,9 +380,61 @@ export class GithubWorkOrchestrator {
         usageSource: "unknown",
         observedAt: this.now().toISOString(),
       }).catch(() => undefined);
-      await this.options.notifier?.failure(project, work, "AGENT_DISPATCH_FAILED");
+      await this.options.notifier?.failure(project, work, errorCode ?? "AGENT_DISPATCH_FAILED");
     }
     return { outcome: "dispatched", projectId: project.id, issueNumber: selection.item.issueNumber, executionId };
+  }
+
+  /**
+   * A runner heartbeat proves only that the worker process is alive. It is not
+   * workflow progress, so an old dispatched/running execution without an ADE
+   * workflow becomes an explicit unknown outcome and is never retried blindly.
+   */
+  private async reconcileMissingWorkflowStarts(): Promise<Set<string>> {
+    const reconciled = new Set<string>();
+    const workflows = this.options.persistence.deliveryWorkflows;
+    if (!workflows) return reconciled;
+    const now = this.now();
+    const active = await this.options.persistence.executions.listActive();
+    for (const execution of active) {
+      if (!execution.workRef?.startsWith("github:issue:")) continue;
+      if (execution.status !== "dispatched" && execution.status !== "running") continue;
+      const startedAt = execution.startedAt ?? execution.requestedAt;
+      if (now.getTime() - Date.parse(startedAt) < this.workflowStartTimeoutMs) continue;
+      let workflow = await workflows.getByExecutionId(execution.id);
+      if (!workflow) {
+        const match = /^github:issue:([1-9][0-9]*)$/u.exec(execution.workRef);
+        const item = match
+          ? (await this.options.persistence.githubWork.listForProject(execution.projectId))
+              .find(({ issueNumber }) => issueNumber === Number(match[1]))
+          : undefined;
+        if (item?.executionRef) workflow = await workflows.getByExecutionId(item.executionRef);
+      }
+      if (workflow) continue;
+      const finishedAt = now.toISOString();
+      await this.options.persistence.executions.complete({
+        executionId: execution.id,
+        status: "unknown",
+        finishedAt,
+        errorCode: "GITHUB_WORKFLOW_NOT_STARTED",
+        errorSummary: "No durable ADE workflow evidence was observed before the startup deadline; reconcile external state before retrying.",
+        releaseReason: "github-workflow-start-timeout",
+        auditEvent: {
+          occurredAt: finishedAt,
+          category: "execution",
+          severity: "warning",
+          actorType: "system",
+          projectId: execution.projectId,
+          executionId: execution.id,
+          runnerId: execution.runnerId,
+          action: "github-work.workflow-start-timeout",
+          result: "unknown",
+          metadata: { workflowStartTimeoutMs: this.workflowStartTimeoutMs },
+        },
+      });
+      reconciled.add(execution.id);
+    }
+    return reconciled;
   }
 
   private async dispatchWithCancellation(request: GithubWorkDispatchRequest): Promise<GithubWorkDispatchResult> {

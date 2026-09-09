@@ -80,6 +80,33 @@ test("cancellation transitions its correlated GitHub marker and removes in-progr
   assert.equal(bodyUpdates, 1);
 });
 
+test("cancellation of a resumed execution preserves the original workflow correlation", async () => {
+  const workflowExecutionRef = "original-execution";
+  let body = upsertGithubWorkMetadata("Issue", {
+    ...DEFAULT_GITHUB_WORK_METADATA, state: "running", executionRef: workflowExecutionRef, branchName: "ade/issue-139",
+  });
+  const github = {
+    getIssueDetails: async () => ({ number: 139, title: "Issue", body, labels: ["in-progress"], state: "open" as const, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt }),
+    updateIssueBody: async (_repository: unknown, _number: number, nextBody: string) => {
+      body = nextBody;
+      return { number: 139, title: "Issue", body, labels: ["in-progress"], state: "open" as const, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt };
+    },
+    syncAdeWorkflowLabels: async () => ({ number: 139, title: "Issue", body, labels: [], state: "open" as const, url: request.work.issueUrl, updatedAt: request.work.sourceUpdatedAt }),
+    createPullRequest: async () => { throw new Error("No PR after cancellation"); },
+  };
+  const executor = new GithubWorkCodexExecutor({ projectRoot: ".", commands: { run: async () => { throw new Error("No command after cancellation"); } }, github });
+
+  const result = await executor.execute({
+    ...request,
+    work: { ...request.work, executionRef: workflowExecutionRef },
+    resumeDecision: { decisionRef: "decision-1", option: "resume", resolvedBy: "operator" },
+    signal: AbortSignal.abort(),
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(readGithubWorkMetadata(body)?.executionRef, workflowExecutionRef);
+});
+
 test("GitHub executor guards its isolated checkout and releases it on failure", async () => {
   let released = false;
   const executor = new GithubWorkCodexExecutor({

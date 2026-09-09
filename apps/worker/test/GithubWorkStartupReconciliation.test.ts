@@ -44,6 +44,7 @@ test("startup reconciliation leaves terminal unknown executions intact and still
 
   const persistence = {
     executions: {
+      listActive: async () => [staleActive.execution],
       listReconciliationCandidates: async () => [alreadyUnknown, staleActive],
       complete: async (input: { executionId: string; status: ExecutionRecord["status"]; errorCode?: string | null }) => {
         assert.notEqual(input.executionId, alreadyUnknown.execution.id, "terminal unknown executions must not be completed again");
@@ -51,6 +52,7 @@ test("startup reconciliation leaves terminal unknown executions intact and still
         return { execution: { ...staleActive.execution, status: input.status }, applied: true, releasedLease: true };
       },
     },
+    deliveryWorkflows: { getByExecutionId: async () => null },
   } as unknown as ControlPlanePersistence;
 
   const orchestrator = new GithubWorkOrchestrator({
@@ -67,4 +69,69 @@ test("startup reconciliation leaves terminal unknown executions intact and still
   assert.equal(completions[0]?.executionId, staleActive.execution.id);
   assert.equal(completions[0]?.status, "unknown");
   assert.equal(completions[0]?.errorCode, "GITHUB_WORK_RECONCILIATION_REQUIRED");
+});
+
+test("startup reconciliation times out missing workflow evidence even with a fresh runner heartbeat", async () => {
+  const active = execution("missing-workflow", "running");
+  const completions: Array<{ executionId: string; status: ExecutionRecord["status"]; errorCode?: string | null; errorSummary?: string | null }> = [];
+  const persistence = {
+    executions: {
+      listActive: async () => [active],
+      listReconciliationCandidates: async () => [],
+      complete: async (input: { executionId: string; status: ExecutionRecord["status"]; errorCode?: string | null; errorSummary?: string | null }) => {
+        completions.push(input);
+        return { execution: { ...active, status: input.status }, applied: true, releasedLease: true };
+      },
+    },
+    deliveryWorkflows: { getByExecutionId: async () => null },
+    githubWork: { listForProject: async () => [] },
+    runners: { list: async () => [{ id: "runner-1", lastHeartbeatAt: "2026-09-08T09:38:30.000Z" }] },
+  } as unknown as ControlPlanePersistence;
+
+  const orchestrator = new GithubWorkOrchestrator({
+    persistence,
+    reader: {} as GithubWorkReader,
+    dispatcher: { execute: async () => ({ status: "succeeded" }) },
+    ownerId: "test-worker",
+    workflowStartTimeoutMs: 10_000,
+    now: () => new Date("2026-09-08T09:38:31.000Z"),
+  });
+
+  await orchestrator.reconcileExecutions();
+
+  assert.equal(completions.length, 1);
+  assert.equal(completions[0]?.executionId, active.id);
+  assert.equal(completions[0]?.status, "unknown");
+  assert.equal(completions[0]?.errorCode, "GITHUB_WORKFLOW_NOT_STARTED");
+  assert.match(completions[0]?.errorSummary ?? "", /reconcile external state/u);
+});
+
+test("startup reconciliation recognizes a resumed execution's existing correlated workflow", async () => {
+  const active = execution("resumed-execution", "running");
+  let completed = false;
+  const persistence = {
+    executions: {
+      listActive: async () => [active],
+      listReconciliationCandidates: async () => [],
+      complete: async () => { completed = true; throw new Error("a correlated resume must remain active"); },
+    },
+    deliveryWorkflows: {
+      getByExecutionId: async (executionId: string) => executionId === "original-execution"
+        ? { id: "workflow-1", executionId, projectId: active.projectId, issueNumber: 246, stage: "planning" }
+        : null,
+    },
+    githubWork: { listForProject: async () => [{ issueNumber: 246, executionRef: "original-execution" }] },
+  } as unknown as ControlPlanePersistence;
+  const orchestrator = new GithubWorkOrchestrator({
+    persistence,
+    reader: {} as GithubWorkReader,
+    dispatcher: { execute: async () => ({ status: "succeeded" }) },
+    ownerId: "test-worker",
+    workflowStartTimeoutMs: 10_000,
+    now: () => new Date("2026-09-08T09:38:31.000Z"),
+  });
+
+  await orchestrator.reconcileExecutions();
+
+  assert.equal(completed, false);
 });

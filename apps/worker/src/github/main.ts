@@ -116,6 +116,7 @@ async function main(): Promise<void> {
       }),
       heartbeatIntervalMs: config.heartbeatIntervalMs,
       stageTimeoutMs: config.githubStageTimeoutMs,
+      workflowStartTimeoutMs: config.githubStageTimeoutMs,
       workflowTimeoutMs: config.githubWorkflowTimeoutMs,
     });
     workerPhase = "registering-runner";
