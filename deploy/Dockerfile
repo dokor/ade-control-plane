@@ -1,4 +1,5 @@
 ARG ADE_VERSION=0.12.0
+ARG CODEX_RUNTIME_IMAGE=ghcr.io/dokor/codex-runtime:0.156.1-r1
 
 FROM node:22-bookworm-slim AS workspace
 
@@ -54,7 +55,7 @@ CMD ["node", "server.js"]
 FROM workspace AS worker-dependencies
 RUN pnpm --filter @ade-control-plane/worker deploy --prod --legacy /worker-deploy
 
-FROM node:22-bookworm-slim AS worker-runtime
+FROM ${CODEX_RUNTIME_IMAGE} AS worker-runtime
 ARG ADE_VERSION
 ENV NODE_ENV=production
 ENV ADE_RUNTIME_VERSION=${ADE_VERSION}
@@ -63,9 +64,6 @@ ENV CODEX_HOME=/home/ade-worker/.codex
 ENV V0_GIT_HOME=/home/ade-git
 ENV GIT_SSH=/usr/local/bin/ade-git-ssh
 ENV PATH=/home/ade-worker/.local/bin:${PATH}
-RUN apt-get update \
-  && apt-get install --no-install-recommends -y bash ca-certificates curl git openssh-client bubblewrap \
-  && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 10002 ade-worker \
   && useradd --system --uid 10002 --gid ade-worker --home-dir /home/ade-worker --create-home ade-worker \
   && mkdir -p /home/ade-worker/.codex /home/ade-git \
@@ -74,12 +72,9 @@ WORKDIR /workspace
 # Keep the ADE CLI immutable and outside the writable Codex home volume.
 RUN npm install --global "@alelouet/ai-delivery-engine@${ADE_VERSION}" \
   && command -v ade
-# The official installer selects the native Linux binary for the build
-# architecture, including linux/arm64 when built on Raspberry Pi.
-USER ade-worker
-RUN curl -fsSL https://chatgpt.com/codex/install.sh | sh \
-  && command -v codex
-USER root
+# Codex is provided by the shared homelab runtime image.
+RUN command -v codex \
+  && codex --version
 COPY --from=worker-dependencies /worker-deploy/ ./
 COPY apps/worker/src ./apps/worker/src
 COPY deploy/bin/worker-entrypoint /usr/local/bin/ade-control-plane-worker
