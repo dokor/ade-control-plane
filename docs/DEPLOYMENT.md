@@ -192,6 +192,17 @@ GitHub worker reuses this same allow-listed provisioning path before starting
 ADE planning. A failed clone or remote verification is recorded as a deferred
 safe failure; it never runs the issue against another checkout.
 
+## Shared Codex runtime prerequisite
+
+Before deploying a revision that uses the shared runtime, ensure
+`ghcr.io/dokor/codex-runtime:0.156.1-r1` has been published by
+`dokor/raspberry-infra`. If the package remains private, the CI builder and
+Raspberry Docker daemon must have read access to that GHCR package. Making the
+container package public also allows anonymous pulls.
+
+The runtime version is intentionally pinned. Do not switch production builds to
+a mutable `latest` tag.
+
 ## Start and verify
 
 ```bash
@@ -218,10 +229,15 @@ PostgreSQL uses the upstream image's short root bootstrap to initialize its
 owned volume and switch to the `postgres` account. The Dashboard and worker
 remain non-root, read-only and drop all capabilities.
 
-The official Codex installer in the worker image selects the native image
-architecture. The worker receives the Codex API key only through a Compose
-secret and passes it only to the Codex child process; the Git process receives
-a separate environment.
+The worker runtime inherits from the shared multi-architecture Codex image
+`ghcr.io/dokor/codex-runtime:0.156.1-r1`. That same base is consumed by the
+homelab Codex bridge, so Docker can reuse the Codex layers instead of storing a
+separate installation per service. ADE still keeps its own `CODEX_HOME`, local
+App Server, credentials and execution workspaces.
+
+The worker receives the Codex API key only through a Compose secret and passes
+it only to the Codex child process; the Git process receives a separate
+environment.
 
 ## Live Codex quota gate
 

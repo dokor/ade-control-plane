@@ -73,6 +73,14 @@ The Codex adapter currently invokes:
 codex exec --sandbox workspace-write --ephemeral --json -
 ```
 
+The worker image no longer installs a separate Codex copy. Its runtime stage inherits from the shared homelab image:
+
+```text
+ghcr.io/dokor/codex-runtime:0.156.1-r1
+```
+
+The same base image is used by the n8n/Argos Codex bridge. This shares Docker layers and the Codex version, while ADE keeps its own `CODEX_HOME`, local App Server, credentials and isolated execution workspaces.
+
 The prompt is provided through stdin.
 
 ### Claude Code

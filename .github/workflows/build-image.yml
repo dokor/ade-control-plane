@@ -16,7 +16,12 @@ on:
         value: ${{ jobs.build.outputs.image }}
 permissions:
   contents: read
+  # Read is required for the private shared Codex base image; write is also
+  # required because this reusable workflow publishes ADE runtime images.
   packages: write
+
+env:
+  CODEX_RUNTIME_IMAGE: ghcr.io/dokor/codex-runtime:0.156.1-r1
 jobs:
   build:
     runs-on: ubuntu-24.04-arm
@@ -56,6 +61,8 @@ jobs:
           file: deploy/Dockerfile
           target: ${{ inputs.runtime }}-runtime
           platforms: linux/arm64
+          build-args: |
+            CODEX_RUNTIME_IMAGE=${{ env.CODEX_RUNTIME_IMAGE }}
           push: true
           tags: |
             ${{ steps.existing.outputs.repository }}:sha-${{ inputs.sha }}

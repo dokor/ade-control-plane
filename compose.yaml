@@ -99,6 +99,8 @@ services:
       context: .
       dockerfile: deploy/Dockerfile
       target: worker-runtime
+      args:
+        CODEX_RUNTIME_IMAGE: ${CODEX_RUNTIME_IMAGE:-ghcr.io/dokor/codex-runtime:0.156.1-r1}
     restart: unless-stopped
     command: ["node_modules/.bin/tsx", "apps/worker/src/github/main.ts"]
     init: true
