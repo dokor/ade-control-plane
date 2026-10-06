@@ -17,7 +17,7 @@
     "@ade-control-plane/host-runner": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^24.4.0",
+    "@types/node": "^24.19.1",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
